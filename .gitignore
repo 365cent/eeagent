@@ -1,0 +1,73 @@
+# --- Secrets & local env ---
+.env
+.env.*
+!.env.example
+!.env*.example
+
+# --- Runtime data (capture client / stray profiles) ---
+data/
+!data/README.md
+
+# --- IDE / agent tooling (local only) ---
+.spec/
+**/.spec/
+.zcode/
+.agents/
+skills-lock.json
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyc
+.venv/
+.pytest_cache/
+*.egg-info/
+.mypy_cache/
+.ruff_cache/
+
+# Portable Postgres bundle + API logs (backend/scripts)
+backend/.pg/
+backend/.env
+
+# --- Node / Next.js ---
+node_modules/
+.next/
+out/
+.turbo/
+.vercel/
+.pnpm-store/
+tsconfig.tsbuildinfo
+
+# v0 sandbox (frontend legacy)
+__v0_runtime_loader.js
+__v0_devtools.tsx
+__v0_jsx-dev-runtime.ts
+.snowflake/
+.design-cache/
+.v0-trash/
+
+# --- Go capture client ---
+client/config.json
+client/capture.exe
+client/bin/
+client/dist/
+client/data/
+client/.toolchain/
+client/.tmp/
+
+# --- OS & editors ---
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.idea/
+.vscode/
+*.log
+
+# --- Scratch / temp ---
+ctx_*.txt
+.tmp_*.json
+~$*
+
+# --- Legacy / backups ---
+v0-backup/

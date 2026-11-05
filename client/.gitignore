@@ -1,0 +1,16 @@
+# 本地配置（含接口地址与 profile 路径）
+config.json
+
+# 构建产物
+capture.exe
+bin/
+dist/
+
+# 浏览器 profile 与临时归档
+data/
+
+# 本地工具链（按 README 从镜像下载，不入库）
+.toolchain/
+
+# 构建期临时文件
+.tmp/

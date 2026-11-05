@@ -1,0 +1,15 @@
+{
+  "api_base": "",
+  "auto_api": true,
+  "capture_engine": "edge",
+  "browser_path": "",
+  "user_data_dir": "data/browser-profile",
+  "max_parallel": 2,
+  "max_upload_mb": 120,
+  "timeout_sec": 90,
+  "upload_timeout_sec": 900,
+  "headless": false,
+  "page_ready_timeout_sec": 25,
+  "interactive_timeout_sec": 180,
+  "min_text_chars": 10
+}

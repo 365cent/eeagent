@@ -1,0 +1,66 @@
+from functools import lru_cache
+from pathlib import Path
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_prefix="", env_file=".env", extra="ignore")
+
+    app_name: str = "EEA Backend"
+    db_host: str = "127.0.0.1"
+    db_port: int = 54329
+    db_user: str = "eea"
+    db_password: str = "eea"
+    db_name: str = "eea"
+    api_port: int = 8000
+    cors_origins: str = "http://localhost:3000,http://127.0.0.1:3000"
+    cors_origin_regex: str = (
+        r"^https?://(localhost|127\.0\.0\.1|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+        r"|192\.168\.\d{1,3}\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}):\d+$"
+    )
+    object_dir: str = str(BACKEND_ROOT / ".pg" / "objects")
+
+    llm_base_url: str = ""
+    llm_api_key: str = ""
+    llm_model: str = ""
+    embedding_model: str = "Qwen3-Embedding-8B"
+    rerank_model: str = "Qwen3-Reranker-8B"
+    vision_model: str = ""
+
+    # Document upload (POST /documents/raw) and MarkItDown ingest caps (MiB-based).
+    doc_raw_upload_max_bytes: int = 120 * 1024 * 1024
+    doc_ingest_max_bytes: int = 120 * 1024 * 1024
+
+    # Vision-caption budget per document (app/services/doc_ingest.py). Cap is
+    # configurable: a large deck can hold far more document-body figures than 8
+    # (2026-10-29 会议 S1-4: QCC 样例 95 张内嵌图，8 张上限只覆盖零头).
+    max_figures: int = 16
+    # Retries (beyond the first attempt) for a vision call that returns empty.
+    vision_caption_retry: int = 2
+
+    @property
+    def database_url(self) -> str:
+        return (
+            f"postgresql+psycopg://{self.db_user}:{self.db_password}"
+            f"@{self.db_host}:{self.db_port}/{self.db_name}"
+        )
+
+    @property
+    def sync_database_url(self) -> str:
+        return self.database_url
+
+    @property
+    def origins(self) -> list[str]:
+        return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
+
+    @property
+    def llm_base_url_normalized(self) -> str:
+        return self.llm_base_url.rstrip("/")
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()

@@ -1,0 +1,1226 @@
+@import './platform-fonts.css';
+@import 'tailwindcss';
+@import './dashboard.css';
+
+@theme {
+  --color-pro-sider: #001529;
+  --color-pro-accent: #1677ff;
+  --color-pro-accent-soft: #69b1ff;
+  --color-layout-canvas: #ffffff;
+}
+
+:root {
+  color-scheme: light;
+  --background: #ffffff;
+  --foreground: #171717;
+  --border: #eaeaea;
+  --font-platform: 'Avenir Next', 'PingFang SC', 'Helvetica Neue', 'Microsoft YaHei', sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background: #ffffff;
+  color: #171717;
+}
+
+body {
+  overflow-x: hidden;
+  font-family: var(--font-platform);
+  -webkit-font-smoothing: antialiased;
+}
+
+.ant-app {
+  font-family: var(--font-platform);
+}
+
+.route-loading,
+.app-loading-overlay {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: #f5f7fa;
+  color: #08233b;
+}
+
+.route-loading {
+  gap: 14px;
+  align-content: center;
+}
+
+.route-loading-mark {
+  display: grid;
+  place-items: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid #82a2bd;
+  border-radius: 10px;
+  background: #0b2d4a;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.4px;
+}
+
+.route-loading-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  text-align: center;
+}
+
+.route-loading-copy strong,
+.app-loading-card strong {
+  font-size: 12px;
+  letter-spacing: 1.5px;
+}
+
+.route-loading-copy span,
+.app-loading-card span {
+  color: #7690a8;
+  font-size: 12px;
+}
+
+.route-loading-bar {
+  width: 160px;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #d9e4ee;
+}
+
+.route-loading-bar span {
+  display: block;
+  width: 45%;
+  height: 100%;
+  border-radius: inherit;
+  background: #1890ff;
+  animation: loading-slide 1.1s ease-in-out infinite;
+}
+
+.app-loading-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 2000;
+  background: rgba(245, 247, 250, 0.96);
+}
+
+.app-loading-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 18px 22px;
+  border: 1px solid #dce6ef;
+  border-radius: 12px;
+  background: #fff;
+  box-shadow: 0 12px 32px rgba(8, 35, 59, 0.1);
+}
+
+.app-loading-card > div:nth-child(2) {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.loading-dots {
+  display: flex;
+  gap: 4px;
+  margin-left: 8px;
+}
+
+.loading-dots i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #1890ff;
+  animation: loading-pulse 1s ease-in-out infinite;
+}
+
+.loading-dots i:nth-child(2) {
+  animation-delay: 0.15s;
+}
+
+.loading-dots i:nth-child(3) {
+  animation-delay: 0.3s;
+}
+
+@keyframes loading-slide {
+  0%,
+  100% {
+    transform: translateX(-110%);
+  }
+  50% {
+    transform: translateX(230%);
+  }
+}
+
+@keyframes loading-pulse {
+  0%,
+  100% {
+    opacity: 0.3;
+    transform: scale(0.8);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+}
+
+.dark-mode {
+  color: #f5f5f5;
+  background: #0a0a0a;
+}
+
+.dark-mode .breadcrumb,
+.dark-mode .muted-icon {
+  color: #a1a1aa;
+}
+
+.dark-mode .avatar {
+  background: #27272a;
+  color: #fafafa;
+  border: 1px solid #3f3f46;
+}
+
+/* ProLayout shell — Tailwind @apply */
+@layer components {
+  .pro-shell .platform-pro-layout.ant-pro-layout {
+    @apply min-h-screen;
+  }
+
+  .pro-shell .ant-pro-sider.ant-layout-sider,
+  .pro-shell .ant-pro-sider .ant-layout-sider-children {
+    @apply !bg-pro-sider;
+  }
+
+  .pro-shell .ant-pro-sider:not(.ant-pro-sider-collapsed) #logo,
+  .pro-shell .ant-pro-sider:not(.ant-pro-sider-collapsed) .ant-pro-sider-logo {
+    margin: 0 !important;
+    padding: 0 !important;
+    border-block-end: 0 !important;
+  }
+
+  .pro-shell .ant-pro-sider .ant-pro-sider-collapsed-button {
+    @apply hidden;
+  }
+
+  /* Collapsed rail: em tokens on sider (ProLayout defaults to 64px inline width) */
+  .pro-shell .ant-pro-sider.ant-pro-sider-collapsed {
+    font-size: 16px !important;
+    --sider-collapsed-gap: 1em;
+    --sider-collapsed-pad: 0.5em;
+    --sider-collapsed-hit: 2.5em;
+    --sider-collapsed-width: calc(var(--sider-collapsed-hit) + 2 * var(--sider-collapsed-pad));
+    width: var(--sider-collapsed-width) !important;
+    min-width: var(--sider-collapsed-width) !important;
+    max-width: var(--sider-collapsed-width) !important;
+    flex: 0 0 var(--sider-collapsed-width) !important;
+  }
+
+  .pro-shell.pro-layout-side:has(.ant-pro-sider-collapsed) .ant-layout-has-sider > div:first-child {
+    font-size: 16px;
+    --sider-collapsed-hit: 2.5em;
+    --sider-collapsed-pad: 0.5em;
+    --sider-collapsed-width: calc(var(--sider-collapsed-hit) + 2 * var(--sider-collapsed-pad));
+    width: var(--sider-collapsed-width) !important;
+    min-width: var(--sider-collapsed-width) !important;
+    max-width: var(--sider-collapsed-width) !important;
+    flex: 0 0 var(--sider-collapsed-width) !important;
+  }
+
+  /* Collapsed sider: 16px anchor, 1em gaps, 0.5em inset, 2.5em hits */
+  .pro-shell .ant-pro-sider.ant-pro-sider-collapsed .ant-layout-sider-children {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: var(--sider-collapsed-gap) !important;
+    padding: var(--sider-collapsed-pad) 0 !important;
+    margin: 0 !important;
+    box-sizing: border-box;
+  }
+
+  /* Lock em resolution to the 16px rail anchor (antd menu defaults to 14px) */
+  .pro-shell .ant-pro-sider.ant-pro-sider-collapsed .ant-layout-sider-children > *,
+  .pro-shell .ant-pro-sider.ant-pro-sider-collapsed .ant-layout-sider-children .ant-pro-sider-menu,
+  .pro-shell .ant-pro-sider.ant-pro-sider-collapsed .pro-sider-footer--collapsed,
+  .pro-shell .ant-pro-sider.ant-pro-sider-collapsed .sider-collapsed-utility {
+    font-size: 16px !important;
+  }
+
+  .pro-shell .ant-pro-sider.ant-pro-sider-collapsed .ant-layout-sider-children > .ant-pro-sider-collapsed-button {
+    position: static !important;
+    top: auto !important;
+    left: auto !important;
+    transform: none !important;
+    order: -1;
+    flex-shrink: 0;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    border: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    font-size: 16px;
+    width: var(--sider-collapsed-hit, 2.5em) !important;
+    height: var(--sider-collapsed-hit, 2.5em) !important;
+    min-width: var(--sider-collapsed-hit, 2.5em) !important;
+    min-height: var(--sider-collapsed-hit, 2.5em) !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .pro-shell .sider-collapsed-hit,
+  .pro-shell .sider-collapsed-toggle.ant-btn {
+    @apply !inline-flex !shrink-0 !items-center !justify-center !border-0 !p-0;
+    width: var(--sider-collapsed-hit, 2.5em) !important;
+    height: var(--sider-collapsed-hit, 2.5em) !important;
+    min-width: var(--sider-collapsed-hit, 2.5em) !important;
+    min-height: var(--sider-collapsed-hit, 2.5em) !important;
+    border-radius: 0.5em;
+    color: rgba(255, 255, 255, 0.72) !important;
+    font-size: 16px !important;
+    line-height: 1;
+    cursor: pointer;
+  }
+
+  .pro-shell .sider-collapsed-hit:hover,
+  .pro-shell .sider-collapsed-toggle.ant-btn:hover {
+    color: #fff !important;
+    background: rgba(255, 255, 255, 0.08) !important;
+  }
+
+  .pro-shell .sider-collapsed-hit.is-selected,
+  .pro-shell .sider-collapsed-utility-btn.is-selected,
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-sider-menu .ant-menu-item-selected {
+    color: #fff !important;
+    background: rgba(37, 99, 235, 0.92) !important;
+  }
+
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-sider-menu .ant-menu-item:not(.ant-menu-item-selected):hover {
+    background: rgba(255, 255, 255, 0.08) !important;
+  }
+
+  .pro-shell .ant-pro-sider.ant-pro-sider-collapsed #logo,
+  .pro-shell .ant-pro-sider.ant-pro-sider-collapsed .ant-layout-sider-children > #logo {
+    order: 0;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 100% !important;
+    font-size: 16px;
+    height: var(--sider-collapsed-hit, 2.5em) !important;
+    min-height: var(--sider-collapsed-hit, 2.5em) !important;
+    max-height: var(--sider-collapsed-hit, 2.5em) !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    flex-shrink: 0;
+  }
+
+  .pro-shell .ant-pro-sider.ant-pro-sider-collapsed .ant-pro-sider-logo,
+  .pro-shell .ant-pro-sider.ant-pro-sider-collapsed .ant-pro-sider-logo-collapsed {
+    height: 100% !important;
+    min-height: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .pro-shell .pro-sider-header--collapsed {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 100%;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .pro-shell .brand--collapsed {
+    display: flex !important;
+    align-items: center;
+    justify-content: center;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+  }
+
+  .pro-shell .brand-logo-mark {
+    @apply h-8 w-8 rounded-md object-contain bg-white/95 p-0.5;
+  }
+
+  .pro-shell .ant-pro-sider-collapsed .brand--collapsed .brand-logo-mark {
+    width: var(--sider-collapsed-hit, 2.5em) !important;
+    height: var(--sider-collapsed-hit, 2.5em) !important;
+    min-width: var(--sider-collapsed-hit, 2.5em) !important;
+    min-height: var(--sider-collapsed-hit, 2.5em) !important;
+    padding: 0 !important;
+    font-size: 16px;
+    border-radius: 0.5em;
+    object-fit: contain;
+  }
+
+  .pro-shell .ant-pro-sider.ant-pro-sider-collapsed .ant-layout-sider-children > div:has(.ant-pro-sider-menu) {
+    order: 2;
+    flex: 1 1 auto;
+    min-height: 0;
+    width: 100%;
+    margin: 0 !important;
+    padding: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: var(--sider-collapsed-gap, 1em) !important;
+    overflow-x: hidden;
+    overflow-y: auto;
+    box-sizing: border-box;
+  }
+
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-sider-menu {
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: var(--sider-collapsed-gap, 1em) !important;
+    width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border-inline: 0 !important;
+  }
+
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-sider-menu::before,
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-sider-menu::after {
+    display: none !important;
+  }
+
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-sider-menu .ant-menu-item {
+    @apply !mx-auto !my-0 !flex !items-center !justify-center !p-0;
+    width: var(--sider-collapsed-hit, 2.5em) !important;
+    height: var(--sider-collapsed-hit, 2.5em) !important;
+    min-width: var(--sider-collapsed-hit, 2.5em) !important;
+    min-height: var(--sider-collapsed-hit, 2.5em) !important;
+    border-radius: 0.5em;
+    margin: 0 !important;
+    margin-block: 0 !important;
+    margin-inline: auto !important;
+    line-height: 1 !important;
+    font-size: 16px !important;
+  }
+
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-base-menu-divider,
+  .pro-shell .ant-pro-sider-collapsed .ant-menu-item-divider {
+    @apply !m-0 !hidden;
+  }
+
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-sider-menu .ant-menu-title-content {
+    opacity: 1 !important;
+  }
+
+  .pro-shell .ant-pro-sider-collapsed .ant-menu-title-content {
+    @apply !flex !h-full !w-full !items-center !justify-center;
+    margin-inline: 0 !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+  }
+
+  .pro-shell .ant-pro-sider .ant-pro-sider-menu {
+    color: rgba(255, 255, 255, 0.65);
+  }
+
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-base-menu-vertical-item-title-collapsed,
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-base-menu-inline-item-title-collapsed {
+    @apply !relative !flex !items-center !justify-center;
+    width: var(--sider-collapsed-hit, 2.5em) !important;
+    height: var(--sider-collapsed-hit, 2.5em) !important;
+    min-width: var(--sider-collapsed-hit, 2.5em) !important;
+    min-height: var(--sider-collapsed-hit, 2.5em) !important;
+    font-size: 16px !important;
+    flex-direction: row !important;
+    gap: 0 !important;
+    overflow: visible !important;
+    color: rgba(255, 255, 255, 0.72);
+  }
+
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-base-menu-vertical-item-title-collapsed-level-0,
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-base-menu-inline-item-title-collapsed-level-0 {
+    flex-direction: row !important;
+  }
+
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-base-menu-vertical-item-icon,
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-base-menu-inline-item-icon {
+    @apply !m-0 !inline-flex !shrink-0 !items-center !justify-center;
+    display: inline-flex !important;
+    width: 1em !important;
+    height: 1em !important;
+    min-width: 1em !important;
+    min-height: 1em !important;
+    font-size: 1em !important;
+    line-height: 1 !important;
+    color: inherit !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+  }
+
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-base-menu-vertical-item-icon .anticon,
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-base-menu-inline-item-icon .anticon,
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-base-menu-vertical-item-icon .anticon svg,
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-base-menu-inline-item-icon .anticon svg {
+    display: inline-block !important;
+    width: 1em !important;
+    height: 1em !important;
+    font-size: 1em !important;
+    color: inherit !important;
+    opacity: 1 !important;
+  }
+
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-sider-menu .ant-menu-item {
+    color: rgba(255, 255, 255, 0.65) !important;
+  }
+
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-sider-menu .ant-menu-item-selected {
+    color: #fff !important;
+  }
+
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-base-menu-vertical-item-text,
+  .pro-shell .ant-pro-sider-collapsed .ant-pro-base-menu-inline-item-text {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+  }
+
+  .pro-shell .ant-pro-sider.ant-pro-sider-collapsed .ant-layout-sider-children > .ant-pro-sider-footer,
+  .pro-shell .ant-pro-sider.ant-pro-sider-collapsed .ant-pro-sider-footer-collapsed {
+    order: 3;
+    flex-shrink: 0;
+    width: 100%;
+    margin: 0 !important;
+    margin-top: auto !important;
+    padding: 0 !important;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: var(--sider-collapsed-gap, 1em) !important;
+  }
+
+  .pro-shell .pro-sider-footer--collapsed {
+    display: flex !important;
+    width: 100%;
+    flex-shrink: 0;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: var(--sider-collapsed-gap, 1em) !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .pro-shell .sider-card--collapsed {
+    @apply !m-0 border border-pro-accent/35 bg-pro-accent/10;
+  }
+
+  .pro-shell .sider-card--collapsed .sider-card-icon {
+    @apply text-pro-accent-soft;
+    font-size: 1em;
+  }
+
+  .pro-shell .sider-collapsed-utility {
+    display: flex !important;
+    width: 100%;
+    flex-direction: column !important;
+    align-items: center !important;
+    gap: var(--sider-collapsed-gap, 1em) !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .pro-shell .ant-pro-layout-content {
+    @apply bg-layout-canvas p-0;
+  }
+
+  .light-mode.pro-shell .ant-pro-layout-content,
+  .light-mode.pro-shell .dashboard-content,
+  .light-mode.pro-shell .dashboard-page-body,
+  .light-mode.pro-shell .content-wrap,
+  .light-mode.pro-shell .platform-main-surface {
+    @apply bg-white;
+  }
+
+  .light-mode.pro-shell .platform-main-surface {
+    color: rgba(0, 0, 0, 0.88);
+    --ant-color-primary: #2563eb;
+    --ant-color-primary-bg: #e8f1ff;
+    --ant-color-bg-container: #ffffff;
+    --ant-color-bg-elevated: #ffffff;
+    --ant-color-bg-layout: #ffffff;
+    --ant-color-fill-secondary: rgba(0, 0, 0, 0.06);
+    --ant-color-fill-tertiary: rgba(0, 0, 0, 0.04);
+    --ant-color-fill-quaternary: #ffffff;
+    --ant-color-text: rgba(0, 0, 0, 0.88);
+    --ant-color-text-heading: rgba(0, 0, 0, 0.88);
+    --ant-color-text-secondary: rgba(0, 0, 0, 0.65);
+    --ant-color-text-tertiary: rgba(0, 0, 0, 0.45);
+    --ant-color-text-description: rgba(0, 0, 0, 0.45);
+    --ant-color-border-secondary: #f0f0f0;
+    --ant-color-border: #eaeaea;
+    --ant-border-radius-lg: 10px;
+    --ant-padding-xs: 8px;
+    --ant-padding-sm: 12px;
+    --ant-padding-lg: 24px;
+    --ant-margin-xs: 8px;
+    --ant-margin-sm: 12px;
+    --ant-font-size: 14px;
+    --ant-font-size-sm: 12px;
+    --ant-motion-duration-mid: 0.2s;
+  }
+
+  .light-mode.pro-shell .platform-main-surface .metric-tile .ant-statistic-title {
+    color: #8290a0;
+  }
+
+  .light-mode.pro-shell .platform-main-surface .metric-tile .ant-statistic-content {
+    color: #15243a;
+  }
+
+  .light-mode.pro-shell .platform-main-surface .platform-page-header,
+  .light-mode.pro-shell .platform-main-surface .platform-page-header .ant-typography,
+  .light-mode.pro-shell .platform-main-surface .content-wrap .ant-typography-title,
+  .light-mode.pro-shell .platform-main-surface .welcome-row h2.ant-typography {
+    color: rgba(0, 0, 0, 0.88);
+  }
+
+  .light-mode.pro-shell .platform-main-surface .content-wrap .ant-typography-secondary {
+    color: rgba(0, 0, 0, 0.65);
+  }
+
+  .pro-shell .ant-pro-sider:not(.ant-pro-sider-collapsed) .ant-pro-sider-menu .ant-menu-item {
+    width: 100% !important;
+    min-width: 0 !important;
+    height: auto !important;
+    min-height: 44px !important;
+    justify-content: flex-start !important;
+    padding-inline: 12px !important;
+  }
+
+  .pro-shell .ant-pro-sider:not(.ant-pro-sider-collapsed) .ant-pro-base-menu-vertical-item-text,
+  .pro-shell .ant-pro-sider:not(.ant-pro-sider-collapsed) .ant-pro-base-menu-inline-item-text,
+  .pro-shell .ant-pro-sider:not(.ant-pro-sider-collapsed) .ant-menu-title-content {
+    position: static !important;
+    width: auto !important;
+    height: auto !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    overflow: visible !important;
+    clip: auto !important;
+    white-space: nowrap !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+  }
+
+  .pro-shell .ant-pro-sider:not(.ant-pro-sider-collapsed) .ant-pro-sider-menu .ant-menu-item .anticon {
+    display: inline-flex !important;
+    font-size: 16px !important;
+    opacity: 1 !important;
+  }
+
+  .pro-shell .content-wrap .overview-metrics {
+    margin-bottom: 18px;
+  }
+
+  .pro-shell .content-wrap .welcome-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 25px;
+  }
+
+  .pro-shell .content-wrap .main-grid {
+    margin-bottom: 18px;
+  }
+
+  .light-mode.pro-shell .panel-card .ant-card-body {
+    flex: 0 1 auto;
+  }
+
+  .light-mode.pro-shell .page-placeholder.ant-pro-card,
+  .light-mode.pro-shell .page-placeholder.ant-pro-card .ant-pro-card-body {
+    @apply !bg-white;
+  }
+
+  .light-mode.pro-shell .panel-card.ant-card,
+  .light-mode.pro-shell .panel-card.ant-card .ant-card-body {
+    background: #fff !important;
+    color: rgba(0, 0, 0, 0.88);
+  }
+
+  .light-mode.pro-shell .panel-card .ant-input,
+  .light-mode.pro-shell .panel-card .ant-input-affix-wrapper,
+  .light-mode.pro-shell .panel-card textarea.ant-input {
+    background: #fff !important;
+    color: rgba(0, 0, 0, 0.88);
+  }
+
+  .light-mode.pro-shell .panel-card .ant-select-selector {
+    background: #fff !important;
+  }
+
+  .dark-mode.pro-shell .ant-pro-layout-content {
+    @apply bg-[#0a0a0a];
+  }
+
+  .dark-mode.pro-shell .platform-main-surface .panel-card.ant-card,
+  .dark-mode.pro-shell .platform-main-surface .panel-card.ant-card .ant-card-body {
+    background: #141416 !important;
+    color: #f4f4f5;
+  }
+
+  .dark-mode.pro-shell .platform-main-surface .metric-tile .ant-statistic-title {
+    color: #a1a1aa;
+  }
+
+  .dark-mode.pro-shell .platform-main-surface .metric-tile .ant-statistic-content {
+    color: #f4f4f5;
+  }
+
+  .dark-mode.pro-shell .platform-main-surface {
+    color: #f4f4f5;
+    --ant-color-primary: #2563eb;
+    --ant-color-primary-bg: rgba(37, 99, 235, 0.18);
+    --ant-color-bg-container: #141416;
+    --ant-color-bg-elevated: #141416;
+    --ant-color-bg-layout: #0a0a0a;
+    --ant-color-fill-secondary: rgba(255, 255, 255, 0.08);
+    --ant-color-fill-tertiary: rgba(255, 255, 255, 0.04);
+    --ant-color-fill-quaternary: #141416;
+    --ant-color-text: #f4f4f5;
+    --ant-color-text-heading: #f4f4f5;
+    --ant-color-text-secondary: #a1a1aa;
+    --ant-color-text-tertiary: #71717a;
+    --ant-color-text-description: #71717a;
+    --ant-color-border-secondary: #27272a;
+    --ant-color-border: #27272a;
+    --ant-border-radius-lg: 10px;
+    --ant-padding-xs: 8px;
+    --ant-padding-sm: 12px;
+    --ant-padding-lg: 24px;
+    --ant-margin-xs: 8px;
+    --ant-margin-sm: 12px;
+    --ant-font-size: 14px;
+    --ant-font-size-sm: 12px;
+    --ant-motion-duration-mid: 0.2s;
+  }
+
+  /* Sider rail: do not inherit main-surface light tokens */
+  .pro-shell .ant-pro-sider,
+  .pro-shell .ant-pro-sider .ant-layout-sider-children {
+    color: rgba(255, 255, 255, 0.65);
+  }
+
+  .pro-shell .ant-pro-layout-container > .ant-layout-has-sider > .ant-pro-sider {
+    --ant-color-text: rgba(255, 255, 255, 0.65);
+    --ant-color-bg-container: #001529;
+  }
+
+  .pro-sider-header {
+    @apply w-full;
+  }
+
+  .pro-shell .ant-pro-sider:not(.ant-pro-sider-collapsed) .pro-sider-header:not(.pro-sider-header--collapsed) {
+    --sider-expanded-inset: 0.75em;
+    font-size: 1rem;
+    box-sizing: border-box;
+    padding: var(--sider-expanded-inset);
+  }
+
+  .pro-sider-footer {
+    @apply pt-2;
+  }
+
+  .pro-shell .pro-sider-footer .ant-menu-dark {
+    @apply border-x-0 bg-transparent;
+  }
+
+  .pro-shell .ant-pro-sider-actions {
+    @apply !hidden;
+  }
+
+  .pro-shell .ant-pro-sider-footer {
+    @apply pb-2;
+  }
+
+  .pro-shell .brand:not(.brand--collapsed) {
+    @apply flex items-center justify-center border-b border-white/10 text-white;
+    margin: 0;
+    padding: 0;
+    padding-bottom: var(--sider-expanded-inset, 0.75em);
+  }
+
+  .pro-shell .brand-grid {
+    @apply w-full min-w-0 max-w-[216px];
+  }
+
+  .pro-shell .brand-stack {
+    display: grid;
+    grid-template-columns: 82px minmax(0, 1fr);
+    column-gap: 7px;
+    row-gap: 4px;
+    align-items: center;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+  }
+
+  .pro-shell .brand-title-row {
+    display: contents;
+  }
+
+  .pro-shell .brand-logo-wrap {
+    grid-column: 1;
+    grid-row: 1;
+    @apply flex items-center justify-start;
+  }
+
+  .pro-shell .brand-product-cn {
+    grid-column: 2;
+    grid-row: 1;
+    min-width: 0;
+    @apply text-[11.5px] font-semibold leading-tight text-white/90;
+  }
+
+  .pro-shell .brand-product-row {
+    grid-column: 1 / -1;
+    grid-row: 2;
+    min-width: 0;
+  }
+
+  .pro-shell .brand-logo {
+    @apply block h-[23px] w-auto max-w-[82px] object-contain object-left;
+  }
+
+  .pro-shell .brand-product {
+    @apply block w-full text-[11px] font-medium leading-snug text-white/55;
+    letter-spacing: 0.015em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .pro-shell .workspace-pill:not(.is-collapsed) {
+    @apply mb-0 flex items-center justify-between gap-2 rounded-lg border border-white/15 bg-white/6 px-3 py-2.5;
+    margin-top: var(--sider-expanded-inset, 0.75em);
+  }
+
+  .pro-shell .workspace-pill.is-collapsed {
+    @apply m-0 flex items-center justify-center border-0 bg-transparent p-0;
+  }
+
+  .pro-shell .workspace-chevron {
+    @apply text-[11px] text-white/45;
+  }
+
+  .pro-shell .workspace-label {
+    @apply block text-[10px] tracking-wide text-white/45;
+  }
+
+  .pro-shell .workspace-name {
+    @apply truncate text-[13px] font-semibold text-white/90;
+  }
+
+  .pro-shell .workspace-initials {
+    @apply w-full text-center font-bold text-blue-100;
+  }
+
+  .pro-shell .sider-card {
+    @apply mx-2 mb-2.5 flex cursor-pointer items-center gap-2.5 rounded-lg border border-pro-accent/35 bg-pro-accent/10 px-3 py-2.5 text-xs text-white/90 transition-colors;
+  }
+
+  .pro-shell .sider-card:hover {
+    @apply border-pro-accent/50 bg-pro-accent/[0.18];
+  }
+
+  .pro-shell .sider-card-icon,
+  .pro-shell .sider-card-arrow {
+    @apply shrink-0 text-sm text-pro-accent-soft;
+  }
+
+  .pro-shell .sider-card-copy {
+    @apply min-w-0 flex-1;
+  }
+
+  .pro-shell .sider-card-title {
+    @apply block text-xs font-semibold leading-snug text-white/90;
+  }
+
+  .pro-shell .sider-card small {
+    @apply mt-0.5 block text-[11px] leading-snug text-white/55;
+  }
+
+  .platform-page-header {
+    @apply sticky top-0 z-20 flex min-h-16 items-center justify-between gap-4 border-b border-[#eaeaea] bg-white/95 px-7 py-2.5 backdrop-blur-md;
+  }
+
+  .dark-mode.pro-shell .platform-page-header {
+    @apply border-zinc-800 bg-[#0f0f10]/90;
+  }
+
+  .pro-shell .topbar-left {
+    @apply flex min-w-0 items-center gap-3;
+  }
+
+  .pro-shell .topbar-titles {
+    @apply min-w-0;
+  }
+
+  .pro-shell .topbar-titles .page-heading {
+    @apply max-w-[min(720px,48vw)] overflow-hidden text-ellipsis whitespace-nowrap;
+  }
+
+  .pro-shell .sider-nav-toggle,
+  .pro-shell .mobile-nav-toggle {
+    @apply inline-flex shrink-0 items-center justify-center;
+    min-width: 40px;
+    min-height: 40px;
+  }
+
+  .pro-shell .breadcrumb {
+    @apply block text-xs;
+  }
+
+  .pro-shell .page-heading {
+    @apply !mt-0.5 !text-lg !leading-snug;
+  }
+
+  .pro-shell .mobile-nav-toggle {
+    @apply hidden;
+  }
+
+  .pro-shell .sider-nav-toggle {
+    @apply inline-flex;
+  }
+
+  .pro-shell .user-profile-trigger {
+    @apply !inline-flex !h-auto !items-center gap-2 !py-1 !pr-2 !pl-1;
+  }
+
+  .pro-shell .user-profile-copy {
+    @apply flex flex-col items-start leading-tight;
+  }
+
+  .pro-shell .user-profile-name {
+    @apply !text-xs;
+  }
+
+  .pro-shell .user-profile-role {
+    @apply !text-[11px];
+  }
+
+  .pro-shell .user-profile-avatar {
+    @apply !bg-blue-100 !text-[12px] !text-blue-600;
+  }
+
+  .light-mode.pro-shell .view-card.signals-panel .ant-table,
+  .light-mode.pro-shell .view-card.signals-panel .ant-table-container,
+  .light-mode.pro-shell .view-card.signals-panel .ant-table-tbody > tr > td,
+  .light-mode.pro-shell .view-card.signals-panel .ant-table-thead > tr > th {
+    @apply bg-white text-[#171717];
+  }
+
+  .light-mode.pro-shell .view-card.signals-panel .ant-table-tbody > tr:hover > td {
+    @apply bg-[#f8fbff];
+  }
+
+  .pro-shell .ant-pro-sider:not(.ant-pro-sider-collapsed) .ant-pro-sider-menu .ant-menu-item {
+    @apply !px-2;
+  }
+}
+
+@media (max-width: 760px) {
+  /* Drawer is fixed; never reserve the desktop collapsed rail (64px) in the flex row. */
+  .pro-shell.pro-layout-side .ant-layout-has-sider > div:first-child,
+  .pro-shell.pro-layout-side:has(.ant-pro-sider-collapsed) .ant-layout-has-sider > div:first-child {
+    width: 0 !important;
+    min-width: 0 !important;
+    max-width: 0 !important;
+    flex: 0 0 0 !important;
+    overflow: hidden !important;
+  }
+
+  .pro-shell .ant-pro-sider.ant-layout-sider {
+    @apply fixed inset-y-0 left-0 z-30 h-dvh w-[min(244px,85vw)] max-w-[85vw] transition-[transform,visibility] duration-200 ease-in-out;
+  }
+
+  .pro-shell .ant-pro-sider.ant-layout-sider,
+  .pro-shell .ant-pro-sider.ant-layout-sider.ant-pro-sider-collapsed {
+    width: min(244px, 85vw) !important;
+    min-width: min(244px, 85vw) !important;
+    max-width: 85vw !important;
+    flex: none !important;
+  }
+
+  .pro-shell:not(.mobile-nav-open) .ant-pro-sider.ant-layout-sider {
+    @apply pointer-events-none -translate-x-full invisible;
+  }
+
+  .pro-shell.mobile-nav-open .ant-pro-sider.ant-layout-sider {
+    @apply pointer-events-auto visible translate-x-0 shadow-[8px_0_24px_rgba(15,23,42,0.18)];
+  }
+
+  .pro-shell .sider-nav-toggle {
+    @apply hidden;
+  }
+
+  .pro-shell .mobile-nav-backdrop {
+    @apply fixed inset-0 z-[25] hidden cursor-pointer border-0 bg-slate-900/30;
+  }
+
+  .pro-shell.mobile-nav-open .mobile-nav-backdrop {
+    @apply block;
+  }
+
+  .pro-shell .mobile-nav-toggle {
+    @apply inline-flex;
+  }
+
+  .pro-shell .breadcrumb {
+    @apply hidden;
+  }
+
+  .pro-shell .user-profile-copy,
+  .pro-shell .user-profile-caret {
+    @apply hidden;
+  }
+
+  .platform-page-header {
+    @apply px-3.5;
+  }
+
+  .pro-shell.mobile-nav-open .ant-pro-sider {
+    @apply z-30;
+  }
+
+  .pro-shell .content-wrap {
+    padding-inline: 14px;
+  }
+
+  .pro-shell .welcome-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .pro-shell .welcome-row h2 {
+    font-size: 20px !important;
+  }
+
+  .pro-shell .overview-metrics {
+    row-gap: 10px;
+  }
+
+  .pro-shell .page-heading {
+    font-size: 16px !important;
+  }
+}
+
+/* Unlayered: dashboard shell layout (wins over antd runtime resets) */
+.pro-shell .platform-main-surface {
+  min-width: 0;
+}
+
+.pro-shell .dashboard-page-body {
+  min-width: 0;
+}
+
+.pro-shell .content-wrap .welcome-row h2.ant-typography,
+.pro-shell .content-wrap .welcome-row .ant-typography-title {
+  color: #0f172a !important;
+}
+
+.dark-mode.pro-shell .content-wrap .welcome-row h2.ant-typography,
+.dark-mode.pro-shell .content-wrap .welcome-row .ant-typography-title {
+  color: #f4f4f5 !important;
+}
+
+.pro-shell .content-wrap .overview-metrics {
+  width: 100%;
+  margin-bottom: 18px;
+}
+
+.pro-shell .content-wrap .overview-metrics .metric-tile {
+  display: block;
+  height: 100%;
+  min-height: 154px;
+  background: #fff;
+  border: 1px solid #eaeaea;
+  border-radius: 10px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.02);
+}
+
+.dark-mode.pro-shell .content-wrap .overview-metrics .metric-tile {
+  background: #141416;
+  border-color: #27272a;
+}
+
+.pro-shell .content-wrap .sparkline,
+.pro-shell .content-wrap .sparkline.blue {
+  display: flex;
+  align-items: flex-end;
+  gap: 5px;
+  height: 31px;
+  margin: 10px 0 6px;
+}
+
+.pro-shell .main-grid.ant-row,
+.pro-shell .overview-metrics.ant-row {
+  margin-inline: 0 !important;
+}
+
+.pro-shell .overview-metrics > .ant-col {
+  min-width: 0;
+}
+
+.pro-shell .content-wrap .theme-name {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+
+.pro-shell .content-wrap .theme-name .ant-tag {
+  margin-inline-end: 0;
+  flex-shrink: 0;
+}
+
+.pro-shell .platform-page-header .page-heading,
+.pro-shell .platform-page-header .breadcrumb {
+  color: inherit;
+}
+
+.light-mode.pro-shell .platform-page-header .page-heading {
+  color: rgba(0, 0, 0, 0.88) !important;
+}
+
+.light-mode.pro-shell .platform-page-header .breadcrumb {
+  color: rgba(0, 0, 0, 0.45) !important;
+}
+
+.strategy-funnel-card {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: center;
+  gap: 7px;
+  padding: 4px 0 13px;
+}
+
+.strategy-funnel-step {
+  display: flex !important;
+  max-width: 100%;
+  height: 36px !important;
+  align-items: center;
+  justify-content: space-between;
+  padding-inline: 14px !important;
+  border: none !important;
+  box-shadow: none !important;
+}
+
+.strategy-funnel-step-value {
+  color: inherit !important;
+  font-size: 16px !important;
+}
+
+.strategy-funnel-footer {
+  display: flex;
+  width: 100%;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--ant-color-border-secondary, #edf0f4);
+}
+
+.strategy-funnel-footer-icon {
+  margin-right: 6px;
+  color: var(--ant-color-primary, #2563eb);
+}
+
+.strategy-funnel-footer-value {
+  color: var(--ant-color-primary, #2563eb) !important;
+  font-size: 15px !important;
+}
+
+
+.header-toolbar-search {
+  width: 220px;
+  cursor: pointer;
+}
+
+.header-toolbar-search .ant-input-prefix {
+  color: var(--ant-color-text-description, rgba(0, 0, 0, 0.45));
+}
+
+.platform-search-shell {
+  display: flex;
+  flex-direction: column;
+}
+
+.platform-search-input-row {
+  padding: var(--ant-padding-sm, 12px);
+}
+
+.platform-search-input-row .platform-search-input-icon {
+  color: var(--ant-color-text-description, rgba(0, 0, 0, 0.45));
+}
+
+.platform-search-results {
+  padding: var(--ant-padding-xs, 8px);
+}
+
+.platform-search-group-label {
+  font-size: var(--ant-font-size-sm, 12px);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.platform-search-item {
+  cursor: pointer;
+  border-radius: var(--ant-border-radius-lg, 10px);
+  padding: var(--ant-padding-xs, 8px);
+  transition: background var(--ant-motion-duration-mid, 0.2s);
+}
+
+.platform-search-item.is-active {
+  background: var(--ant-color-fill-secondary, rgba(0, 0, 0, 0.06));
+}
+
+.platform-search-item-avatar {
+  background: var(--ant-color-primary-bg, #e8f1ff) !important;
+  color: var(--ant-color-primary, #2563eb) !important;
+}
+
+.platform-search-footer {
+  padding: var(--ant-padding-sm, 12px);
+  background: var(--ant-color-fill-quaternary, #fafafa);
+}
+
+.platform-search-footer-hint {
+  font-size: var(--ant-font-size-sm, 12px);
+}
+
+.platform-search-listy-item {
+  padding-inline: 4px;
+}
+
+.platform-search-empty {
+  padding: var(--ant-padding-lg, 24px);
+}
