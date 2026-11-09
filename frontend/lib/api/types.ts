@@ -86,23 +86,21 @@ export type SignalCreatePayload = {
 
 export type TagAssignmentPayload = {
   tag_names: string[]
-  operator_subject?: string
 }
 
 export type ThemeAssignmentPayload = {
   tech_theme_id: string | null
-  operator_subject?: string
 }
 
 export type SignalUpdatePayload = {
   value_chain_stage_code?: string | null
   signal_type_code?: string | null
-  operator_subject?: string
-  operator_role?: string
 }
 
 export type TagSuggestion = {
   suggested_tags: string[]
+  value_chain_stage_code: string | null
+  signal_type_code: string | null
   source: string
   /** Optional scores when backend T1 adds them; current API omits these. */
   freq?: number | null
@@ -117,8 +115,8 @@ export type AuditOut = {
   entity_type: string
   entity_id: string
   field_name: string
-  machine_value: AuditValue
-  human_value: AuditValue
+  old_value: AuditValue
+  new_value: AuditValue
   operator_subject: string
   operator_role: string
   corrected_at: string
@@ -196,11 +194,40 @@ export type ThemeDetail = ThemeOut & {
 export type OverviewStats = {
   signals: number
   signals_pending_review: number
+  signals_retained?: number
+  signals_fetching?: number
+  signals_fetch_failed?: number
+  signals_archived?: number
   tech_themes: number
   demand_points: number
   vehicle_functions: number
   landing_points: number
   funnel_pool: number
+  signal_sources?: number
+  demand_points_pending_review?: number
+  capture_jobs_open?: number
+  capture_jobs_failed?: number
+  documents_failed_ingest?: number
+  substantive_standards?: number
+  weekly_window_start_utc?: string
+  as_of_utc?: string
+  weekly_new?: {
+    signals: number
+    tech_themes: number
+    demand_points: number
+    vehicle_functions: number
+    landing_points: number
+    strategic_assessments: number
+    documents: number
+  }
+  strategy_funnel?: {
+    industry_scan: number
+    tier1_adaptation: number
+    scoring: number
+    classification: number
+    rejected: number
+    pool_entry_blocked: number
+  }
 }
 
 export type DemandOut = {
@@ -208,6 +235,7 @@ export type DemandOut = {
   name: string
   source_tech_theme_id: string | null
   value_chain_stage_code: string
+  derivation_trace: DemandDerivationTrace | null
   cross_validation: Record<string, unknown> | null
   time_series: unknown[] | null
   review_status: string | null
@@ -215,6 +243,69 @@ export type DemandOut = {
   function_count?: number
   signal_frequency?: number
   source_count?: number
+}
+
+export type DemandDerivationStepKey =
+  | 'fact_identification'
+  | 'frequency_consensus'
+  | 'similarity_analysis'
+  | 'stakeholder_attribution'
+  | 'demand_naming'
+
+export type DemandDerivationStep = {
+  key: DemandDerivationStepKey
+  content: string
+  evidence_signal_ids: string[]
+}
+
+export type DemandDerivationTrace = {
+  steps: DemandDerivationStep[]
+}
+
+export type DemandCreatePayload = {
+  name: string
+  source_tech_theme_id: string
+  value_chain_stage_code: string
+  derivation_trace: DemandDerivationTrace
+  cross_validation: Record<string, unknown> | null
+  time_series: unknown[]
+  review_status: 'pending'
+}
+
+export type DemandUpdatePayload = Partial<Omit<DemandCreatePayload, 'review_status'>> & {
+  review_status?: string | null
+}
+
+export type VehicleFunctionOut = {
+  id: string
+  demand_point_id: string
+  name: string
+  value_chain_stage_code: string | null
+  forward_trace: Record<string, unknown> | null
+  reverse_trace: Record<string, unknown> | null
+  recommendation_level: string | null
+  automation_levels: string[] | null
+  target_domain: string | null
+  recommendation_reason: string | null
+  l2_l4_difference: string | null
+  published: boolean
+  created_at: string
+}
+
+export type VehicleFunctionCreatePayload = {
+  demand_point_id: string
+  name: string
+  forward_trace: Record<string, unknown>
+  reverse_trace: Record<string, unknown> | null
+  recommendation_level: string | null
+  automation_levels: string[]
+  target_domain: string | null
+  recommendation_reason: string | null
+  l2_l4_difference: string | null
+}
+
+export type VehicleFunctionUpdatePayload = Partial<Omit<VehicleFunctionCreatePayload, 'demand_point_id'>> & {
+  published?: boolean
 }
 
 export type LandingPointOut = {
@@ -226,6 +317,41 @@ export type LandingPointOut = {
   created_at: string
   domain_name?: string
   standard_count?: number
+}
+
+export type LandingPointCreatePayload = {
+  vehicle_function_id: string
+  domain: string
+  name: string
+  role_description: string | null
+}
+
+export type LandingPointUpdatePayload = {
+  name?: string
+  domain?: string
+  role_description?: string | null
+}
+
+export type LandingPointStandardPhase = '设计' | '制造' | '运营'
+
+export type LandingPointStandardConstraint = '工程化' | '经济性' | '安全合规'
+
+export type LandingPointStandardOut = {
+  id: string
+  tech_landing_point_id: string
+  phase: LandingPointStandardPhase
+  constraint_type: LandingPointStandardConstraint
+  requirement_text: string | null
+}
+
+export type LandingPointStandardGrid = {
+  cells: LandingPointStandardOut[]
+}
+
+export type LandingPointStandardUpsert = {
+  phase: LandingPointStandardPhase
+  constraint_type: LandingPointStandardConstraint
+  requirement_text: string | null
 }
 
 export type AssessmentOut = {
@@ -244,6 +370,92 @@ export type AssessmentOut = {
   operator_subject: string | null
   assessed_at: string
   is_current: boolean
+  score_rationales: StrategyScoreRationales | null
+  funnel_snapshot: StrategyFunnelSnapshot | null
+}
+
+export type StrategyClassification = '前瞻布局' | '短期可落地' | '产业投资/生态合作'
+
+export type StrategyFunnelCurrentStep =
+  | 'pool_entry_blocked'
+  | 'industry_scan'
+  | 'tier1_adaptation'
+  | 'scoring'
+  | 'classification'
+  | 'ready_to_finalize'
+  | 'rejected'
+  | 'complete'
+
+export type StrategyScoreDimension = 'business' | 'maturity' | 'moat' | 'supply_chain' | 'feasibility'
+
+export type StrategyScoreDraft = {
+  score: number | null
+  rationale: string | null
+}
+
+export type StrategyScoreDrafts = Record<StrategyScoreDimension, StrategyScoreDraft>
+
+export type StrategyScoreRationales = Record<StrategyScoreDimension, string>
+
+export type StrategyFunnelSnapshot = {
+  scan_scope: string | null
+  scan_sources: string[] | null
+  deployment_boundary_evidence_ids: string[]
+  tier1_current_business_relation: string | null
+  tier1_future_business_relation: string | null
+  valuable_role: string | null
+  adaptation_decision: 'pass' | 'reject' | null
+  adaptation_reason: string | null
+  score_drafts: StrategyScoreDrafts
+  classification: StrategyClassification | null
+  strategy_note: string | null
+}
+
+export type StrategyFunnelOut = {
+  tech_landing_point_id: string
+  current_step: StrategyFunnelCurrentStep
+  pool_eligible: boolean
+  deployment_boundary_evidence_ids: string[]
+  scan_scope: string | null
+  scan_sources: string[]
+  tier1_current_business_relation: string | null
+  tier1_future_business_relation: string | null
+  valuable_role: string | null
+  adaptation_decision: 'pass' | 'reject' | null
+  adaptation_reason: string | null
+  score_drafts: StrategyScoreDrafts
+  score_total: number | null
+  classification: StrategyClassification | null
+  strategy_note: string | null
+  finalized_assessment_id: string | null
+  finalized_at: string | null
+  updated_by: string | null
+  updated_at: string | null
+  latest_assessment: AssessmentOut | null
+}
+
+/** Flat PATCH payload; the server validates stage order and owns the funnel state. */
+export type StrategyFunnelPatchPayload = {
+  scan_scope?: string | null
+  scan_sources?: string[] | null
+  tier1_current_business_relation?: string | null
+  tier1_future_business_relation?: string | null
+  valuable_role?: string | null
+  adaptation_decision?: 'pass' | 'reject' | null
+  adaptation_reason?: string | null
+  score_business?: number | null
+  rationale_business?: string | null
+  score_maturity?: number | null
+  rationale_maturity?: string | null
+  score_moat?: number | null
+  rationale_moat?: string | null
+  score_supply_chain?: number | null
+  rationale_supply_chain?: string | null
+  score_feasibility?: number | null
+  rationale_feasibility?: string | null
+  classification?: StrategyClassification | null
+  strategy_note?: string | null
+  finalize?: boolean
 }
 
 export type PanoramaLandingPoint = {
@@ -276,12 +488,51 @@ export type PanoramaStage = {
 
 export type TraceChain = {
   landing_point: LandingPointOut
-  standards: unknown[]
+  standards: LandingPointStandardOut[]
   assessment: AssessmentOut | null
-  vehicle_function: { id: string; name: string } | null
+  assessment_versions: AssessmentOut[]
+  vehicle_function: VehicleFunctionOut | null
   demand_point: DemandOut | null
   theme: ThemeOut | null
-  signals: SignalOut[]
+  signals: TraceSignalOut[]
+  demand_review_status: string | null
+  demand_cross_validation_conclusion: string | null
+  function_published: boolean | null
+  basis_freshness: 'unknown_untracked'
+  completeness: TraceCompleteness
+}
+
+export type TraceDocumentOut = {
+  id: string
+  filename: string | null
+  mime: string
+  size: number
+  sha256: string
+  ingest_status: string
+  figure_count: number
+  created_at: string
+  raw_object_reference_present: boolean
+  canonical_object_reference_present: boolean
+  endpoint: string
+}
+
+export type TraceSignalOut = SignalOut & {
+  trace_relationships: Array<'theme_member' | 'demand_evidence'>
+  body_reference_present: boolean
+  archive_reference_present: boolean
+  is_archived: boolean
+  body_endpoint: string | null
+  archive_endpoint: string | null
+  figures_endpoint: string | null
+  document: TraceDocumentOut | null
+}
+
+export type TraceCompleteness = {
+  complete: boolean
+  present_stages: Array<'landing_point' | 'vehicle_function' | 'demand_point' | 'theme' | 'signals'>
+  missing_stages: Array<'landing_point' | 'vehicle_function' | 'demand_point' | 'theme' | 'signals'>
+  unresolved_evidence_signal_ids: string[]
+  unresolved_document_ids: string[]
 }
 
 export type ListSignalsParams = {

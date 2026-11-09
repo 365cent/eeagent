@@ -144,7 +144,14 @@ async def test_endpoint_falls_back_to_jieba_when_llm_unavailable(client, monkeyp
     body = got.json()
     assert body["source"] == "jieba-frequency"
     assert body["suggested_tags"]  # non-empty jieba tags
-    assert set(body) == {"suggested_tags", "source"}  # TagSuggestion shape unchanged
+    assert body["value_chain_stage_code"] is None
+    assert body["signal_type_code"] is None
+    assert set(body) == {
+        "suggested_tags",
+        "value_chain_stage_code",
+        "signal_type_code",
+        "source",
+    }
 
 
 async def test_endpoint_uses_llm_when_available(client, monkeypatch):
@@ -166,7 +173,13 @@ async def test_endpoint_uses_llm_when_available(client, monkeypatch):
         },
     )
     assert resp.status_code == 201, resp.text
+    assert resp.json()["signal_type_code"] == "technology"
     sid = resp.json()["id"]
     got = await client.get(f"/api/v1/signals/{sid}/tag-suggestions")
     assert got.status_code == 200, got.text
-    assert got.json() == {"suggested_tags": ["eFuse", "域控制器"], "source": "llm"}
+    assert got.json() == {
+        "suggested_tags": ["eFuse", "域控制器"],
+        "value_chain_stage_code": "delivery_oem",
+        "signal_type_code": "technology",
+        "source": "llm",
+    }

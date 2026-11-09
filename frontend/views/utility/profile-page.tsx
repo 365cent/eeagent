@@ -1,10 +1,9 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { App as AntApp, Avatar, Button, Card, Col, Form, Input, Row, Select, Space, Table, Tag, Typography } from 'antd'
+import { App as AntApp, Avatar, Button, Card, Col, Form, Input, Row, Select, Space, Table, Typography } from 'antd'
 import { PageHeader } from '@/components/shared/page-header'
 import type { UtilityPageConfig } from '@/config/utility-pages'
-import type { NavigateFn } from '@/types/platform'
 import { fetchAccessHistory } from '@/lib/api/eea-api'
 import type { AccessLogOut } from '@/lib/api/types'
 import {
@@ -25,22 +24,17 @@ const VALUE_CHAIN_OPTIONS = [
 
 const SIGNAL_TYPE_OPTIONS = ['战略', '技术', '人才', '资本', '标准'].map((v) => ({ value: v, label: v }))
 
-const agentSessions = [
-  { key: 's1', name: '48V 配电证据追问', updated: '2026-06-18 14:22' },
-  { key: 's2', name: 'eFuse 落脚点澄清', updated: '2026-06-17 09:05' },
-]
-
 type ProfilePageProps = {
   config: UtilityPageConfig
-  onNavigate: NavigateFn
 }
 
-export function ProfilePage({ config, onNavigate }: ProfilePageProps) {
+export function ProfilePage({ config }: ProfilePageProps) {
   const { message: messageApi } = AntApp.useApp()
   const [form] = Form.useForm<UserProfilePrefs>()
   const [loading, setLoading] = useState(true)
   const [visits, setVisits] = useState<AccessLogOut[]>([])
   const [visitsLoading, setVisitsLoading] = useState(true)
+  const [visitsError, setVisitsError] = useState(false)
 
   useEffect(() => {
     form.setFieldsValue(loadProfilePrefs())
@@ -54,7 +48,10 @@ export function ProfilePage({ config, onNavigate }: ProfilePageProps) {
         if (alive) setVisits(rows)
       })
       .catch(() => {
-        if (alive) setVisits([])
+        if (alive) {
+          setVisits([])
+          setVisitsError(true)
+        }
       })
       .finally(() => {
         if (alive) setVisitsLoading(false)
@@ -74,13 +71,11 @@ export function ProfilePage({ config, onNavigate }: ProfilePageProps) {
 
   const onSave = async () => {
     const values = await form.validateFields()
-    saveProfilePrefs(values)
-    messageApi.success('个人资料与记忆已保存（本地演示）')
-  }
-
-  const onResetMemory = () => {
-    form.setFieldValue('memoryMarkdown', defaultProfile.memoryMarkdown)
-    messageApi.info('已恢复默认记忆模板')
+    if (saveProfilePrefs(values)) {
+      messageApi.success('个人偏好已保存到当前浏览器')
+    } else {
+      messageApi.error('浏览器未能保存个人偏好')
+    }
   }
 
   return (
@@ -99,16 +94,10 @@ export function ProfilePage({ config, onNavigate }: ProfilePageProps) {
       <Col xs={24} lg={16}>
         <Card className="panel-card" title="基本信息" loading={loading}>
           <Space align="start" size={20} style={{ marginBottom: 20 }}>
-            <Avatar size={72} className="user-profile-avatar">LW</Avatar>
+            <Avatar size={72} className="user-profile-avatar">{form.getFieldValue('displayName')?.trim()?.[0] ?? '?'}</Avatar>
             <div>
-              <Text strong style={{ fontSize: 18 }}>{form.getFieldValue('displayName') ?? defaultProfile.displayName}</Text>
-              <div>
-                <Tag color="blue">{form.getFieldValue('roleTitle') ?? defaultProfile.roleTitle}</Tag>
-                <Tag color={form.getFieldValue('platformRole') === 'taxonomy_admin' ? 'purple' : 'default'}>
-                  {form.getFieldValue('platformRole') === 'taxonomy_admin' ? '方法论/词表管理员' : '研究者'}
-                </Tag>
-              </div>
-              <Text type="secondary">操作者身份将写入纠偏审计（REQ-RULE-02）</Text>
+              <Text strong style={{ fontSize: 18 }}>{form.getFieldValue('displayName') || '未设置显示名称'}</Text>
+              <Text type="secondary">这些资料仅保存在当前浏览器，不用于权限或审计身份识别。</Text>
             </div>
           </Space>
           <Form form={form} layout="vertical" initialValues={defaultProfile}>
@@ -128,25 +117,11 @@ export function ProfilePage({ config, onNavigate }: ProfilePageProps) {
                   <Input />
                 </Form.Item>
               </Col>
-              <Col xs={24} sm={12}>
-                <Form.Item name="platformRole" label="平台角色">
-                  <Select
-                    options={[
-                      { value: 'researcher', label: '研究者 — 采集与推导' },
-                      { value: 'taxonomy_admin', label: '方法论/词表管理员 — 分类复核' },
-                    ]}
-                  />
-                </Form.Item>
-              </Col>
               <Col span={24}>
                 <Form.Item name="researchTags" label="研究关注标签">
                   <Select
                     mode="tags"
-                    placeholder="智能配电、区域控制器…"
-                    options={['智能汽车', 'EEA', '智能配电', '区域控制器', '功能安全', 'eFuse'].map((t) => ({
-                      value: t,
-                      label: t,
-                    }))}
+                    placeholder="输入个人关注标签"
                   />
                 </Form.Item>
               </Col>
@@ -174,7 +149,6 @@ export function ProfilePage({ config, onNavigate }: ProfilePageProps) {
         <Card
           className="panel-card"
           title="Agent 个人记忆"
-          extra={<Button type="link" onClick={onResetMemory}>恢复模板</Button>}
           style={{ marginTop: 18 }}
         >
           <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
@@ -191,7 +165,7 @@ export function ProfilePage({ config, onNavigate }: ProfilePageProps) {
       <Col xs={24} lg={8}>
         <Card className="panel-card" title="登录历史">
           <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-            按内网 IP 自动识别，无需登录；仅保留浏览器版本与操作系统。
+            此处展示服务端访问记录；网络地址不是用户身份，也不用于授权。
           </Text>
           <Table<AccessLogOut>
             size="small"
@@ -199,7 +173,7 @@ export function ProfilePage({ config, onNavigate }: ProfilePageProps) {
             loading={visitsLoading}
             pagination={false}
             dataSource={visits}
-            locale={{ emptyText: '暂无访问记录' }}
+            locale={{ emptyText: visitsError ? '访问记录暂不可用，请检查服务连接。' : '暂无访问记录' }}
             columns={[
               {
                 title: '时间',
@@ -224,24 +198,7 @@ export function ProfilePage({ config, onNavigate }: ProfilePageProps) {
         </Card>
 
         <Card className="panel-card" title="Agent 会话" style={{ marginTop: 18 }}>
-          {process.env.NODE_ENV === 'development' ? (
-            <>
-              <Text type="secondary" style={{ display: 'block', marginBottom: 12 }}>
-                多会话持久化；每线程一条 conversation_id（REQ-AGT-01，开发预览）。
-              </Text>
-              <Table
-                size="small"
-                pagination={false}
-                dataSource={agentSessions}
-                columns={[
-                  { title: '会话', dataIndex: 'name', ellipsis: true },
-                  { title: '更新', dataIndex: 'updated', width: 120 },
-                ]}
-              />
-            </>
-          ) : (
-            <Text type="secondary">多会话 Agent 将在第二阶段（业务 skills 就绪后）接入。</Text>
-          )}
+          <Text type="secondary">当前没有可用的 Agent 会话查询接口。</Text>
         </Card>
       </Col>
     </Row>

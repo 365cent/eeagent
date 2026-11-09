@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { App as AntApp, Button, Select, Space, Typography } from 'antd'
 import { EeaApiError } from '@/lib/api/client'
-import { useRefCodeMaps } from '@/hooks/use-eea-queries'
+import { useRefCodeMaps, useSignalTagSuggestions } from '@/hooks/use-eea-queries'
 import { useSignalMutations } from '@/hooks/use-signal-mutations'
 import type { RefCodeMaps } from '@/lib/eea-mappers'
 
@@ -27,17 +27,36 @@ export function SignalClassificationEditor({
   const { message: messageApi } = AntApp.useApp()
   const { maps, isSuccess } = useRefCodeMaps()
   const { patchClassification } = useSignalMutations(signalId)
+  const suggestionsQuery = useSignalTagSuggestions(signalId)
   const [editing, setEditing] = useState(false)
   const [draftStage, setDraftStage] = useState<string | null>(stageCode)
   const [draftType, setDraftType] = useState<string | null>(typeCode)
 
   useEffect(() => {
-    setDraftStage(stageCode)
-    setDraftType(typeCode)
-  }, [stageCode, typeCode])
+    if (!editing) {
+      setDraftStage(stageCode)
+      setDraftType(typeCode)
+    }
+  }, [stageCode, typeCode, editing])
 
   const stageOptions = useMemo(() => domainOptions(maps, 'value_chain_stage'), [maps])
   const typeOptions = useMemo(() => domainOptions(maps, 'signal_type'), [maps])
+  const suggestedStage = suggestionsQuery.data?.value_chain_stage_code ?? null
+  const suggestedType = suggestionsQuery.data?.signal_type_code ?? null
+  const suggestedStageLabel = stageOptions.find((option) => option.value === suggestedStage)?.label
+  const suggestedTypeLabel = typeOptions.find((option) => option.value === suggestedType)?.label
+
+  const adoptStageSuggestion = () => {
+    if (!suggestedStage || !suggestedStageLabel) return
+    setDraftStage(suggestedStage)
+    setEditing(true)
+  }
+
+  const adoptTypeSuggestion = () => {
+    if (!suggestedType || !suggestedTypeLabel) return
+    setDraftType(suggestedType)
+    setEditing(true)
+  }
 
   const cancel = () => {
     setDraftStage(stageCode)
@@ -77,6 +96,28 @@ export function SignalClassificationEditor({
             </Button>
             <Button size="small" type="primary" loading={patchClassification.isPending} onClick={() => void save()}>
               保存
+            </Button>
+          </Space>
+        )}
+      </div>
+      <div style={{ marginBottom: 10 }}>
+        <Text type="secondary">模型建议（需人工明确采用）</Text>
+        {suggestionsQuery.isLoading ? (
+          <Text type="secondary" style={{ display: 'block' }}>正在加载建议…</Text>
+        ) : suggestionsQuery.isError ? (
+          <Space size={6}>
+            <Text type="danger">建议加载失败</Text>
+            <Button size="small" type="link" onClick={() => void suggestionsQuery.refetch()}>重试</Button>
+          </Space>
+        ) : (
+          <Space wrap size={[6, 4]} style={{ display: 'flex', marginTop: 4 }}>
+            <Text>环节：{suggestedStageLabel ?? (suggestedStage ? `未知词表代码（${suggestedStage}）` : '无建议')}</Text>
+            <Button size="small" type="link" disabled={!suggestedStageLabel || suggestedStage === (editing ? draftStage : stageCode)} onClick={adoptStageSuggestion}>
+              采用环节建议
+            </Button>
+            <Text>类型：{suggestedTypeLabel ?? (suggestedType ? `未知词表代码（${suggestedType}）` : '无建议')}</Text>
+            <Button size="small" type="link" disabled={!suggestedTypeLabel || suggestedType === (editing ? draftType : typeCode)} onClick={adoptTypeSuggestion}>
+              采用类型建议
             </Button>
           </Space>
         )}

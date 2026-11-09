@@ -14,6 +14,10 @@ import type {
   DocumentDetail,
   DocumentRawOut,
   LandingPointOut,
+  LandingPointCreatePayload,
+  LandingPointUpdatePayload,
+  LandingPointStandardGrid,
+  LandingPointStandardUpsert,
   ListSignalsParams,
   OverviewStats,
   PanoramaStage,
@@ -25,6 +29,8 @@ import type {
   StudioMindmapPayload,
   SignalStudioKind,
   AuditOut,
+  DemandCreatePayload,
+  DemandUpdatePayload,
   SignalCreatePayload,
   SignalUpdatePayload,
   SessionOut,
@@ -40,6 +46,11 @@ import type {
   VocabOut,
   VocabUsageOut,
   AssistantChatTurn,
+  VehicleFunctionCreatePayload,
+  VehicleFunctionOut,
+  VehicleFunctionUpdatePayload,
+  StrategyFunnelOut,
+  StrategyFunnelPatchPayload,
 } from '@/lib/api/types'
 
 export function fetchRefCodes(domain?: string) {
@@ -94,9 +105,78 @@ export function fetchDemands() {
   return eeaFetch<DemandOut[]>('/demands')
 }
 
+export function createDemand(payload: DemandCreatePayload) {
+  return eeaFetch<DemandOut>('/demands', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function patchDemand(demandId: string, payload: DemandUpdatePayload) {
+  return eeaFetch<DemandOut>(`/demands/${encodeURIComponent(demandId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function fetchVehicleFunctions(demandPointId?: string) {
+  return eeaFetch<VehicleFunctionOut[]>(`/functions${toQueryString({ demand_point_id: demandPointId })}`)
+}
+
+export function createVehicleFunction(payload: VehicleFunctionCreatePayload) {
+  return eeaFetch<VehicleFunctionOut>('/functions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function patchVehicleFunction(functionId: string, payload: VehicleFunctionUpdatePayload) {
+  return eeaFetch<VehicleFunctionOut>(`/functions/${encodeURIComponent(functionId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
 export function fetchLandingPoints(vehicleFunctionId?: string) {
   return eeaFetch<LandingPointOut[]>(
     `/landing-points${toQueryString({ vehicle_function_id: vehicleFunctionId })}`,
+  )
+}
+
+export function createLandingPoint(payload: LandingPointCreatePayload) {
+  return eeaFetch<LandingPointOut>('/landing-points', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function patchLandingPoint(landingPointId: string, payload: LandingPointUpdatePayload) {
+  return eeaFetch<LandingPointOut>(`/landing-points/${encodeURIComponent(landingPointId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function fetchLandingPointStandards(landingPointId: string) {
+  return eeaFetch<LandingPointStandardGrid>(
+    `/landing-points/${encodeURIComponent(landingPointId)}/standards`,
+  )
+}
+
+export function putLandingPointStandard(landingPointId: string, payload: LandingPointStandardUpsert) {
+  return eeaFetch<LandingPointStandardGrid>(
+    `/landing-points/${encodeURIComponent(landingPointId)}/standards`,
+    {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
   )
 }
 
@@ -106,6 +186,29 @@ export function fetchAssessments(params?: { lp_id?: string; current_only?: boole
       lp_id: params?.lp_id,
       current_only: params?.current_only ?? true,
     })}`,
+  )
+}
+
+export function fetchStrategyFunnel(landingPointId: string) {
+  return eeaFetch<StrategyFunnelOut>(
+    `/strategy/landing-points/${encodeURIComponent(landingPointId)}/funnel`,
+  )
+}
+
+export function patchStrategyFunnel(landingPointId: string, payload: StrategyFunnelPatchPayload) {
+  return eeaFetch<StrategyFunnelOut>(
+    `/strategy/landing-points/${encodeURIComponent(landingPointId)}/funnel`,
+    {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    },
+  )
+}
+
+export function fetchStrategyAssessmentHistory(landingPointId: string) {
+  return eeaFetch<AssessmentOut[]>(
+    `/strategy/landing-points/${encodeURIComponent(landingPointId)}/assessments/history`,
   )
 }
 

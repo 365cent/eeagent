@@ -7,10 +7,12 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Respon
 from fastapi.responses import JSONResponse, PlainTextResponse
 from anyio import to_thread
 from sqlalchemy import func, or_, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.config import get_settings
+from app.core.identity import OperatorIdentity, get_operator_identity
 from app.db.base import get_db
 from app.models.models import DemandPoint, Document, Signal, SignalTag, TechTheme, Vocab
 from app.schemas.schemas import (
@@ -188,6 +190,8 @@ async def _create_signal_record(
     body_text: str | None = None,
     snapshot_html_object_key: str | None = None,
     document_id: uuid.UUID | None = None,
+    capture_submission_id: uuid.UUID | None = None,
+    capture_submission_sha256: str | None = None,
 ) -> Signal:
     """Shared post-ingest pipeline for both ingestion paths (B3/B5): persist
     the signal row, persist the body snapshot when one is present, pre-tag
@@ -203,6 +207,7 @@ async def _create_signal_record(
     misattribution (backend/TODO.md W4.1).
     """
     stage_explicit = value_chain_stage_code
+    signal_type_explicit = signal_type_code
     # REQ-TAG-04: 平台按标题与证据快照初判价值链环节（人工可纠偏）
     if value_chain_stage_code is None:
         value_chain_stage_code = judge_stage(title, body_text or "")
@@ -224,9 +229,26 @@ async def _create_signal_record(
         captured_at=func.now() if body_text else None,
         snapshot_html_object_key=snapshot_html_object_key,
         document_id=document_id,
+        capture_submission_id=capture_submission_id,
+        capture_submission_sha256=capture_submission_sha256,
     )
     db.add(sig)
-    await db.flush()
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        if capture_submission_id is None:
+            raise
+        existing = (
+            await db.execute(
+                select(Signal).where(Signal.capture_submission_id == capture_submission_id)
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            raise
+        if existing.capture_submission_sha256 != capture_submission_sha256:
+            raise HTTPException(409, "submission_id was already used for a different capture")
+        return existing
     # REQ-TAG-05: machine pre-tagging from snapshot text
     tag_names: list[str] = []
     if body_text:
@@ -238,6 +260,8 @@ async def _create_signal_record(
             if stage_explicit is None and llm_suggestion.value_chain_stage_code:
                 # advisory LLM stage when the client did not set one (人工可纠偏, REQ-TAG-04)
                 sig.value_chain_stage_code = value_chain_stage_code = llm_suggestion.value_chain_stage_code
+            if signal_type_explicit is None and llm_suggestion.signal_type_code:
+                sig.signal_type_code = llm_suggestion.signal_type_code
             tag_names = llm_suggestion.tech_tags or (suggest_tags(title + "\n" + body_text) if document_id is None else [])
         elif document_id is None:
             tag_names = suggest_tags(title + "\n" + body_text)
@@ -331,6 +355,8 @@ async def _signal_from_html(
     data: bytes,
     channel_code: str | None = None,
     html_label: str = "archive_html",
+    capture_submission_id: uuid.UUID | None = None,
+    capture_submission_sha256: str | None = None,
 ) -> Signal:
     """HTML bytes → signal: snapshot parse, object-store archive, shared
     post-ingest pipeline. Feeds POST /signals/capture (extension upload) and
@@ -364,6 +390,8 @@ async def _signal_from_html(
         excerpt=snap.body_md[:200],
         body_text=snap.body_md,
         snapshot_html_object_key=html_key,
+        capture_submission_id=capture_submission_id,
+        capture_submission_sha256=capture_submission_sha256,
     )
 
 
@@ -382,7 +410,10 @@ async def capture_signal(
     omitted. The JSON POST /signals stays the paste fallback (REQ-SIG-11);
     the body is always generated server-side, never submitted.
     """
-    data = await archive_html.read()
+    upload_limit = get_settings().doc_raw_upload_max_bytes
+    data = await archive_html.read(upload_limit + 1)
+    if len(data) > upload_limit:
+        raise HTTPException(413, f"archive_html exceeds {upload_limit} bytes")
     sig = await _signal_from_html(db, url=url, data=data, channel_code=channel_code)
     # 4. 返回 SignalDetail（含 snapshot_html_object_key）
     return await get_signal(sig.id, db)
@@ -626,7 +657,12 @@ async def auto_aggregate_signal(signal_id: uuid.UUID, db: AsyncSession = Depends
 
 
 @router.patch("/{signal_id}", response_model=SignalDetail)
-async def update_signal(signal_id: uuid.UUID, payload: SignalUpdate, db: AsyncSession = Depends(get_db)):
+async def update_signal(
+    signal_id: uuid.UUID,
+    payload: SignalUpdate,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_operator_identity),
+):
     s = await _load_signal(db, signal_id)
     data = payload.model_dump(exclude={"operator_subject", "operator_role"}, exclude_unset=True)
     body_text = data.pop("body_text", None)
@@ -637,7 +673,7 @@ async def update_signal(signal_id: uuid.UUID, payload: SignalUpdate, db: AsyncSe
         # REQ-RULE-02: audit human corrections of machine-classified fields
         if field in ("value_chain_stage_code", "signal_type_code", "evolution_node_code"):
             await record_correction(
-                db, "signal", s.id, field, old, value, payload.operator_subject, payload.operator_role
+                db, "signal", s.id, field, old, value, actor
             )
         setattr(s, field, value)
     if body_text:
@@ -650,7 +686,12 @@ async def update_signal(signal_id: uuid.UUID, payload: SignalUpdate, db: AsyncSe
 
 
 @router.put("/{signal_id}/tags", response_model=SignalDetail)
-async def set_tags(signal_id: uuid.UUID, payload: TagAssignment, db: AsyncSession = Depends(get_db)):
+async def set_tags(
+    signal_id: uuid.UUID,
+    payload: TagAssignment,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_operator_identity),
+):
     s = await _load_signal(db, signal_id)
     old = sorted(st.vocab.name for st in s.tags)
     # SCHEMA-SIGNAL-TAG: assigning the same tag twice never creates a second row
@@ -663,13 +704,18 @@ async def set_tags(signal_id: uuid.UUID, payload: TagAssignment, db: AsyncSessio
         v = await get_or_create_vocab(db, "tech_tag", name)  # REQ-TAG-06: new tags join global vocab
         db.add(SignalTag(signal_id=s.id, vocab_id=v.id))
     if sorted(tag_names) != old:
-        await record_correction(db, "signal", s.id, "tech_tags", old, sorted(tag_names), payload.operator_subject)
+        await record_correction(db, "signal", s.id, "tech_tags", old, sorted(tag_names), actor)
     await db.commit()
     return await get_signal(signal_id, db)
 
 
 @router.put("/{signal_id}/theme", response_model=SignalDetail)
-async def assign_theme(signal_id: uuid.UUID, payload: ThemeAssignment, db: AsyncSession = Depends(get_db)):
+async def assign_theme(
+    signal_id: uuid.UUID,
+    payload: ThemeAssignment,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_operator_identity),
+):
     s = await _load_signal(db, signal_id)
     if payload.tech_theme_id is not None:
         theme = await db.get(TechTheme, payload.tech_theme_id)
@@ -679,7 +725,7 @@ async def assign_theme(signal_id: uuid.UUID, payload: ThemeAssignment, db: Async
     s.tech_theme_id = payload.tech_theme_id
     if old != payload.tech_theme_id:
         await record_correction(
-            db, "signal", s.id, "tech_theme_id", str(old), str(payload.tech_theme_id), payload.operator_subject
+            db, "signal", s.id, "tech_theme_id", str(old), str(payload.tech_theme_id), actor
         )
     await db.commit()
     return await get_signal(signal_id, db)
@@ -693,6 +739,15 @@ async def tag_suggestions(signal_id: uuid.UUID, db: AsyncSession = Depends(get_d
     # 返回结构不变，仅 source 标注来源
     body = load_body(s.body_object_key) if s.body_object_key else None
     llm = await suggest_tags_with_llm(s.title, (body or text)[:6000])
-    if llm is not None and llm.tech_tags:
-        return TagSuggestion(suggested_tags=llm.tech_tags, source="llm")
-    return TagSuggestion(suggested_tags=suggest_tags(text), source="jieba-frequency")
+    if llm is not None:
+        return TagSuggestion(
+            suggested_tags=llm.tech_tags or suggest_tags(text),
+            value_chain_stage_code=llm.value_chain_stage_code or judge_stage(s.title, body or text),
+            signal_type_code=llm.signal_type_code,
+            source="llm",
+        )
+    return TagSuggestion(
+        suggested_tags=suggest_tags(text),
+        value_chain_stage_code=judge_stage(s.title, body or text),
+        source="jieba-frequency",
+    )

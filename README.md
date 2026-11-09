@@ -4,6 +4,8 @@ EEA is a foresight / signal intelligence platform: FastAPI backend, Next.js UI, 
 
 From the **repository root**, use three terminals when developing locally: start the **backend** first, then the **frontend**; run the **capture client** when you need uploads from the public web.
 
+Project status and implementation order: [project TODO](TODO.md), [source and requirement index](docs/PROJECT-INDEX.md), [requirement traceability](docs/REQUIREMENTS-TRACEABILITY.md). The development host is macOS; use the [Mac setup and checks](docs/DEVELOPMENT-MAC.md). The PowerShell bootstrap and commands below are Windows development instructions; they are not the Linux production deployment procedure. See [Linux deployment work](deploy/TODO.md).
+
 ---
 
 ### Backend (API + local Postgres)

@@ -1,6 +1,8 @@
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -10,6 +12,14 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="", env_file=".env", extra="ignore")
 
     app_name: str = "EEA Backend"
+    app_env: Literal["development", "test", "production"] = "development"
+    dev_operator_subject: str = "local-development-user"
+    dev_operator_role: Literal["researcher", "taxonomy_admin", "platform_admin"] = "researcher"
+    trusted_proxy_ips: str = ""
+    capture_server_fetch_enabled: bool = False
+    capture_worker_poll_seconds: float = Field(default=1.0, gt=0)
+    capture_worker_lease_seconds: int = Field(default=900, ge=60)
+    capture_worker_max_attempts: int = Field(default=3, ge=1)
     db_host: str = "127.0.0.1"
     db_port: int = 54329
     db_user: str = "eea"

@@ -4,6 +4,8 @@ EEA 前瞻技术扫描平台的**采集客户端**：在本机可见浏览器里
 
 瘦客户端原则见 [`../docs/platform-implementation-plan.md`](../docs/platform-implementation-plan.md) §7 与 [`TODO.md`](TODO.md)：客户端**不做** HTML→Markdown、不做文档解析、不打包 Chromium、不调用 LLM。
 
+页面采集优先使用 `POST /api/v1/capture/jobs`（`url` + `file` + 稳定 `submission_id`），随后轮询 `GET /api/v1/capture/jobs/{id}`，直到服务端返回成功、失败或取消。OpenAPI 缺少异步任务契约时，回退到同步 `/capture` 或旧 `/signals/capture`，不在 POST 结果不明时改投另一端点。开发机组件检查见 [`../docs/DEVELOPMENT-MAC.md`](../docs/DEVELOPMENT-MAC.md)，Windows 发布验收清单见 [`TODO.md`](TODO.md)。
+
 ---
 
 ## 构建
@@ -64,6 +66,7 @@ dist/                发布产物（gitignored）
 | `capture_engine` | `edge` 或 `chrome` |
 | `browser_path` | 留空自动探测常见安装路径 |
 | `user_data_dir` | 浏览器 profile（公众号登录态保存在这里） |
+| `queue_dir` | 本地持久任务状态与待上传快照目录，默认 `data/capture-queue`；保留任务完成前不要清除此目录 |
 | `max_parallel` | 并发抓取数 |
 | `max_upload_mb` | 单个归档/文件上限（默认 **120 MiB**，与 backend `DOC_RAW_UPLOAD_MAX_BYTES` 一致） |
 | `timeout_sec` | 网页抓取超时 |
@@ -92,6 +95,7 @@ auto_api      true (lan 10.215.8.74)
 capture.exe                       # 图形界面（默认）
 capture.exe doctor                # 检查浏览器 / profile / 后端连通性
 capture.exe upload --url https://… --headless
+capture.exe upload --resume                 # 恢复本地队列中未完成的任务
 capture.exe upload --html saved.html                 # 已保存的 SingleFile HTML
 capture.exe upload --html saved.html --html-url https://…   # 显式指定原链接
 capture.exe upload --file 报告.pdf
@@ -117,13 +121,14 @@ Edge/Chrome (--remote-debugging-port=0, 独立 profile)
    ├─ Runtime.evaluate 注入 SingleFile core（go:embed，1 MB）
    └─ SingleFile.getPageData({loadDeferredContent:true}) → 自包含 HTML
           │
-          └─ POST /api/v1/signals/capture  multipart: url / channel_code / archive_html
+          └─ POST /api/v1/capture/jobs  multipart: url / file / submission_id
+                 └─ GET /api/v1/capture/jobs/{id} 轮询到终态并显示 signal
 ```
 
 - 单例浏览器进程，多标签并发抓取；抓完即关标签。
 - profile 下的 `DevToolsActivePort` 若指向死端口，会先探测再清理；若同 profile 已有存活浏览器则直接复用。
 - `channel_code` 只对明确域名做推断（`mp.weixin.qq.com` → `wechat_mp`），其余交给服务端按 URL 归一，避免客户端猜词表。
-- 文档走 `POST /api/v1/documents/raw`，multipart `file`，只传原文件。
+- 文档仍走 `POST /api/v1/documents/raw`，multipart `file`，只传原文件；迁移至异步统一文档任务仍在 CC-02。
 - 已保存的网页走同一条 capture 契约，不需要开浏览器：原链接从 `<link rel="canonical">` / `og:url` / `twitter:url` 读取，可用 `--html-url` 覆盖；都没有则拒绝上传，不会伪造来源。
 
 ---
@@ -135,7 +140,7 @@ go test ./...
 ```
 
 - `internal/capture`：真 Edge + 本地页面，断言标题、正文、图片/CSS 背景被内联、外链被消除。
-- `internal/queue`：抓取→上传全链路（httptest 桩服务端校验 multipart 字段）、已保存 HTML、文档上传、5xx 重试。
+- `internal/queue`：抓取→上传全链路（httptest 桩服务端校验 multipart 字段）、已保存 HTML、文档上传；只有服务端公开 `submission_id` 幂等键时，模糊结果的 5xx/网络失败才使用同一 ID 重试。
 - `internal/archive`：canonical / og:url 推断（属性顺序、引号、BOM、相对链接）。
 - `internal/platform`：multipart 形状、超限拒绝、错误可重试判定、渠道推断。
 
@@ -145,7 +150,7 @@ go test ./...
 
 ## 已知限制
 
-- 后端 `POST /api/v1/signals/capture`、`GET /signals/{id}/archive`、`POST /documents/raw` 已在 [`../backend/`](../backend/) 实现；`capture doctor` 与 `upload` 可对接 `http://127.0.0.1:8000`（API 根，勿加 `/api/v1`）。
+- 后端 `POST /api/v1/capture/jobs` 为持久网页采集任务入口；客户端把队列元数据写入 `queue_dir/queue-state.json`，待上传快照单独保存，启动 GUI 会恢复未完成任务，CLI 可用 `capture.exe upload --resume` 恢复。目录包含可能的敏感页面内容，请按本机数据处理；客户端不保存浏览器凭据。跨 Windows 重启恢复尚待真机验收；GUI 的失败重试/排队取消、队列历史清理功能尚未接入，文档上传还未迁移至统一异步任务。队列状态无限期保留；确认没有待恢复任务后，可退出程序并手动清理 `queue_dir`。历史同步 `/capture`、`/signals/capture`、`GET /signals/{id}/archive` 和 `POST /documents/raw` 仍保留。`capture doctor` 与 `upload` 使用 API 根（勿加 `/api/v1`）。
 - 归档体积受 `max_upload_mb` 限制（默认 120 MiB）；图片极多的页面可能仍超限，可在 `config.json` 再调高。
 - SingleFile core 为 **AGPL-3.0-or-later**，内部分发前需法务确认；版本与构建命令固定在 [`scripts/vendor-singlefile.sh`](scripts/vendor-singlefile.sh)。
 - 动态登录墙、验证码仍需人工在那个可见浏览器窗口里处理。

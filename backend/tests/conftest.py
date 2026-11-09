@@ -29,6 +29,8 @@ except ImportError:  # pragma: no cover - Windows
 BACKEND_ROOT = Path(__file__).resolve().parent.parent
 
 TEST_DB_NAME = "eea_test"
+os.environ["APP_ENV"] = "test"
+os.environ["CAPTURE_SERVER_FETCH_ENABLED"] = "true"
 os.environ["DB_NAME"] = TEST_DB_NAME
 # keep test bodies out of backend/.pg/objects (the dev object store)
 _OBJECT_DIR = tempfile.mkdtemp(prefix="eea-test-objects-")
@@ -53,8 +55,8 @@ _ADMIN_DSN = (
 )
 
 _TRUNCATE_SQL = text(
-    "TRUNCATE TABLE eea_access_log, eea_document, eea_signal_tag, eea_signal, eea_correction_audit, "
-    "eea_strategic_assessment, eea_deployment_standard, eea_tech_landing_point, "
+    "TRUNCATE TABLE eea_access_log, eea_capture_job, eea_document, eea_signal_tag, eea_signal, eea_correction_audit, "
+    "eea_strategic_assessment, eea_strategic_funnel, eea_deployment_standard, eea_tech_landing_point, "
     "eea_vehicle_function, eea_demand_point, eea_tech_theme, eea_vocab, "
     "eea_ref_code CASCADE"
 )
@@ -163,6 +165,14 @@ def _clean_database():
                         "alias": item[2] if len(item) > 2 else None,
                     },
                 )
+        for domain_name in ("软件", "硬件", "通信", "电源与能源管理", "工具"):
+            conn.execute(
+                text(
+                    "INSERT INTO eea_vocab (id, kind, name) "
+                    "VALUES (gen_random_uuid(), 'domain', :name)"
+                ),
+                {"name": domain_name},
+            )
     yield
 
 

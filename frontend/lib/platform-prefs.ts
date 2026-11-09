@@ -2,7 +2,6 @@ export type UserProfilePrefs = {
   displayName: string
   email: string
   roleTitle: string
-  platformRole: 'researcher' | 'taxonomy_admin'
   researchTags: string[]
   defaultValueChain: string
   defaultSignalType: string
@@ -27,20 +26,18 @@ const PROFILE_KEY = 'eea-user-profile'
 const SETTINGS_KEY = 'eea-platform-settings'
 
 export const defaultProfile: UserProfilePrefs = {
-  displayName: '刘文',
-  email: 'liu.wen@desaysv.com',
-  roleTitle: '战略研究员',
-  platformRole: 'researcher',
-  researchTags: ['智能汽车', 'EEA', '智能配电'],
-  defaultValueChain: '创造端（供应链）',
-  defaultSignalType: '战略',
-  memoryMarkdown:
-    '## 研究偏好\n\n- 默认关注低压系统智能化与区域控制器\n- 复核时优先核对价值链环节与信号类型\n',
+  displayName: '',
+  email: '',
+  roleTitle: '',
+  researchTags: [],
+  defaultValueChain: '',
+  defaultSignalType: '',
+  memoryMarkdown: '',
 }
 
 export const defaultSettings: PlatformSettingsPrefs = {
-  workspaceName: '技术战略研究组',
-  workspaceDescription: '德赛西威 EEA 前瞻技术扫描 — 产业信号到战略研判',
+  workspaceName: '',
+  workspaceDescription: '',
   defaultLanding: 'overview',
   notifySignalReview: true,
   notifyCrawlFailure: true,
@@ -63,11 +60,12 @@ function readJson<T>(key: string, fallback: T): T {
   }
 }
 
-function writeJson(key: string, value: unknown) {
+function writeJson(key: string, value: unknown): boolean {
   try {
     window.localStorage.setItem(key, JSON.stringify(value))
+    return true
   } catch {
-    /* ignore quota */
+    return false
   }
 }
 
@@ -75,14 +73,14 @@ export function loadProfilePrefs(): UserProfilePrefs {
   return readJson(PROFILE_KEY, defaultProfile)
 }
 
-export function saveProfilePrefs(prefs: UserProfilePrefs) {
-  writeJson(PROFILE_KEY, prefs)
+export function saveProfilePrefs(prefs: UserProfilePrefs): boolean {
+  return writeJson(PROFILE_KEY, prefs)
 }
 
 export function loadPlatformSettings(): PlatformSettingsPrefs {
   return readJson(SETTINGS_KEY, defaultSettings)
 }
 
-export function savePlatformSettings(prefs: PlatformSettingsPrefs) {
-  writeJson(SETTINGS_KEY, prefs)
+export function savePlatformSettings(prefs: PlatformSettingsPrefs): boolean {
+  return writeJson(SETTINGS_KEY, prefs)
 }

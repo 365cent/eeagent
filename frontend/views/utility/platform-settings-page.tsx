@@ -12,7 +12,6 @@ import {
   Row,
   Select,
   Switch,
-  Table,
   Tag,
   Typography,
 } from 'antd'
@@ -27,12 +26,6 @@ import { mainMenuEntries } from '@/config/menu'
 import type { UtilityPageConfig } from '@/config/utility-pages'
 
 const { Text } = Typography
-
-const roleMatrix = [
-  { key: '1', role: '研究者', scope: '采集信号、编辑标签与主题、发起推导与报告' },
-  { key: '2', role: '方法论/词表管理员', scope: '复核封闭词表、纠偏归集并留痕（REQ-RULE-02）' },
-  { key: '3', role: '平台管理员', scope: '工作空间、通知策略、会话与 Agent 写回策略' },
-]
 
 const landingOptions = [
   { value: 'overview', label: '工作台总览' },
@@ -55,8 +48,11 @@ export function PlatformSettingsPage({ config }: PlatformSettingsPageProps) {
 
   const onSave = async () => {
     const values = await form.validateFields()
-    savePlatformSettings(values)
-    messageApi.success('平台设置已保存（本地演示）')
+    if (savePlatformSettings(values)) {
+      messageApi.success('设置已保存到当前浏览器；服务器安全策略未更改')
+    } else {
+      messageApi.error('浏览器未能保存设置')
+    }
   }
 
   return (
@@ -137,15 +133,7 @@ export function PlatformSettingsPage({ config }: PlatformSettingsPageProps) {
           </Card>
 
           <Card className="panel-card" title="角色与权限（第一期）" style={{ marginTop: 18 }}>
-            <Table
-              size="small"
-              pagination={false}
-              dataSource={roleMatrix}
-              columns={[
-                { title: '角色', dataIndex: 'role', width: 140 },
-                { title: '能力范围', dataIndex: 'scope' },
-              ]}
-            />
+            <Text type="secondary">当前没有可用的服务端角色与权限查询接口。</Text>
           </Card>
 
           <Card className="panel-card" title="数据与合规" style={{ marginTop: 18 }}>

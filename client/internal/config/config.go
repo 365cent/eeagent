@@ -21,6 +21,7 @@ type Config struct {
 	CaptureEngine      string `json:"capture_engine"`
 	BrowserPath        string `json:"browser_path"`
 	UserDataDir        string `json:"user_data_dir"`
+	QueueDir           string `json:"queue_dir"`
 	MaxParallel        int    `json:"max_parallel"`
 	MaxUploadMB        int    `json:"max_upload_mb"`
 	TimeoutSec         int    `json:"timeout_sec"`
@@ -38,6 +39,7 @@ func Default() Config {
 		AutoAPI:            true,
 		CaptureEngine:      "edge",
 		UserDataDir:        filepath.Join("data", "browser-profile"),
+		QueueDir:           filepath.Join("data", "capture-queue"),
 		MaxParallel:        2,
 		MaxUploadMB:        120,
 		TimeoutSec:         90,
@@ -58,6 +60,9 @@ func (c *Config) applyDefaults() {
 	}
 	if c.UserDataDir == "" {
 		c.UserDataDir = d.UserDataDir
+	}
+	if c.QueueDir == "" {
+		c.QueueDir = d.QueueDir
 	}
 	if c.MaxParallel <= 0 {
 		c.MaxParallel = d.MaxParallel
@@ -135,6 +140,20 @@ func isLoopbackURL(raw string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// QueueStateDir resolves queue_dir relative to the directory containing
+// config.json, keeping persistent job state stable when the app is launched
+// from a shortcut with a different working directory.
+func QueueStateDir(configDir string, c Config) string {
+	path := c.QueueDir
+	if !filepath.IsAbs(path) {
+		path = filepath.Join(configDir, path)
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		return abs
+	}
+	return filepath.Clean(path)
 }
 
 // Save writes the config back to dir as indented JSON.

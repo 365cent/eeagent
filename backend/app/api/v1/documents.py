@@ -120,10 +120,10 @@ async def upload_raw_document(
     Duplicate bytes return the existing row (same id, same canonical artifact);
     an earlier failed/skipped ingest is retried on the next upload.
     """
-    data = await file.read()
+    max_upload, _ = _doc_limits()
+    data = await file.read(max_upload + 1)
     if not data:
         raise HTTPException(422, "file 为空：拒绝存储空文档（REQ-SIG-10 证据留存原则）")
-    max_upload, _ = _doc_limits()
     if len(data) > max_upload:
         raise HTTPException(
             413,

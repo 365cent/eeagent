@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { PlatformSearchModal } from '@/components/search/platform-search-modal'
 import { usePlatformSearchShortcut } from '@/hooks/use-platform-search-shortcut'
-import { ArrowRightOutlined, BulbOutlined, MenuUnfoldOutlined } from '@ant-design/icons'
+import { MenuUnfoldOutlined } from '@ant-design/icons'
 import { Button, ConfigProvider, Menu, Tooltip } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import { platformRootTheme } from '@/config/platform-theme'
@@ -172,35 +172,6 @@ export function PlatformLayout({
             }}
             menuFooterRender={() => (
               <div className={`pro-sider-footer${proLayoutCollapsed ? ' pro-sider-footer--collapsed' : ''}`}>
-                {proLayoutCollapsed ? (
-                  <Tooltip title="本周研究提醒" placement="right">
-                    <button
-                      type="button"
-                      className="sider-collapsed-hit sider-card--collapsed"
-                      aria-label="本周研究提醒"
-                      onClick={() => onNavigate('reminders')}
-                    >
-                      <BulbOutlined className="sider-card-icon" aria-hidden />
-                    </button>
-                  </Tooltip>
-                ) : (
-                  <div
-                    className="sider-card"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => onNavigate('reminders')}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter' || event.key === ' ') onNavigate('reminders')
-                    }}
-                  >
-                    <BulbOutlined className="sider-card-icon" aria-hidden />
-                    <div className="sider-card-copy">
-                      <span className="sider-card-title">本周研究提醒</span>
-                      <small>还有 12 条信号待复核</small>
-                    </div>
-                    <ArrowRightOutlined className="sider-card-arrow" aria-hidden />
-                  </div>
-                )}
                 {proLayoutCollapsed ? (
                   <div className="sider-collapsed-utility" role="group" aria-label="快捷入口">
                     {(siderUtilityMenuItems ?? []).map((item) => {

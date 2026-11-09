@@ -55,19 +55,18 @@ type PlatformSettingsForm = {
 }
 
 const defaultProfile: ProfileForm = {
-  displayName: '刘文',
-  email: 'liu.wen@desaysv.com',
-  role: '战略研究员',
-  workspace: '技术战略研究组',
-  interestTags: ['智能汽车', 'EEA', '智能配电', '功能安全'],
-  memoryMarkdown:
-    '## 研究偏好\n- 关注低压系统智能化、区域控制器与智能配电链路\n- 复核时优先核对价值链环节与信号类型封闭词表\n\n## 常用筛选\n- 创造端（供应链）+ 技术类信号\n- 技术方向：智能配电、eFuse',
-  notifyReview: true,
-  notifyCapture: true,
+  displayName: '',
+  email: '',
+  role: '',
+  workspace: '',
+  interestTags: [],
+  memoryMarkdown: '',
+  notifyReview: false,
+  notifyCapture: false,
 }
 
 const defaultSettings: PlatformSettingsForm = {
-  workspaceName: '技术战略研究组',
+  workspaceName: '',
   defaultLanding: 'overview',
   notifyEmail: true,
   notifyInApp: true,
@@ -77,18 +76,9 @@ const defaultSettings: PlatformSettingsForm = {
   agentRequireConfirm: true,
 }
 
-const recentVisits = [
-  { key: '1', title: '信号采集·证据库', path: 'signals', time: '今天 16:42' },
-  { key: '2', title: '推导流水线', path: 'traceDetail', time: '今天 15:10' },
-  { key: '3', title: '方法论映射', path: 'knowledge', time: '昨天 11:28' },
-  { key: '4', title: '战略研判', path: 'strategy', time: '周一 09:05' },
-]
+const recentVisits: { key: string; title: string; path: string; time: string }[] = []
 
-const roleMatrix = [
-  { role: '研究者', scope: '采集信号、编辑标签与主题、发起推导与报告' },
-  { role: '方法论/词表管理员', scope: '复核封闭词表、纠偏归集并留痕（REQ-RULE-02）' },
-  { role: '平台管理员', scope: '工作空间、通知策略、会话与 Agent 写回策略' },
-]
+const roleMatrix: { role: string; scope: string }[] = []
 
 type ProfileViewProps = {
   onNavigate: (view: string) => void
@@ -125,15 +115,15 @@ export function ProfileView({ onNavigate, onSaved }: ProfileViewProps) {
       <Col xs={24} lg={8}>
         <Card className="panel-card" title="账户概览">
           <Space orientation="vertical" size={16} style={{ width: '100%' }} align="center">
-            <Avatar size={72} className="user-profile-avatar">LW</Avatar>
+            <Avatar size={72} className="user-profile-avatar">{form.getFieldValue('displayName')?.trim()?.[0] ?? '?'}</Avatar>
             <div style={{ textAlign: 'center' }}>
-              <Text strong style={{ fontSize: 18 }}>刘文</Text>
+              <Text strong style={{ fontSize: 18 }}>{form.getFieldValue('displayName') || '未设置显示名称'}</Text>
               <br />
-              <Text type="secondary">战略研究员 · 技术战略研究组</Text>
+              <Text type="secondary">个人资料仅保存在当前浏览器</Text>
             </div>
             <Descriptions column={1} size="small" style={{ width: '100%' }}>
-              <Descriptions.Item label="平台角色">研究者</Descriptions.Item>
-              <Descriptions.Item label="Agent 会话">多会话持久化（REQ-AGT-01）</Descriptions.Item>
+              <Descriptions.Item label="平台角色">未由服务端提供</Descriptions.Item>
+              <Descriptions.Item label="Agent 会话">当前没有可用的会话查询接口</Descriptions.Item>
             </Descriptions>
           </Space>
         </Card>

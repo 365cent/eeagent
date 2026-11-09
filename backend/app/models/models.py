@@ -39,7 +39,10 @@ class Vocab(Base):
     __tablename__ = "eea_vocab"
     __table_args__ = (
         UniqueConstraint("kind", "name"),
-        CheckConstraint("kind IN ('tech_tag', 'domain')", name="ck_vocab_kind"),
+        CheckConstraint(
+            "kind IN ('tech_tag', 'domain', 'recommendation_level', 'target_domain')",
+            name="ck_vocab_kind",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -68,6 +71,7 @@ class DemandPoint(Base):
         UUID(as_uuid=True), ForeignKey("eea_tech_theme.id")
     )
     value_chain_stage_code: Mapped[str] = mapped_column(Text, nullable=False)
+    derivation_trace: Mapped[dict | None] = mapped_column(JSONB)
     cross_validation: Mapped[dict | None] = mapped_column(JSONB)
     time_series: Mapped[list | None] = mapped_column(JSONB)
     review_status: Mapped[str | None] = mapped_column(Text)
@@ -81,6 +85,11 @@ class Signal(Base):
     __table_args__ = (
         Index("eea_signal_theme_idx", "tech_theme_id"),
         Index("eea_signal_url_norm_idx", "url_normalized"),
+        UniqueConstraint("capture_submission_id", name="uq_signal_capture_submission_id"),
+        CheckConstraint(
+            "(capture_submission_id IS NULL) = (capture_submission_sha256 IS NULL)",
+            name="ck_signal_capture_submission_pair",
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
@@ -110,6 +119,10 @@ class Signal(Base):
         UUID(as_uuid=True), ForeignKey("eea_document.id", name="fk_eea_signal_document")
     )
     captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Optional idempotency receipt for POST /capture. Legacy signal routes leave
+    # both fields NULL; a capture key is bound to one canonical request digest.
+    capture_submission_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    capture_submission_sha256: Mapped[str | None] = mapped_column(CHAR(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
@@ -120,6 +133,55 @@ class Signal(Base):
     tags: Mapped[list["SignalTag"]] = relationship(
         back_populates="signal", cascade="all, delete-orphan"
     )
+
+
+class CaptureJob(Base):
+    """Durable server-side queue entry for one user-side capture submission."""
+
+    __tablename__ = "eea_capture_job"
+    __table_args__ = (
+        UniqueConstraint("submission_id", name="uq_capture_job_submission"),
+        CheckConstraint(
+            "status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')",
+            name="ck_capture_job_status",
+        ),
+        CheckConstraint(
+            "stage IN ('queued', 'fetching', 'processing', 'completed', 'failed', 'cancelled')",
+            name="ck_capture_job_stage",
+        ),
+        CheckConstraint("attempt_count >= 0", name="ck_capture_job_attempt_count"),
+        Index("eea_capture_job_ready_idx", "status", "available_at", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    submission_id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), nullable=False)
+    fingerprint: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    source_url: Mapped[str | None] = mapped_column(Text)
+    publisher: Mapped[str | None] = mapped_column(Text)
+    source_label: Mapped[str | None] = mapped_column(Text)
+    channel_code: Mapped[str | None] = mapped_column(Text)
+    filename: Mapped[str | None] = mapped_column(Text)
+    mime: Mapped[str | None] = mapped_column(Text)
+    payload_object_key: Mapped[str | None] = mapped_column(Text)
+    payload_size: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    via: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="queued", server_default="queued")
+    stage: Mapped[str] = mapped_column(Text, nullable=False, default="queued", server_default="queued")
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    worker_id: Mapped[str | None] = mapped_column(Text)
+    signal_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eea_signal.id", ondelete="SET NULL")
+    )
+    error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Document(Base):
@@ -202,6 +264,8 @@ class CorrectionAudit(Base):
     field_name: Mapped[str] = mapped_column(Text, nullable=False)
     machine_value: Mapped[dict | None] = mapped_column(JSONB)
     human_value: Mapped[dict | None] = mapped_column(JSONB)
+    old_value: Mapped[dict | None] = mapped_column(JSONB)
+    new_value: Mapped[dict | None] = mapped_column(JSONB)
     operator_subject: Mapped[str] = mapped_column(Text, nullable=False)
     operator_role: Mapped[str] = mapped_column(Text, nullable=False)
     corrected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -218,6 +282,11 @@ class VehicleFunction(Base):
     value_chain_stage_code: Mapped[str | None] = mapped_column(Text)
     forward_trace: Mapped[dict | None] = mapped_column(JSONB)
     reverse_trace: Mapped[dict | None] = mapped_column(JSONB)
+    recommendation_level: Mapped[str | None] = mapped_column(Text)
+    automation_levels: Mapped[list | None] = mapped_column(JSONB)
+    target_domain: Mapped[str | None] = mapped_column(Text)
+    recommendation_reason: Mapped[str | None] = mapped_column(Text)
+    l2_l4_difference: Mapped[str | None] = mapped_column(Text)
     published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -281,6 +350,10 @@ class StrategicAssessment(Base):
         CheckConstraint("score_moat BETWEEN 1 AND 5", name="ck_assess_moat"),
         CheckConstraint("score_supply_chain BETWEEN 1 AND 5", name="ck_assess_supply"),
         CheckConstraint("score_feasibility BETWEEN 1 AND 5", name="ck_assess_feasibility"),
+        CheckConstraint(
+            "classification IN ('前瞻布局', '短期可落地', '产业投资/生态合作')",
+            name="ck_assess_classification",
+        ),
         Index(
             "eea_strategic_assessment_current_idx",
             "tech_landing_point_id",
@@ -308,8 +381,61 @@ class StrategicAssessment(Base):
     )
     classification: Mapped[str] = mapped_column(Text, nullable=False)
     strategy_note: Mapped[str | None] = mapped_column(Text)
+    score_rationales: Mapped[dict | None] = mapped_column(JSONB)
+    funnel_snapshot: Mapped[dict | None] = mapped_column(JSONB)
     operator_subject: Mapped[str | None] = mapped_column(Text)
     assessed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     is_current: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
 
     landing_point: Mapped[TechLandingPoint] = relationship(back_populates="assessments")
+
+
+class StrategicFunnel(Base):
+    """Mutable work-in-progress funnel state, separate from final assessments."""
+
+    __tablename__ = "eea_strategic_funnel"
+    __table_args__ = (
+        CheckConstraint(
+            "adaptation_decision IS NULL OR adaptation_decision IN ('pass', 'reject')",
+            name="ck_strategy_funnel_adaptation",
+        ),
+        CheckConstraint(
+            "classification IS NULL OR classification IN ('前瞻布局', '短期可落地', '产业投资/生态合作')",
+            name="ck_strategy_funnel_classification",
+        ),
+        CheckConstraint("score_business IS NULL OR score_business BETWEEN 1 AND 5", name="ck_strategy_funnel_business"),
+        CheckConstraint("score_maturity IS NULL OR score_maturity BETWEEN 1 AND 5", name="ck_strategy_funnel_maturity"),
+        CheckConstraint("score_moat IS NULL OR score_moat BETWEEN 1 AND 5", name="ck_strategy_funnel_moat"),
+        CheckConstraint("score_supply_chain IS NULL OR score_supply_chain BETWEEN 1 AND 5", name="ck_strategy_funnel_supply"),
+        CheckConstraint("score_feasibility IS NULL OR score_feasibility BETWEEN 1 AND 5", name="ck_strategy_funnel_feasibility"),
+    )
+
+    tech_landing_point_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("eea_tech_landing_point.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    scan_scope: Mapped[str | None] = mapped_column(Text)
+    scan_sources: Mapped[list | None] = mapped_column(JSONB)
+    tier1_current_business_relation: Mapped[str | None] = mapped_column(Text)
+    tier1_future_business_relation: Mapped[str | None] = mapped_column(Text)
+    valuable_role: Mapped[str | None] = mapped_column(Text)
+    adaptation_decision: Mapped[str | None] = mapped_column(Text)
+    adaptation_reason: Mapped[str | None] = mapped_column(Text)
+    score_business: Mapped[int | None] = mapped_column(SmallInteger)
+    rationale_business: Mapped[str | None] = mapped_column(Text)
+    score_maturity: Mapped[int | None] = mapped_column(SmallInteger)
+    rationale_maturity: Mapped[str | None] = mapped_column(Text)
+    score_moat: Mapped[int | None] = mapped_column(SmallInteger)
+    rationale_moat: Mapped[str | None] = mapped_column(Text)
+    score_supply_chain: Mapped[int | None] = mapped_column(SmallInteger)
+    rationale_supply_chain: Mapped[str | None] = mapped_column(Text)
+    score_feasibility: Mapped[int | None] = mapped_column(SmallInteger)
+    rationale_feasibility: Mapped[str | None] = mapped_column(Text)
+    classification: Mapped[str | None] = mapped_column(Text)
+    strategy_note: Mapped[str | None] = mapped_column(Text)
+    finalized_assessment_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
+    finalized_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_by: Mapped[str] = mapped_column(Text, nullable=False)

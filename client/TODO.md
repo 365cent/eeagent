@@ -1,209 +1,79 @@
-# Capture Client — implementation plan
+# Capture Client 实施清单
 
-状态：2026-10-28。对照 WBS W2（[`docs/wbs/EEA-WBS-工作清单.xlsx`](../docs/wbs/EEA-WBS-工作清单.xlsx)）、[`docs/platform-implementation-plan.md`](../docs/platform-implementation-plan.md) §7。**Capture Client 计划见本文件**；服务端 API 见 [`../backend/TODO.md`](../backend/TODO.md)（已对齐）。
+更新：2026-11-09。生产服务端已选 Linux 内网；本目录仍是研究者 Windows 电脑上的 Go 采集程序。公网与登录浏览器留在用户终端。总顺序见 [项目清单](../TODO.md)，原文映射见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。
 
-## 待办 checklist
+## 现状和边界
 
-### Backend（W2 ingest — 已在 [`../backend/TODO.md`](../backend/TODO.md) 落地）
+已有 Edge/Chrome + 自写 CDP + SingleFile、GUI/CLI、URL/HTML/文档上传、网卡选择和本地持久队列。网页采集现优先提交至 `POST /api/v1/capture/jobs`，使用稳定 `submission_id` 并轮询服务端终态；旧服务端按 OpenAPI 回退到同步接口。文档上传仍调用 `/documents/raw`。本次未运行 Windows 真浏览器测试，旧“完成”记录不等同新发布验收。
 
-- [x] `objectstore`: `save_bytes` / `load_bytes`（[`../backend/app/services/objectstore.py`](../backend/app/services/objectstore.py)）
-- [x] Alembic：`snapshot_html_object_key`（`0003`）；`eea_document` 表替代可选 `ingest_document_key`
-- [x] `POST /api/v1/signals/capture` — multipart：`url` + `archive_html`（**无** `body_md`）
-- [x] `app/services/html_snapshot.py`：HTML → Markdown/正文 → `save_body`；从 HTML 抽 title / publisher / published_at
-- [x] `GET /api/v1/signals/{id}/archive`（text/html）
-- [x] `POST /api/v1/documents/raw` — 原文件 only（W4 再 MarkItDown；MinerU 已排除）
-- [x] pytest：fixture `.html` 上传 → body 非空、archive 可回放（[`../backend/tests/test_capture.py`](../backend/tests/test_capture.py)）
+保持瘦客户端：上传 URL+自包含 HTML 或原始文件，不做 Markdown 转换、LLM 分类或业务推导，不分发 Chromium。Edge/Chrome 是实际实现，旧 WebView2/Rod 选择表不再指导开发。
 
-### Capture Client（本目录）
+## CC-01 浏览器采集与来源
 
-- [x] `go.mod` + `cmd/capture/main.go`（默认 GUI，`capture upload` CLI）
-- [x] `internal/config` + `config.example.json`
-- [x] `internal/platform` — multipart 上传（仅 url + archive_html 或 raw file）
-- [x] `scripts/vendor-singlefile.sh` + embed SingleFile core
-- [x] `internal/capture` — **Edge/Chrome + CDP 主路径**（替代原计划 WebView2；见下）
-- [x] `internal/ui` — windigo 小窗：粘贴/拖放合一，设置面板收在「设置」里（对齐 buddy 视觉）
-- [x] `internal/queue` — 并发与失败重试
-- [x] 内网自动寻址：`internal/netinfo` 跳过 VMware/Hyper-V，绑定物理网卡；`auto_api` + `doctor` 显示 LAN IP
-- [x] 120 MiB 上限与独立上传超时（`upload_timeout_sec=900`）；121 MiB 客户端直接拒绝
-- [x] 已保存网页入库：`upload --html F [--html-url U]`、GUI 拖入 `.html`（URL 从 canonical/og:url 推断）
-- [x] `README.md` — 构建、profile 登录、配置说明
+- [ ] P0 · 部分实现 · 可独立开展；验收依赖 DOC-02 真实材料。
+- 来源：Word §2.1、图2-1-1/2-1-2、表A；REQ-SIG-01/02/07/11；WBS 1.3.2。
+- 入口：[engine.go](internal/capture/engine.go)、[archive.go](internal/archive/archive.go)、[cdp/](internal/cdp/)。
+- 普通网页/微信公众号分别识别渠道，等待可读正文稳定；保留用户 URL、最终 URL 和采集时间。
+- 识别验证码、登录墙、空正文和错误页；允许可见浏览器人工处理，超时给出具体原因，不能把验证壳上传成成功证据。
+- 保存 HTML 从 canonical/og:url/twitter:url 推断来源；没有可靠来源则要求显式输入，不生成虚构公网地址。
+- 单例浏览器、多标签任务的关闭/取消不能结束用户其他会话；保护 profile 登录态。
+- 验收：静态/延迟渲染/微信验证/无正文/崩溃/取消/无来源 HTML 均有结果；原 URL 与正文一致。
 
-已完成并验证（2026-10-28）：真 Edge 抓取本地页与 `baidu.com`（6.8 MB 自包含）、GUI 端到端到桩服务端、`go test ./...` 含真浏览器用例。
+## CC-02 统一 API 与任务恢复
 
-**抓取引擎偏差**：原计划 WebView2 为 1 号路径、Rod+Edge 回退。落地时改为直接用本机 Edge/Chrome + 自写 CDP 客户端（stdlib websocket），原因：企网无法拉 Go 依赖（`go-rod` / WebView2 绑定均取不到），windigo 无浏览器宿主；CDP 同样满足「系统浏览器、独立 profile、可见登录」，且不引入 Chromium 下载。`capture_engine` 仍保留 `edge|chrome`。
+- [ ] P0 · 部分实现 · 依赖 BE-01/02、OPS-03。
+- 来源：REQ-SIG-01/07/10/11、会议统一采集入口；WBS 1.3.2、1.6.1。
+- 入口：[client.go](internal/platform/client.go)、[queue.go](internal/queue/queue.go)、[cli.go](internal/cli/cli.go)。
+- 网页异步上传、幂等重试、本地持久队列和 Retry-After 切片已交付；具体实现与检查证据见[交付记录](../docs/DELIVERY-RECORD.md#cc-02--asynchronous-capture-and-durable-client-queue-slice)。CC-02 验收仍未完成。
+- 服务端幂等和原子对象写入见 BE-01；部署必须升级到当前 Alembic head（现为 0011）。旧端点没有幂等键时不自动重试不确定结果。
+- 仍需将文档上传迁至统一任务；把 retry/cancel 操作接入 GUI；设计终态历史保留与清理；并在 Windows 真机验证客户端队列重启恢复。服务端 worker 已可轮询处理，但只有收到 succeeded 终态后才显示采集完成。
+- 分开抓取超时、上传超时和服务器处理超时；上传完成后继续轮询，不能提前显示“入库成功”。
+- 明确的 4xx 验证错误不进入自动重试；429/5xx 有限重试并优先采用 `Retry-After`（最多等待 10 分钟）。401/403身份提示仍待身份接入。
+- 旧服务端兼容模式通过能力探测显式选择并提示，不因任意错误重复上传两条路径。
+- 验收：桩服务验证 multipart/幂等标识；断网重开、worker失败、重试与取消不会重复创建信号。
 
-**联调后端（2026-10-28）**：上述端点已在 backend 实现。本地验收：`scripts/start_api.py` 后 `capture doctor` → `capture upload --url …` / `--html`；前端 `newSignal` 亦接同一 capture / `documents/raw` 契约。
+## CC-03 Linux 服务连接与凭据
 
-**离线归档（2026-10-28 已交付）**：`--html` / GUI 拖入 `.html` 走同一条 capture 契约，URL 推断顺序 canonical → `og:url` → `twitter:url`，可用 `--html-url` 覆盖；无来源则拒传。CLI 与 GUI 已对 live API 验证（`text/html` + 原文件名 + 推断 URL）。
+- [ ] P0 · 未开始（现有仅基础地址配置）· 依赖 OPS-03。
+- 来源：实施计划 §10.1 #4、REQ-RULE-02；WBS 1.6/1.7。
+- 入口：[config.go](internal/config/config.go)、[netinfo.go](internal/netinfo/netinfo.go)、doctor 命令。
+- 生产明确配置 HTTPS API 根地址；现有“本机 LAN IP 推断服务器”只保留开发用途，不能误连用户电脑。
+- 支持企业 CA 信任和反向代理路径；禁止用关闭证书校验作为部署办法。
+- 使用服务器签发的用户级 capture 上传凭据，只允许相应上传/自身任务查询；Windows 凭据存储保存秘密，配置文件只保存引用。
+- doctor 检查浏览器、API可达、版本/能力和授权状态，输出脱敏诊断，不打印凭据。
+- 验收：Linux TLS API、失效/撤销 token、错误 CA、错误地址、代理路径均有可操作说明。
 
----
+## CC-04 GUI 和人工恢复
 
-## 设计原则：瘦客户端、胖服务端
+- [ ] P0 · 部分实现 · 依赖 CC-01/02/03、FE-02。
+- 来源：Word §2.1；REQ-SIG-10/11；WBS 1.3.2。
+- 入口：[ui/](internal/ui/)、[queue.go](internal/queue/queue.go)。
+- 保持粘贴/拖放主操作面，显示每项的抓取、上传、解析、待复核、成功、失败，成功带信号打开入口。
+- 多文件任务逐项反馈、取消、重试；一项失败不掩盖其他项。复制诊断默认去除敏感信息。
+- 微信失败提示在平台保留原 URL 粘贴正文；明确这是补救而非已成功抓取。
+- 验收：真实 API 下 GUI/CLI 同等可追溯，操作结果重启后可见；无虚假成功消息。
 
-| 层 | 职责 |
-|----|------|
-| **Capture Client**（`client/`） | 公网抓取；SingleFile 式**自包含 HTML**；上传 **URL + HTML** 或**原始文档**；可从 URL 推断 `channel_code`（如 `mp.weixin.qq.com` → `wechat_mp`）。**不做** HTML→MD、**不做** MarkItDown/MinerU、**不打包** Chromium。 |
-| **EEA backend** | 收 HTML → **转 Markdown** 写入 `body_object_key`；从 HTML 抽元数据；jieba 预标与归集；文档 blob 存盘，W4 服务端解析。 |
+## CC-05 扩展协同
 
-```mermaid
-flowchart LR
-  subgraph captureClient [Capture Client tiny]
-    UI[windigo UI]
-    Q[queue]
-    Eng[WebView2 or Edge Chrome]
-    SF[SingleFile JS in page]
-    UP[multipart upload]
-    UI --> Q --> Eng --> SF --> UP
-    Q -->|raw file| UP
-  end
-  subgraph server [EEA backend]
-    CAP[POST signals capture]
-    HTML[store archive_html]
-    MD[html to markdown]
-    TAG[jieba and signal row]
-    UP --> CAP --> HTML --> MD --> TAG
-  end
-  Eng -->|HTTPS| Internet[public web]
-```
+- [ ] P1 · 外部阻塞 · 依赖外部 reader-collection 源码、BE-01、OPS-03、DOC-02。
+- 来源：2026-10-29 会议及后续统一入口约定；WBS 1.3.2。
+- 当前仓库/相邻目录未发现 reader-collection；不能在本目录声称其已修改或已发布。
+- 发布统一上传、任务、幂等、来源和权限契约供扩展接入；扩展须在用户终端访问公网。
+- 核对扩展 token 保存、目标域/来源限制、单击采集到平台结果链；跨项目变更由该项目任务执行。
+- 若扩展未交付，已有 Go 客户端保持完整可用路径；是否影响扩展专项验收由 DOC-02 记录，不能据此免除 URL 一键采集。
+- 验收：扩展版本与端到端结果可核对；缺少外部产物时状态保持阻塞。
 
-```mermaid
-sequenceDiagram
-  participant User
-  participant CC as Capture_Client
-  participant Web as WebView2_or_Edge
-  participant API as EEA_API
-  participant Store as OBJECT_DIR
+## CC-06 Windows 包与生产验收
 
-  User->>CC: paste URL or drop PDF
-  alt Web page
-    CC->>Web: Navigate URL profile cookies
-    Web->>Web: SingleFile core script
-    Web-->>CC: archive_html bytes
-    CC->>API: multipart url channel archive_html
-    API->>Store: html blob
-    API->>API: html to md body_object_key
-    API-->>CC: signal id
-  else Document
-    CC->>API: multipart file only
-    API->>Store: documents raw
-    API-->>CC: document id
-  end
-```
+- [ ] P0 · 未验证 · 依赖 CC-01…04、BE-16、OPS-03/04、DOC-02；独立 Windows 构建与浏览器证据供 OPS-06 汇总。
+- 来源：WBS 1.3.2、1.5、1.6、1.7。
+- 入口：[release.ps1](scripts/release.ps1)、[vendor-singlefile.sh](scripts/vendor-singlefile.sh)、[README](README.md)。
+- 锁定工具链和 SingleFile 来源/版本；Windows runner 编译 GUI 和 CLI，go test -short ./...，并在 Windows Edge/Chrome 跑真浏览器集成。
+- 输出版本化 zip、SHA256SUMS、配置示例、第三方许可证/源码获取说明；SingleFile AGPL 分发处理列入交付记录。
+- 文档说明安装/升级/凭据配置、profile、采集失败和正文补救；升级不覆盖用户配置/profile/未完成队列。
+- 10 篇网页≥9篇标题正文准确，5 篇微信逐一记录成功/失败；20 条业务样本与服务端信号 ID 对应。
+- 验收：干净业务电脑安装可用、升级/回退不丢队列与配置、发布包 hash 可验证；不在 Linux/macOS 上假称 Windows GUI 测试通过。
 
----
+## 旧计划对照
 
-## 命名
-
-| 项 | 值 |
-|----|-----|
-| 产品名 | **Capture Client** |
-| 目录 | `client/` |
-| 二进制 | `capture.exe` / `capture` |
-| 入口 | `client/cmd/capture/main.go` |
-
----
-
-## 依赖（Go 尽量小）
-
-### 页面抓取（`config.capture_engine`）
-
-| 优先级 | 引擎 | Go 依赖 | 说明 |
-|--------|------|---------|------|
-| 1 默认 | **WebView2** | 如 `github.com/wailsapp/go-webview2` | 系统 Edge WebView2 Runtime，exe 不内嵌 Chromium；Navigate + ExecuteScript 跑 SingleFile |
-| 2 回退 | **本机 Edge/Chrome + Rod** | `go-rod/rod` + `launcher` | 仅 `Bin(path).UserDataDir(profile)`，禁止 Rod 默认下载浏览器 |
-| 3 | chromedp | 与 Rod **二选一** | 同样只用系统浏览器路径 |
-
-配置：`capture_engine` = `webview2` | `edge` | `chrome`；`browser_path`；`user_data_dir`。
-
-### UI（Windows v1）
-
-- **windigo**（参考 buddy 仓库 Win32 小窗 + 可选托盘）
-- 文件：选文件按钮 + 可选 Shell 拖放（实现阶段）
-
-### 客户端包含
-
-- Vendored **single-file-core**（[SingleFile releases](https://github.com/gildas-lormeau/SingleFile/releases)）→ `go:embed`；**AGPL**，内部分发需法务确认
-- **stdlib** + `net/http` multipart
-
-### 客户端明确不做
-
-- html-to-markdown、MarkItDown、MinerU、Fyne、内置 Chromium、Rod 自动下载浏览器、LLM
-
----
-
-## 服务端：`POST /api/v1/signals/capture`
-
-1. 存 `archive_html` → `snapshot_html_object_key`
-2. HTML → MD/正文（`html_snapshot.py`：`markdownify` / `html2text` 或 MarkItDown，可后续换实现不改客户端）
-3. `save_body` → jieba / 归集（沿用现有 [`signals.py`](../backend/app/api/v1/signals.py) 创建流）
-4. 服务端从 HTML 抽 title、publisher、published_at
-
-| 字段 | 客户端 | 服务端 |
-|------|--------|--------|
-| `url` | 必填 | 必填 |
-| `channel_code` | 可选（URL 推断） | 归一化词表 |
-| `archive_html` | 必填（文件 part） | 存盘 + 转换 |
-| `body_md` | **不发送** | 服务端生成 |
-
-文档：`POST /api/v1/documents/raw`，客户端只传原文件。
-
----
-
-## 目录结构（规划）
-
-| 路径 | 作用 |
-|------|------|
-| `cmd/capture/main.go` | 默认 GUI；CLI 子命令 |
-| `internal/cli` | `upload --url` / `--file`、`version` |
-| `internal/config` | `api_base`、`capture_engine`、`browser_path`、`user_data_dir`、`max_parallel`、`max_upload_mb` |
-| `internal/ui` | windigo UI |
-| `internal/queue` | worker pool |
-| `internal/capture` | `CaptureURL(ctx, url) ([]byte, error)` |
-| `internal/singlefile` | embed JS |
-| `internal/platform` | HTTP multipart |
-| `scripts/vendor-singlefile.sh` | 固定 SingleFile 版本 |
-
----
-
-## `config.json` 示例
-
-```json
-{
-  "api_base": "http://127.0.0.1:8000",
-  "capture_engine": "webview2",
-  "browser_path": "",
-  "user_data_dir": "data/browser-profile",
-  "max_parallel": 2,
-  "max_upload_mb": 120
-}
-```
-
-`browser_path` 为空时，回退引擎解析 Edge / Chrome 常见安装路径。
-
----
-
-## 实施顺序
-
-1. ~~Backend：capture + html→md + 测试~~ ✅（见 backend/TODO B1–B6）
-2. ~~Client CLI：fixture `.html` 上传~~ ✅
-3. ~~SingleFile + 真 URL 冒烟~~ ✅（CDP + Edge，非 WebView2）
-4. ~~windigo GUI~~ ✅
-5. W2 二十条链接验收表（业务提供 URL；模板见 backend/TODO B7 `client/fixtures/acceptance-links.md` 可选新建）
-
-## 风险
-
-| 风险 | 应对 |
-|------|------|
-| 未装 WebView2 Runtime | README 安装说明；`capture_engine=edge` |
-| SingleFile 在 WebView2 内行为 | 尽早原型；回退 Rod+Edge |
-| 微信登录 | 可见 profile；平台 REQ-SIG-11 粘贴补救 |
-| HTML 过大 | `max_upload_mb` |
-| MD 质量 | 仅改服务端转换库，客户端不变 |
-
----
-
-## 约束
-
-- 生产 API **无公网**；仅 Capture Client 访问公网。  
-- 不新增第六种证据状态（REQ-SIG-10）。  
-- 抓取失败仍保留 URL；禁止无正文却标「已留存」。
+旧客户端 checklist 的实现作为基础保留：主引擎实际为 CDP + Edge/Chrome；离线 HTML/自动寻址/120 MiB/上传超时仍需按新契约回归。旧 B1–B6 属后端 BE-01/02/12/16，旧 B7 二十条链接验收归 CC-06 与 DOC-02/05。

@@ -1,37 +1,199 @@
+from datetime import datetime, timedelta, timezone
+
 from fastapi import APIRouter, Depends
-from sqlalchemy import func, select, text
+from sqlalchemy import and_, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import get_db
 from app.models.models import (
+    CaptureJob,
     DemandPoint,
+    DeploymentStandard,
+    Document,
     Signal,
     StrategicAssessment,
+    StrategicFunnel,
     TechLandingPoint,
     TechTheme,
     VehicleFunction,
 )
-from app.schemas.schemas import OverviewStats
+from app.schemas.schemas import (
+    OverviewStats,
+    OverviewStrategyFunnelCounts,
+    OverviewWeeklyNew,
+)
+from app.services.strategy_funnel import _current_step
 
 router = APIRouter(tags=["overview"])
 
 
-@router.get("/overview", response_model=OverviewStats)
+@router.get(
+    "/overview",
+    response_model=OverviewStats,
+    description=(
+        "Returns live row counts. Weekly additions use each entity's persisted creation/assessment "
+        "timestamp in the UTC calendar week beginning Monday 00:00, through as_of_utc. Funnel "
+        "counts are exclusive current states per landing point; step four includes finalized rows."
+    ),
+)
 async def overview(db: AsyncSession = Depends(get_db)):
-    async def count(q) -> int:
-        return (await db.execute(q)).scalar_one()
+    as_of = datetime.now(timezone.utc)
+    week_start = (as_of - timedelta(days=as_of.weekday())).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+
+    def total(model, *, timestamp_field=None):
+        query = select(func.count(model.id))
+        if timestamp_field is not None:
+            query = query.where(timestamp_field >= week_start, timestamp_field <= as_of)
+        return query.scalar_subquery()
+
+    counters = (
+        await db.execute(
+            select(
+                total(Signal).label("signals"),
+                select(func.count(func.distinct(Signal.url_normalized)))
+                .where(func.length(func.trim(Signal.url_normalized)) > 0)
+                .scalar_subquery()
+                .label("signal_sources"),
+                select(func.count(Signal.id))
+                .where(Signal.evidence_status_code == "pending_review")
+                .scalar_subquery()
+                .label("signals_pending_review"),
+                select(func.count(Signal.id))
+                .where(Signal.evidence_status_code == "retained")
+                .scalar_subquery()
+                .label("signals_retained"),
+                select(func.count(Signal.id))
+                .where(Signal.evidence_status_code == "fetching")
+                .scalar_subquery()
+                .label("signals_fetching"),
+                select(func.count(Signal.id))
+                .where(Signal.evidence_status_code == "fetch_failed")
+                .scalar_subquery()
+                .label("signals_fetch_failed"),
+                select(func.count(Signal.id))
+                .where(Signal.evidence_status_code == "archived")
+                .scalar_subquery()
+                .label("signals_archived"),
+                select(func.count(DemandPoint.id))
+                .where(DemandPoint.review_status == "pending")
+                .scalar_subquery()
+                .label("demand_points_pending_review"),
+                select(func.count(CaptureJob.id))
+                .where(CaptureJob.status.in_(("queued", "running")))
+                .scalar_subquery()
+                .label("capture_jobs_open"),
+                select(func.count(CaptureJob.id))
+                .where(CaptureJob.status == "failed")
+                .scalar_subquery()
+                .label("capture_jobs_failed"),
+                select(func.count(Document.id))
+                .where(Document.ingest_status == "failed")
+                .scalar_subquery()
+                .label("documents_failed_ingest"),
+                total(TechTheme).label("tech_themes"),
+                total(DemandPoint).label("demand_points"),
+                total(VehicleFunction).label("vehicle_functions"),
+                total(TechLandingPoint).label("landing_points"),
+                select(func.count(DeploymentStandard.id))
+                .where(
+                    DeploymentStandard.requirement_text.is_not(None),
+                    func.length(func.trim(DeploymentStandard.requirement_text)) > 0,
+                )
+                .scalar_subquery()
+                .label("substantive_standards"),
+                select(func.count(StrategicAssessment.id))
+                .where(StrategicAssessment.is_current.is_(True))
+                .scalar_subquery()
+                .label("funnel_pool"),
+                total(Signal, timestamp_field=Signal.created_at).label("weekly_signals"),
+                total(TechTheme, timestamp_field=TechTheme.created_at).label("weekly_tech_themes"),
+                total(DemandPoint, timestamp_field=DemandPoint.created_at).label("weekly_demand_points"),
+                total(VehicleFunction, timestamp_field=VehicleFunction.created_at).label("weekly_vehicle_functions"),
+                total(TechLandingPoint, timestamp_field=TechLandingPoint.created_at).label("weekly_landing_points"),
+                total(StrategicAssessment, timestamp_field=StrategicAssessment.assessed_at).label(
+                    "weekly_strategic_assessments"
+                ),
+                total(Document, timestamp_field=Document.created_at).label("weekly_documents"),
+            )
+        )
+    ).one()
+
+    # Use the same pure state resolver as GET/PATCH /strategy/.../funnel so
+    # overview buckets cannot drift from the sequential funnel contract.
+    has_boundary_evidence = exists(
+        select(DeploymentStandard.id).where(
+            DeploymentStandard.tech_landing_point_id == TechLandingPoint.id,
+            DeploymentStandard.requirement_text.is_not(None),
+            func.length(func.trim(DeploymentStandard.requirement_text)) > 0,
+        )
+    )
+    funnel_rows = (
+        await db.execute(
+            select(
+                TechLandingPoint.id,
+                StrategicFunnel,
+                StrategicAssessment,
+                has_boundary_evidence.label("pool_eligible"),
+            )
+            .outerjoin(
+                StrategicFunnel,
+                StrategicFunnel.tech_landing_point_id == TechLandingPoint.id,
+            )
+            .outerjoin(
+                StrategicAssessment,
+                and_(
+                    StrategicAssessment.tech_landing_point_id == TechLandingPoint.id,
+                    StrategicAssessment.is_current.is_(True),
+                ),
+            )
+        )
+    ).all()
+
+    stage_counts = {
+        "industry_scan": 0,
+        "tier1_adaptation": 0,
+        "scoring": 0,
+        "classification": 0,
+        "rejected": 0,
+        "pool_entry_blocked": 0,
+    }
+    for _lp_id, funnel, current_assessment, pool_eligible in funnel_rows:
+        step = _current_step(funnel, bool(pool_eligible), current_assessment)
+        if step in stage_counts:
+            stage_counts[step] += 1
+        elif step in {"ready_to_finalize", "complete"}:
+            stage_counts["classification"] += 1
 
     return OverviewStats(
-        signals=await count(select(func.count(Signal.id))),
-        signals_pending_review=await count(
-            # canonical code, not the label '待人工复核' — eea_signal stores codes (app/seed.py)
-            select(func.count(Signal.id)).where(Signal.evidence_status_code == "pending_review")
+        signals=counters.signals,
+        signal_sources=counters.signal_sources,
+        signals_retained=counters.signals_retained,
+        signals_pending_review=counters.signals_pending_review,
+        signals_fetching=counters.signals_fetching,
+        signals_fetch_failed=counters.signals_fetch_failed,
+        signals_archived=counters.signals_archived,
+        demand_points_pending_review=counters.demand_points_pending_review,
+        capture_jobs_open=counters.capture_jobs_open,
+        capture_jobs_failed=counters.capture_jobs_failed,
+        documents_failed_ingest=counters.documents_failed_ingest,
+        tech_themes=counters.tech_themes,
+        demand_points=counters.demand_points,
+        vehicle_functions=counters.vehicle_functions,
+        landing_points=counters.landing_points,
+        substantive_standards=counters.substantive_standards,
+        funnel_pool=counters.funnel_pool,
+        weekly_window_start_utc=week_start,
+        as_of_utc=as_of,
+        weekly_new=OverviewWeeklyNew(
+            signals=counters.weekly_signals,
+            tech_themes=counters.weekly_tech_themes,
+            demand_points=counters.weekly_demand_points,
+            vehicle_functions=counters.weekly_vehicle_functions,
+            landing_points=counters.weekly_landing_points,
+            strategic_assessments=counters.weekly_strategic_assessments,
+            documents=counters.weekly_documents,
         ),
-        tech_themes=await count(select(func.count(TechTheme.id))),
-        demand_points=await count(select(func.count(DemandPoint.id))),
-        vehicle_functions=await count(select(func.count(VehicleFunction.id))),
-        landing_points=await count(select(func.count(TechLandingPoint.id))),
-        funnel_pool=await count(
-            select(func.count(StrategicAssessment.id)).where(StrategicAssessment.is_current)
-        ),
+        strategy_funnel=OverviewStrategyFunnelCounts(**stage_counts),
     )

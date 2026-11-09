@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"eea/capture/internal/capture"
@@ -49,6 +50,7 @@ func usage(out io.Writer) {
   capture upload --html F       upload a saved SingleFile HTML (URL read from it)
   capture upload --html F --html-url U   saved HTML with an explicit source URL
   capture upload --file F       upload raw documents
+  capture upload --resume       resume persisted unfinished jobs
   capture doctor                check browser and API
   capture version`)
 
@@ -63,6 +65,27 @@ func (s *stringList) Set(v string) error {
 	return nil
 }
 
+type deferredEngine struct {
+	opts    capture.Options
+	once    sync.Once
+	browser *capture.Browser
+	err     error
+}
+
+func (e *deferredEngine) Capture(ctx context.Context, rawURL string) (*capture.Archive, error) {
+	e.once.Do(func() { e.browser, e.err = capture.Launch(context.Background(), e.opts) })
+	if e.err != nil {
+		return nil, e.err
+	}
+	return e.browser.Capture(ctx, rawURL)
+}
+
+func (e *deferredEngine) Close() {
+	if e.browser != nil {
+		_ = e.browser.Close()
+	}
+}
+
 func runUpload(args []string, out io.Writer) int {
 	fs := flag.NewFlagSet("upload", flag.ContinueOnError)
 	fs.SetOutput(out)
@@ -73,6 +96,7 @@ func runUpload(args []string, out io.Writer) int {
 	htmlURL := fs.String("html-url", "", "source URL for a single --html file")
 	apiBase := fs.String("api-base", "", "override api_base")
 	channel := fs.String("channel", "", "override channel_code")
+	resume := fs.Bool("resume", false, "resume persisted unfinished jobs")
 	engine := fs.String("engine", "", "edge or chrome")
 	browserPath := fs.String("browser-path", "", "explicit browser executable")
 	headless := fs.Bool("headless", false, "run the browser headless")
@@ -81,8 +105,8 @@ func runUpload(args []string, out io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if len(urls) == 0 && len(files) == 0 && len(htmls) == 0 {
-		fmt.Fprintln(out, "nothing to do: pass --url, --html or --file")
+	if len(urls) == 0 && len(files) == 0 && len(htmls) == 0 && !*resume {
+		fmt.Fprintln(out, "nothing to do: pass --url, --html, --file or --resume")
 		return 2
 	}
 	if *htmlURL != "" && len(htmls) != 1 {
@@ -119,34 +143,37 @@ func runUpload(args []string, out io.Writer) int {
 
 	api := platform.New(base, cfg.MaxUploadMB)
 
-	var engineImpl queue.CaptureEngine
-	if len(urls) > 0 {
-		browser, err := capture.Launch(context.Background(), capture.Options{
-			Engine:          cfg.CaptureEngine,
-			BrowserPath:     cfg.BrowserPath,
-			UserDataDir:     cfg.UserDataDir,
-			Headless:        cfg.Headless,
-			ReadyWait:       time.Duration(cfg.ReadyTimeout) * time.Second,
-			InteractiveWait: time.Duration(cfg.InteractiveTimeout) * time.Second,
-			MinTextChars:    cfg.MinTextChars,
-		})
-		if err != nil {
-			fmt.Fprintf(out, "browser: %v\n", err)
-			return 1
-		}
-		defer browser.Close()
-		engineImpl = browser
-	}
+	engineImpl := &deferredEngine{opts: capture.Options{
+		Engine:          cfg.CaptureEngine,
+		BrowserPath:     cfg.BrowserPath,
+		UserDataDir:     cfg.UserDataDir,
+		Headless:        cfg.Headless,
+		ReadyWait:       time.Duration(cfg.ReadyTimeout) * time.Second,
+		InteractiveWait: time.Duration(cfg.InteractiveTimeout) * time.Second,
+		MinTextChars:    cfg.MinTextChars,
+	}}
+	defer engineImpl.Close()
 
 	q := queue.New(engineImpl, api, queue.Options{
 		Workers:       cfg.MaxParallel,
 		Retries:       2,
 		Timeout:       time.Duration(cfg.TimeoutSec) * time.Second,
 		UploadTimeout: time.Duration(cfg.UploadTimeout) * time.Second,
+		StateDir:      config.QueueStateDir(dir, cfg),
 	})
+	if err := q.Restore(); err != nil {
+		fmt.Fprintf(out, "queue restore: %v\n", err)
+		return 1
+	}
+	current := make(map[int]bool)
+	for _, job := range q.Snapshot() {
+		if job.Status == queue.StatusQueued || job.Status == queue.StatusRunning {
+			current[job.ID] = true
+		}
+	}
 	q.Start()
 	for _, u := range urls {
-		q.SubmitURL(strings.TrimSpace(u), *channel)
+		current[q.SubmitURL(strings.TrimSpace(u), *channel)] = true
 	}
 	for _, f := range files {
 		abs, err := filepath.Abs(strings.TrimSpace(f))
@@ -154,7 +181,7 @@ func runUpload(args []string, out io.Writer) int {
 			fmt.Fprintf(out, "file %s: %v\n", f, err)
 			continue
 		}
-		q.SubmitFile(abs)
+		current[q.SubmitFile(abs)] = true
 	}
 	for _, f := range htmls {
 		abs, err := filepath.Abs(strings.TrimSpace(f))
@@ -162,11 +189,17 @@ func runUpload(args []string, out io.Writer) int {
 			fmt.Fprintf(out, "html %s: %v\n", f, err)
 			continue
 		}
-		q.SubmitArchive(abs, *htmlURL)
+		current[q.SubmitArchive(abs, *htmlURL)] = true
 	}
 	q.Wait()
-	jobs := q.Snapshot()
+	allJobs := q.Snapshot()
 	q.Close()
+	jobs := make([]queue.Job, 0, len(current))
+	for _, job := range allJobs {
+		if current[job.ID] {
+			jobs = append(jobs, job)
+		}
+	}
 
 	failed := 0
 	for _, j := range jobs {

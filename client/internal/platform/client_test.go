@@ -2,6 +2,7 @@ package platform
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -12,6 +13,11 @@ func TestCaptureMultipart(t *testing.T) {
 	var gotField, gotChannel, gotFilename, gotBody string
 	var gotType string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet && r.URL.Path == "/openapi.json" {
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"paths":{"/api/v1/signals/capture":{}}}`))
+			return
+		}
 		if r.URL.Path != "/api/v1/signals/capture" {
 			t.Errorf("path = %s", r.URL.Path)
 		}
@@ -62,6 +68,46 @@ func TestCaptureMultipart(t *testing.T) {
 	}
 	if gotBody != "<html>archived</html>" {
 		t.Errorf("body = %q", gotBody)
+	}
+}
+
+func TestCreateManualFallbackKeepsReviewStateAndSource(t *testing.T) {
+	var payload map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/signals" {
+			t.Errorf("request = %s %s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Errorf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"id":"sig-manual","title":"人工补录标题","url":"https://mp.weixin.qq.com/s/a","channel_code":"wechat_mp","evidence_status_code":"pending_review"}`))
+	}))
+	defer srv.Close()
+
+	sig, err := New(srv.URL, 8).CreateManualFallback(context.Background(), ManualFallbackInput{
+		URL: "https://mp.weixin.qq.com/s/a", Title: "人工补录标题", Body: "研究者粘贴的微信正文",
+	})
+	if err != nil {
+		t.Fatalf("CreateManualFallback: %v", err)
+	}
+	if sig.ID != "sig-manual" || sig.EvidenceState != "pending_review" {
+		t.Fatalf("signal = %+v", sig)
+	}
+	if payload["url"] != "https://mp.weixin.qq.com/s/a" || payload["body_text"] != "研究者粘贴的微信正文" {
+		t.Fatalf("manual payload = %#v", payload)
+	}
+	if payload["evidence_status_code"] != "pending_review" {
+		t.Fatalf("evidence_status_code = %#v", payload["evidence_status_code"])
+	}
+}
+
+func TestCreateManualFallbackRequiresTitleURLAndBody(t *testing.T) {
+	_, err := New("http://127.0.0.1:1", 8).CreateManualFallback(context.Background(), ManualFallbackInput{
+		URL: "https://example.com/a", Title: "T",
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires url, title, and body") {
+		t.Fatalf("err = %v", err)
 	}
 }
 

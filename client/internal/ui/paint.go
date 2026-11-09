@@ -2,11 +2,14 @@ package ui
 
 import (
 	"math"
+	"strconv"
 	"syscall"
 	"unsafe"
 
 	"github.com/rodrigocfd/windigo/co"
 	"github.com/rodrigocfd/windigo/win"
+
+	"eea/capture/internal/queue"
 )
 
 const (
@@ -108,7 +111,11 @@ func (a *appState) paintInto(hdc win.HDC, w, h int) {
 		a.paintPanel(hdc, f)
 		return
 	}
-	a.paintCard(hdc, f)
+	if a.showJobs {
+		a.paintJobs(hdc, f)
+	} else {
+		a.paintCard(hdc, f)
+	}
 	a.paintStatus(hdc, f)
 }
 
@@ -118,6 +125,9 @@ func (a *appState) paintHeader(hdc win.HDC, f frame) {
 		Right: f.header.l + int32(winScale.x(28)), Bottom: int32(winScale.y(25)),
 	}, 0, true)
 	textAt(hdc, a.fonts.title, int(f.header.l)+winScale.x(36), winScale.y(10), rgb(inkR, inkG, inkB), "EEA 采集")
+	a.paintNav(hdc, f.linkNav, "链接", !a.showJobs && !a.manualMode)
+	a.paintNav(hdc, f.manualNav, "微信补录", !a.showJobs && a.manualMode)
+	a.paintNav(hdc, f.jobsNav, "任务", a.showJobs)
 	textAt(hdc, a.fonts.small, int(f.settings.l), winScale.y(14), rgb(muteR, muteG, muteB), "设置")
 	textRight(hdc, a.fonts.body, int(f.min.r), winScale.y(12), rgb(muteR, muteG, muteB), "—")
 	textRight(hdc, a.fonts.body, int(f.close.r), winScale.y(12), rgb(muteR, muteG, muteB), "×")
@@ -126,6 +136,10 @@ func (a *appState) paintHeader(hdc win.HDC, f frame) {
 func (a *appState) paintCard(hdc win.HDC, f frame) {
 	a.fillAA(hdc, [3]byte{lineR, lineG, lineB}, f.card.rect(), winScale.x(12), false)
 	a.fillAA(hdc, [3]byte{255, 255, 255}, inset(f.card, 1).rect(), winScale.x(11), false)
+	if a.manualMode {
+		a.paintManualFallbackForm(hdc, f)
+		return
+	}
 
 	hint := "粘贴链接，或把文件拖进来"
 	if n := a.pendingLines(); n > 0 {
@@ -133,6 +147,102 @@ func (a *appState) paintCard(hdc win.HDC, f frame) {
 	}
 	textAt(hdc, a.fonts.small, int(f.hint.l), int(f.hint.t)+winScale.y(4), rgb(muteR, muteG, muteB), hint)
 	a.paintPill(hdc, f.send, "上传", a.canSend())
+}
+
+func (a *appState) paintNav(hdc win.HDC, b box, label string, active bool) {
+	color := rgb(muteR, muteG, muteB)
+	if active {
+		color = rgb(brandR, brandG, brandB)
+	}
+	sz, err := extent(hdc, a.fonts.small, label)
+	x, y := int(b.l), int(b.t)+winScale.y(5)
+	if err == nil {
+		x += (b.dx() - int(sz.Cx)) / 2
+	}
+	textAt(hdc, a.fonts.small, x, y, color, label)
+}
+
+func (a *appState) paintManualFallbackForm(hdc win.HDC, f frame) {
+	labelColor := rgb(muteR, muteG, muteB)
+	textAt(hdc, a.fonts.small, int(f.manualURLLabel.l), int(f.manualURLLabel.t), labelColor, "原始微信 URL")
+	textAt(hdc, a.fonts.small, int(f.manualTitleLabel.l), int(f.manualTitleLabel.t), labelColor, "标题")
+	textAt(hdc, a.fonts.small, int(f.manualBodyLabel.l), int(f.manualBodyLabel.t), labelColor, "粘贴正文 · 手工补录，非浏览器采集成功")
+	for _, b := range []box{f.manualURL, f.manualTitle, f.manualBody} {
+		a.fillAA(hdc, [3]byte{lineR, lineG, lineB}, b.rect(), winScale.x(6), false)
+		a.fillAA(hdc, [3]byte{255, 255, 255}, inset(b, 1).rect(), winScale.x(5), false)
+	}
+	textAt(hdc, a.fonts.small, int(f.hint.l), int(f.hint.t), labelColor,
+		fit(hdc, a.fonts.small, "提交后保存为待人工复核的手工证据", int(f.hint.dx())))
+	a.paintPill(hdc, f.send, "提交补录", a.canSend())
+}
+
+func (a *appState) paintJobs(hdc win.HDC, f frame) {
+	a.fillAA(hdc, [3]byte{lineR, lineG, lineB}, f.card.rect(), winScale.x(12), false)
+	a.fillAA(hdc, [3]byte{255, 255, 255}, inset(f.card, 1).rect(), winScale.x(11), false)
+	jobs := a.orderedJobs()
+	start := a.jobPage * len(f.jobRows)
+	if len(jobs) == 0 {
+		textAt(hdc, a.fonts.small, int(f.card.l)+winScale.x(18), int(f.card.t)+winScale.y(26), rgb(muteR, muteG, muteB), "暂无任务。链接采集和微信手工补录会显示在这里。")
+	} else {
+		for row, b := range f.jobRows {
+			idx := start + row
+			if idx >= len(jobs) {
+				break
+			}
+			job := jobs[idx]
+			if row > 0 {
+				y := b.t - int32(winScale.y(2))
+				line := win.RECT{Left: f.card.l + int32(winScale.x(12)), Top: y, Right: f.card.r - int32(winScale.x(12)), Bottom: y + 1}
+				br := solidBrush(lineR, lineG, lineB)
+				_ = hdc.FillRect(&line, br)
+				_ = br.DeleteObject()
+			}
+			statusColor := rgb(muteR, muteG, muteB)
+			if job.Status == queue.StatusFailed {
+				statusColor = rgb(errR, errG, errB)
+			} else if job.Status == queue.StatusRunning {
+				statusColor = rgb(inkR, inkG, inkB)
+			} else if job.Status == queue.StatusDone {
+				statusColor = rgb(brandR, brandG, brandB)
+			}
+			textAt(hdc, a.fonts.small, int(b.l)+winScale.x(2), int(b.t)+winScale.y(5), statusColor,
+				fit(hdc, a.fonts.small, jobStatusLabel(job), winScale.x(96)))
+			textAt(hdc, a.fonts.small, int(b.l)+winScale.x(103), int(b.t)+winScale.y(5), rgb(inkR, inkG, inkB),
+				fit(hdc, a.fonts.small, jobDisplayTarget(job), int(f.jobSecondary[row].l)-int(b.l)-winScale.x(109)))
+			a.paintJobAction(hdc, f.jobPrimary[row], jobPrimaryAction(job), job.Status == queue.StatusDone)
+			a.paintJobAction(hdc, f.jobSecondary[row], jobSecondaryAction(job), false)
+		}
+	}
+	a.paintJobAction(hdc, f.jobPrev, "‹", a.jobPage > 0)
+	pages := (len(jobs) + len(f.jobRows) - 1) / len(f.jobRows)
+	pageLabel := "0 / 0"
+	if pages > 0 {
+		pageLabel = formatPage(a.jobPage+1, pages)
+	}
+	textAt(hdc, a.fonts.small, int(f.jobPage.l), int(f.jobPage.t)+winScale.y(1), rgb(muteR, muteG, muteB), pageLabel)
+	a.paintJobAction(hdc, f.jobNext, "›", a.jobPage+1 < pages)
+}
+
+func (a *appState) paintJobAction(hdc win.HDC, b box, label string, emphasized bool) {
+	if b.empty() || label == "" {
+		return
+	}
+	color := rgb(muteR, muteG, muteB)
+	if emphasized {
+		color = rgb(brandR, brandG, brandB)
+	}
+	sz, err := extent(hdc, a.fonts.small, label)
+	x := int(b.l) + winScale.x(4)
+	y := int(b.t) + winScale.y(3)
+	if err == nil {
+		x = int(b.l) + (b.dx()-int(sz.Cx))/2
+		y = int(b.t) + (b.dy()-int(sz.Cy))/2
+	}
+	textAt(hdc, a.fonts.small, x, y, color, label)
+}
+
+func formatPage(current, total int) string {
+	return strconv.Itoa(current) + " / " + strconv.Itoa(total)
 }
 
 func (a *appState) paintPill(hdc win.HDC, b box, label string, on bool) {

@@ -11,9 +11,11 @@ import {
   fetchPanorama,
   fetchRefCodes,
   fetchSignal,
+  fetchSignalTagSuggestions,
   fetchSignals,
   fetchThemes,
   fetchTraceFromLandingPoint,
+  fetchVocab,
   fetchVocabUsage,
 } from '@/lib/api/eea-api'
 import {
@@ -30,7 +32,6 @@ import {
 import type { Signal } from '@/types/platform'
 import type { AssessmentOut, ListSignalsParams } from '@/lib/api/types'
 import { buildListSignalsParams } from '@/lib/signal-list-filters'
-import { signals as mockSignals } from '@/mocks/signals'
 
 export const eeaQueryKeys = {
   refCodes: ['eea', 'ref-codes'] as const,
@@ -39,6 +40,8 @@ export const eeaQueryKeys = {
   signal: (id: string) => ['eea', 'signal', id] as const,
   themes: ['eea', 'themes'] as const,
   vocabUsage: ['eea', 'vocab-usage'] as const,
+  vocab: (kind: string) => ['eea', 'vocab', kind] as const,
+  tagSuggestions: (signalId: string) => ['eea', 'tag-suggestions', signalId] as const,
   audit: (entityId: string) => ['eea', 'audit', entityId] as const,
   demands: ['eea', 'demands'] as const,
   landingPoints: ['eea', 'landing-points'] as const,
@@ -96,6 +99,21 @@ export function useVocabUsage(kind = 'tech_tag') {
   return useQuery({
     queryKey: [...eeaQueryKeys.vocabUsage, kind],
     queryFn: () => fetchVocabUsage(kind),
+  })
+}
+
+export function useVocab(kind: string) {
+  return useQuery({
+    queryKey: eeaQueryKeys.vocab(kind),
+    queryFn: () => fetchVocab(kind),
+  })
+}
+
+export function useSignalTagSuggestions(signalId: string) {
+  return useQuery({
+    queryKey: eeaQueryKeys.tagSuggestions(signalId),
+    queryFn: () => fetchSignalTagSuggestions(signalId),
+    enabled: Boolean(signalId),
   })
 }
 
@@ -179,6 +197,10 @@ export function useLandingRows() {
   return {
     isLoading: landingQuery.isLoading || assessments.isLoading,
     isError: landingQuery.isError || assessments.isError,
+    error: landingQuery.error ?? assessments.error,
+    refetch: async () => {
+      await Promise.all([landingQuery.refetch(), assessments.refetch()])
+    },
     rows,
   }
 }
@@ -196,12 +218,4 @@ export function useTraceChain(lpId: string | undefined) {
     queryFn: () => fetchTraceFromLandingPoint(lpId!),
     enabled: Boolean(lpId),
   })
-}
-
-/** Fallback mock signals only when API is unreachable (offline dev). */
-export function useSignalsWithFallback(filters: { query?: string; stageChip?: string; themeId?: string } = {}) {
-  const live = useSignalsListFiltered(filters)
-  const usingMock = live.isError && !live.isFetching
-  const rows = live.isSuccess ? live.rows : usingMock ? mockSignals : []
-  return { ...live, rows, usingMock, apiReachable: live.isSuccess || live.isLoading }
 }

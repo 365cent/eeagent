@@ -58,8 +58,16 @@ class VocabOut(BaseModel):
 
 
 class VocabCreate(BaseModel):
-    kind: Literal["tech_tag", "domain"]
-    name: str
+    kind: Literal["tech_tag", "domain", "recommendation_level", "target_domain"]
+    name: str = Field(min_length=1, max_length=200)
+
+    @field_validator("name")
+    @classmethod
+    def _nonblank_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("词表名称不能为空")
+        return value
 
 
 class VocabUsageOut(BaseModel):
@@ -131,8 +139,6 @@ class SignalUpdate(RefCodeValidated):
     source_label: str | None = None
     excerpt: str | None = None
     body_text: str | None = None
-    operator_subject: str = "local-admin"
-    operator_role: str = "方法论/词表管理员"
 
 
 class SignalBase(BaseModel):
@@ -309,29 +315,29 @@ class LlmStatusOut(BaseModel):
 
 class TagAssignment(BaseModel):
     tag_names: list[str]
-    operator_subject: str = "local-admin"
 
 
 class ThemeAssignment(BaseModel):
     tech_theme_id: uuid.UUID | None  # None = 移出归集
-    operator_subject: str = "local-admin"
 
 
 class DemandCreate(RefCodeValidated):
     name: str
     source_tech_theme_id: uuid.UUID | None = None
     value_chain_stage_code: str
+    derivation_trace: dict | None = None
     cross_validation: dict | None = None
     time_series: list | None = None
-    review_status: str | None = None
+    review_status: Literal["pending", "confirmed"] | None = None
 
 
 class DemandUpdate(RefCodeValidated):
     name: str | None = None
     value_chain_stage_code: str | None = None
+    derivation_trace: dict | None = None
     cross_validation: dict | None = None
     time_series: list | None = None
-    review_status: str | None = None
+    review_status: Literal["pending", "confirmed"] | None = None
 
 
 class DemandOut(BaseModel):
@@ -340,6 +346,7 @@ class DemandOut(BaseModel):
     name: str
     source_tech_theme_id: uuid.UUID | None
     value_chain_stage_code: str
+    derivation_trace: dict | None
     cross_validation: dict | None
     time_series: list | None
     review_status: str | None
@@ -355,6 +362,11 @@ class FunctionCreate(RefCodeValidated):
     value_chain_stage_code: str | None = None
     forward_trace: dict | None = None
     reverse_trace: dict | None = None
+    recommendation_level: str | None = None
+    automation_levels: list[Literal["L0", "L1", "L2", "L3", "L4", "L5"]] | None = None
+    target_domain: str | None = None
+    recommendation_reason: str | None = None
+    l2_l4_difference: str | None = None
 
 
 class FunctionUpdate(RefCodeValidated):
@@ -362,6 +374,11 @@ class FunctionUpdate(RefCodeValidated):
     value_chain_stage_code: str | None = None
     forward_trace: dict | None = None
     reverse_trace: dict | None = None
+    recommendation_level: str | None = None
+    automation_levels: list[Literal["L0", "L1", "L2", "L3", "L4", "L5"]] | None = None
+    target_domain: str | None = None
+    recommendation_reason: str | None = None
+    l2_l4_difference: str | None = None
     published: bool | None = None
 
 
@@ -373,6 +390,11 @@ class FunctionOut(BaseModel):
     value_chain_stage_code: str | None
     forward_trace: dict | None
     reverse_trace: dict | None
+    recommendation_level: str | None
+    automation_levels: list[str] | None
+    target_domain: str | None
+    recommendation_reason: str | None
+    l2_l4_difference: str | None
     published: bool
     created_at: datetime
 
@@ -381,6 +403,12 @@ class LandingPointCreate(BaseModel):
     vehicle_function_id: uuid.UUID
     domain: str  # vocab name; created on the fly (REQ-TECH-02)
     name: str
+    role_description: str | None = None
+
+
+class LandingPointUpdate(BaseModel):
+    name: str | None = Field(default=None, min_length=1)
+    domain: str | None = Field(default=None, min_length=1)
     role_description: str | None = None
 
 
@@ -399,7 +427,7 @@ class LandingPointOut(BaseModel):
 class StandardUpsert(BaseModel):
     phase: Phase
     constraint_type: ConstraintType
-    requirement_text: str | None = None
+    requirement_text: str | None = Field(...)
 
 
 class StandardOut(BaseModel):
@@ -413,19 +441,20 @@ class StandardOut(BaseModel):
 
 class StandardGrid(BaseModel):
     cells: list[StandardOut]
-    # full 3x3 grid: missing cells mean 留空 (REQ-STD-02), returned as None text
+    # Only persisted cells are returned. Missing = not filled; a persisted row
+    # with requirement_text=None = explicitly reviewed as having no content.
 
 
 class AssessmentCreate(BaseModel):
-    funnel_step: int = Field(ge=1, le=4)
-    score_business: int = Field(ge=1, le=5)
-    score_maturity: int = Field(ge=1, le=5)
-    score_moat: int = Field(ge=1, le=5)
-    score_supply_chain: int = Field(ge=1, le=5)
-    score_feasibility: int = Field(ge=1, le=5)
+    model_config = ConfigDict(extra="forbid")
+    funnel_step: int = Field(strict=True, ge=1, le=4)
+    score_business: int = Field(strict=True, ge=1, le=5)
+    score_maturity: int = Field(strict=True, ge=1, le=5)
+    score_moat: int = Field(strict=True, ge=1, le=5)
+    score_supply_chain: int = Field(strict=True, ge=1, le=5)
+    score_feasibility: int = Field(strict=True, ge=1, le=5)
     classification: Classification
     strategy_note: str | None = None
-    operator_subject: str = "local-admin"
 
 
 class AssessmentOut(BaseModel):
@@ -442,9 +471,108 @@ class AssessmentOut(BaseModel):
     score_total: int
     classification: str
     strategy_note: str | None
+    score_rationales: dict[str, str] | None = None
+    funnel_snapshot: dict | None = None
     operator_subject: str | None
     assessed_at: datetime
     is_current: bool
+
+
+class StrategyScoreDraft(BaseModel):
+    score: int | None
+    rationale: str | None
+
+
+class StrategyScoreDrafts(BaseModel):
+    business: StrategyScoreDraft
+    maturity: StrategyScoreDraft
+    moat: StrategyScoreDraft
+    supply_chain: StrategyScoreDraft
+    feasibility: StrategyScoreDraft
+
+
+class StrategyFunnelPatch(BaseModel):
+    """One-stage-at-a-time edits to the strategic funnel work record."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    scan_scope: str | None = None
+    scan_sources: list[str] | None = None
+    tier1_current_business_relation: str | None = None
+    tier1_future_business_relation: str | None = None
+    valuable_role: str | None = None
+    adaptation_decision: Literal["pass", "reject"] | None = None
+    adaptation_reason: str | None = None
+    score_business: int | None = Field(default=None, strict=True, ge=1, le=5)
+    rationale_business: str | None = None
+    score_maturity: int | None = Field(default=None, strict=True, ge=1, le=5)
+    rationale_maturity: str | None = None
+    score_moat: int | None = Field(default=None, strict=True, ge=1, le=5)
+    rationale_moat: str | None = None
+    score_supply_chain: int | None = Field(default=None, strict=True, ge=1, le=5)
+    rationale_supply_chain: str | None = None
+    score_feasibility: int | None = Field(default=None, strict=True, ge=1, le=5)
+    rationale_feasibility: str | None = None
+    classification: Classification | None = None
+    strategy_note: str | None = None
+    finalize: bool = Field(default=False, strict=True)
+
+    @field_validator(
+        "scan_scope",
+        "tier1_current_business_relation",
+        "tier1_future_business_relation",
+        "valuable_role",
+        "adaptation_reason",
+        "rationale_business",
+        "rationale_maturity",
+        "rationale_moat",
+        "rationale_supply_chain",
+        "rationale_feasibility",
+        "strategy_note",
+        mode="before",
+    )
+    @classmethod
+    def _strip_optional_text(cls, value):
+        return value.strip() if isinstance(value, str) else value
+
+    @field_validator("scan_sources")
+    @classmethod
+    def _strip_sources(cls, value: list[str] | None) -> list[str] | None:
+        if value is None:
+            return None
+        return [source.strip() for source in value]
+
+
+class StrategyFunnelOut(BaseModel):
+    tech_landing_point_id: uuid.UUID
+    current_step: Literal[
+        "pool_entry_blocked",
+        "industry_scan",
+        "tier1_adaptation",
+        "scoring",
+        "classification",
+        "ready_to_finalize",
+        "rejected",
+        "complete",
+    ]
+    pool_eligible: bool
+    deployment_boundary_evidence_ids: list[uuid.UUID]
+    scan_scope: str | None
+    scan_sources: list[str]
+    tier1_current_business_relation: str | None
+    tier1_future_business_relation: str | None
+    valuable_role: str | None
+    adaptation_decision: Literal["pass", "reject"] | None
+    adaptation_reason: str | None
+    score_drafts: StrategyScoreDrafts
+    score_total: int | None
+    classification: Classification | None
+    strategy_note: str | None
+    finalized_assessment_id: uuid.UUID | None
+    finalized_at: datetime | None
+    updated_by: str | None
+    updated_at: datetime | None
+    latest_assessment: AssessmentOut | None
 
 
 class AuditOut(BaseModel):
@@ -453,8 +581,10 @@ class AuditOut(BaseModel):
     entity_type: str
     entity_id: uuid.UUID
     field_name: str
-    machine_value: dict | list | str | None
-    human_value: dict | list | str | None
+    machine_value: dict | list | str | int | float | bool | None
+    human_value: dict | list | str | int | float | bool | None
+    old_value: dict | list | str | int | float | bool | None = None
+    new_value: dict | list | str | int | float | bool | None = None
     operator_subject: str
     operator_role: str
     corrected_at: datetime
@@ -462,6 +592,8 @@ class AuditOut(BaseModel):
 
 class TagSuggestion(BaseModel):
     suggested_tags: list[str]
+    value_chain_stage_code: str | None = None
+    signal_type_code: str | None = None
     source: str = "jieba-frequency"
 
 
@@ -481,22 +613,156 @@ class CaptureResult(BaseModel):
     document: DocumentRawOut | None = None
 
 
+class CaptureJobOut(BaseModel):
+    """Durable capture job state returned by the asynchronous capture API."""
+
+    id: uuid.UUID
+    submission_id: uuid.UUID
+    status: Literal["queued", "running", "succeeded", "failed", "cancelled"]
+    stage: Literal["queued", "fetching", "processing", "completed", "failed", "cancelled"]
+    attempt_count: int
+    created_at: datetime
+    updated_at: datetime
+    started_at: datetime | None = None
+    heartbeat_at: datetime | None = None
+    finished_at: datetime | None = None
+    signal_id: uuid.UUID | None = None
+    error: str | None = None
+    result: CaptureResult | None = None
+
+
+class OverviewWeeklyNew(BaseModel):
+    """Rows created since Monday 00:00 UTC of the current week, through as_of_utc."""
+
+    signals: int = Field(description="eea_signal.created_at in the current UTC calendar week")
+    tech_themes: int = Field(description="eea_tech_theme.created_at in the current UTC calendar week")
+    demand_points: int = Field(description="eea_demand_point.created_at in the current UTC calendar week")
+    vehicle_functions: int = Field(description="eea_vehicle_function.created_at in the current UTC calendar week")
+    landing_points: int = Field(description="eea_tech_landing_point.created_at in the current UTC calendar week")
+    strategic_assessments: int = Field(description="Assessment versions by assessed_at in the current UTC calendar week")
+    documents: int = Field(description="eea_document.created_at in the current UTC calendar week")
+
+
+class OverviewStrategyFunnelCounts(BaseModel):
+    """Exclusive counts of landing points by their current persisted funnel step."""
+
+    industry_scan: int = Field(description="Eligible landing points whose current step is industry_scan")
+    tier1_adaptation: int = Field(description="Eligible landing points whose current step is tier1_adaptation")
+    scoring: int = Field(description="Eligible, passed Tier1 landing points whose current step is scoring")
+    classification: int = Field(
+        description="Landing points at classification, ready_to_finalize, or complete; counted once per landing point"
+    )
+    rejected: int = Field(description="Landing points whose current Tier1 decision is reject")
+    pool_entry_blocked: int = Field(description="Landing points without a substantive deployment-boundary standard")
+
+
 class OverviewStats(BaseModel):
-    signals: int
-    signals_pending_review: int
-    tech_themes: int
-    demand_points: int
-    vehicle_functions: int
-    landing_points: int
-    funnel_pool: int
+    """Live counts. Entity totals count rows; source count is distinct normalized URLs."""
+
+    signals: int = Field(description="All persisted signal rows, including any archived records")
+    signal_sources: int = Field(description="Distinct non-empty Signal.url_normalized values across all signal rows")
+    signals_retained: int = Field(description="Signals with evidence_status_code='retained'")
+    signals_pending_review: int = Field(description="Signals with evidence_status_code='pending_review'")
+    signals_fetching: int = Field(description="Signals with evidence_status_code='fetching'")
+    signals_fetch_failed: int = Field(description="Signals with evidence_status_code='fetch_failed'")
+    signals_archived: int = Field(description="Signals with evidence_status_code='archived'")
+    demand_points_pending_review: int = Field(description="Demand points with review_status='pending'")
+    capture_jobs_open: int = Field(description="Capture jobs whose persisted status is queued or running")
+    capture_jobs_failed: int = Field(description="Capture jobs whose current persisted status is failed")
+    documents_failed_ingest: int = Field(
+        description=(
+            "Documents with persisted ingest_status='failed'; this is the retryable document-ingest todo count"
+        )
+    )
+    tech_themes: int = Field(description="All persisted theme rows")
+    demand_points: int = Field(description="All persisted demand-point rows")
+    vehicle_functions: int = Field(description="All persisted vehicle-function rows, published or draft")
+    landing_points: int = Field(description="All persisted technology landing-point rows")
+    substantive_standards: int = Field(
+        description="Standards with non-NULL, non-whitespace requirement_text; explicit blanks are excluded"
+    )
+    funnel_pool: int = Field(description="Current StrategicAssessment versions, one per currently assessed landing point")
+    weekly_window_start_utc: datetime = Field(description="Inclusive Monday 00:00 UTC start of the current calendar week")
+    as_of_utc: datetime = Field(description="UTC instant through which weekly-created counts are measured")
+    weekly_new: OverviewWeeklyNew
+    strategy_funnel: OverviewStrategyFunnelCounts
+
+
+class TraceDocumentOut(BaseModel):
+    """Persisted document metadata; object-reference flags do not verify blob readability."""
+
+    id: uuid.UUID
+    filename: str | None
+    mime: str
+    size: int
+    sha256: str
+    ingest_status: str
+    figure_count: int
+    created_at: datetime
+    raw_object_reference_present: bool = Field(
+        description="True when the document row has an object key; use the document API to verify/read the blob"
+    )
+    canonical_object_reference_present: bool = Field(
+        description="True when the document row has a canonical Markdown object key; does not verify blob readability"
+    )
+    endpoint: str
+
+
+class TraceSignalOut(SignalOut):
+    """Signal source/evidence fields derived from the signal and document rows."""
+
+    trace_relationships: list[Literal["theme_member", "demand_evidence"]]
+    body_reference_present: bool = Field(
+        description="True when body_object_key is stored; the body endpoint still verifies object availability"
+    )
+    archive_reference_present: bool = Field(
+        description="True when snapshot_html_object_key is stored; the archive endpoint verifies object availability"
+    )
+    is_archived: bool = Field(
+        description="True only when the persisted evidence_status_code is 'archived'"
+    )
+    body_endpoint: str | None
+    archive_endpoint: str | None
+    figures_endpoint: str | None
+    document: TraceDocumentOut | None
+
+
+class TraceCompleteness(BaseModel):
+    """Structural chain completeness; optional file/image artifacts are surfaced separately."""
+
+    complete: bool = Field(description="True only when no chain stage or cited evidence reference is missing")
+    present_stages: list[Literal["landing_point", "vehicle_function", "demand_point", "theme", "signals"]]
+    missing_stages: list[Literal["landing_point", "vehicle_function", "demand_point", "theme", "signals"]]
+    unresolved_evidence_signal_ids: list[str] = Field(
+        description="Persisted demand evidence IDs that do not resolve to a signal row"
+    )
+    unresolved_document_ids: list[str] = Field(
+        description="Signal document IDs that do not resolve to a document row"
+    )
 
 
 class TraceChain(BaseModel):
-    """REQ-RULE-03: 落脚点 → 功能 → 需求点 → 主题 → 信号 分段追溯"""
+    """REQ-RULE-03 chain with persisted review, evidence, archive references and assessment history."""
+
     landing_point: LandingPointOut
     standards: list[StandardOut]
-    assessment: AssessmentOut | None
+    assessment: AssessmentOut | None = Field(description="Current assessment only; null if no current version exists")
+    assessment_versions: list[AssessmentOut] = Field(
+        description="All retained assessment versions ordered by version; is_current identifies the current row"
+    )
     vehicle_function: FunctionOut | None
     demand_point: DemandOut | None
     theme: ThemeOut | None
-    signals: list[SignalOut]
+    signals: list[TraceSignalOut]
+    demand_review_status: str | None = Field(description="Persisted DemandPoint.review_status")
+    demand_cross_validation_conclusion: str | None = Field(
+        description="Persisted DemandPoint.cross_validation.conclusion, if present"
+    )
+    function_published: bool | None = Field(description="Persisted VehicleFunction.published")
+    basis_freshness: Literal["unknown_untracked"] = Field(
+        description=(
+            "Unknown: DemandPoint has no updated_at/confirmed_at baseline, so the API cannot "
+            "reliably determine whether the evidence basis changed after review or assessment"
+        )
+    )
+    completeness: TraceCompleteness

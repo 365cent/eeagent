@@ -1,10 +1,7 @@
 import MiniSearch from 'minisearch'
 import { mainMenuEntries } from '@/config/menu'
 import { utilityPages } from '@/config/utility-pages'
-import { demandPoints, landingPoints } from '@/mocks/demands'
 import { getLivePlatformSearchData } from '@/lib/live-platform-data'
-import { signals } from '@/mocks/signals'
-import { themes } from '@/mocks/themes'
 import type { AppRouteOptions } from '@/types/platform'
 
 export type PlatformSearchKind = 'nav' | 'signal' | 'theme' | 'demand' | 'landing' | 'action'
@@ -39,25 +36,10 @@ export function platformSearchKindLabel(kind: PlatformSearchKind): string {
 
 function buildDocuments(): PlatformSearchDocument[] {
   const live = getLivePlatformSearchData()
-  const signalSource = live?.signals?.length ? live.signals : signals
-  const themeSource: { id: string; name: string; note: string; count: number; sources: number }[] =
-    live?.themes?.length
-      ? live.themes.map((theme) => ({
-          id: theme.id,
-          name: theme.name,
-          note: theme.note,
-          count: theme.count,
-          sources: theme.sources,
-        }))
-      : themes.map((theme, index) => ({
-          id: `mock-${index}`,
-          name: theme.name,
-          note: theme.note,
-          count: theme.count,
-          sources: theme.sources,
-        }))
-  const demandSource = live?.demands?.length ? live.demands : demandPoints
-  const landingSource = live?.landings?.length ? live.landings : landingPoints
+  const signalSource = live?.signals ?? []
+  const themeSource = live?.themes ?? []
+  const demandSource = live?.demands ?? []
+  const landingSource = live?.landings ?? []
 
   const docs: PlatformSearchDocument[] = []
 

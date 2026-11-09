@@ -10,16 +10,6 @@ import {
 import type { SignalUpdatePayload, TagAssignmentPayload, ThemeAssignmentPayload } from '@/lib/api/types'
 import { eeaQueryKeys } from '@/hooks/use-eea-queries'
 
-async function resolveOperatorSubject(): Promise<string> {
-  try {
-    const { fetchSessionMe } = await import('@/lib/api/eea-api')
-    const me = await fetchSessionMe()
-    return me.ip || 'local-admin'
-  } catch {
-    return 'local-admin'
-  }
-}
-
 export function useSignalMutations(signalId: string | undefined) {
   const queryClient = useQueryClient()
 
@@ -32,32 +22,30 @@ export function useSignalMutations(signalId: string | undefined) {
     }
     await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.themes })
     await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.vocabUsage })
+    await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.vocab('tech_tag') })
   }
 
   const patchClassification = useMutation({
-    mutationFn: async (input: Pick<SignalUpdatePayload, 'value_chain_stage_code' | 'signal_type_code'>) => {
+    mutationFn: (input: Pick<SignalUpdatePayload, 'value_chain_stage_code' | 'signal_type_code'>) => {
       if (!signalId) throw new Error('missing signal id')
-      const operator_subject = await resolveOperatorSubject()
-      return patchSignal(signalId, { ...input, operator_subject })
+      return patchSignal(signalId, input)
     },
     onSuccess: () => void invalidate(),
   })
 
   const setTags = useMutation({
-    mutationFn: async (tagNames: string[]) => {
+    mutationFn: (tagNames: string[]) => {
       if (!signalId) throw new Error('missing signal id')
-      const operator_subject = await resolveOperatorSubject()
-      const payload: TagAssignmentPayload = { tag_names: tagNames, operator_subject }
+      const payload: TagAssignmentPayload = { tag_names: tagNames }
       return putSignalTags(signalId, payload)
     },
     onSuccess: () => void invalidate(),
   })
 
   const setTheme = useMutation({
-    mutationFn: async (techThemeId: string | null) => {
+    mutationFn: (techThemeId: string | null) => {
       if (!signalId) throw new Error('missing signal id')
-      const operator_subject = await resolveOperatorSubject()
-      const payload: ThemeAssignmentPayload = { tech_theme_id: techThemeId, operator_subject }
+      const payload: ThemeAssignmentPayload = { tech_theme_id: techThemeId }
       return putSignalTheme(signalId, payload)
     },
     onSuccess: () => void invalidate(),

@@ -1,14 +1,41 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select, update
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.identity import OperatorIdentity, get_operator_identity
 from app.db.base import get_db
-from app.models.models import DeploymentStandard, StrategicAssessment, TechLandingPoint
-from app.schemas.schemas import AssessmentCreate, AssessmentOut
+from app.models.models import StrategicAssessment
+from app.schemas.schemas import (
+    AssessmentCreate,
+    AssessmentOut,
+    StrategyFunnelOut,
+    StrategyFunnelPatch,
+)
+from app.services.strategy_funnel import finalize_funnel, get_funnel_response, patch_funnel
 
 router = APIRouter(prefix="/strategy", tags=["strategy"])
+
+
+@router.get("/landing-points/{lp_id}/funnel", response_model=StrategyFunnelOut)
+async def get_landing_point_funnel(
+    lp_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Read the current funnel draft, gates, and latest finalized assessment."""
+    return await get_funnel_response(db, lp_id)
+
+
+@router.patch("/landing-points/{lp_id}/funnel", response_model=StrategyFunnelOut)
+async def patch_landing_point_funnel(
+    lp_id: uuid.UUID,
+    payload: StrategyFunnelPatch,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_operator_identity),
+):
+    """Save exactly one funnel step or separately finalize its assessment."""
+    return await patch_funnel(db, lp_id, payload, actor)
 
 
 @router.get("/assessments", response_model=list[AssessmentOut])
@@ -39,38 +66,14 @@ async def get_assessment(assessment_id: uuid.UUID, db: AsyncSession = Depends(ge
 
 
 @router.post("/landing-points/{lp_id}/assessments", response_model=AssessmentOut, status_code=201)
-async def create_assessment(lp_id: uuid.UUID, payload: AssessmentCreate, db: AsyncSession = Depends(get_db)):
-    """改判追加新版本：旧版本 is_current=false，新版本 version=max+1（REQ-STR-07）。"""
-    lp = await db.get(TechLandingPoint, lp_id)
-    if lp is None:
-        raise HTTPException(404, "landing point not found")
-    # 进入条件：已有部署边界记录的技术落脚点，进入筛选池（funnel-pool-entry）
-    std_count = (
-        await db.execute(
-            select(func.count(DeploymentStandard.id)).where(DeploymentStandard.tech_landing_point_id == lp_id)
-        )
-    ).scalar_one()
-    if std_count == 0:
-        raise HTTPException(422, "无部署边界记录的落脚点不得进入筛选池")
-    max_v = (
-        await db.execute(
-            select(func.max(StrategicAssessment.version)).where(
-                StrategicAssessment.tech_landing_point_id == lp_id
-            )
-        )
-    ).scalar_one()
-    next_v = (max_v or 0) + 1
-    await db.execute(
-        update(StrategicAssessment)
-        .where(StrategicAssessment.tech_landing_point_id == lp_id, StrategicAssessment.is_current)
-        .values(is_current=False)
-    )
-    a = StrategicAssessment(
-        tech_landing_point_id=lp_id, version=next_v, is_current=True, **payload.model_dump()
-    )
-    db.add(a)
-    await db.commit()
-    return a
+async def create_assessment(
+    lp_id: uuid.UUID,
+    payload: AssessmentCreate,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_operator_identity),
+):
+    """Compatibility finalizer; the payload cannot skip saved funnel gates."""
+    return await finalize_funnel(db, lp_id, actor, legacy_payload=payload)
 
 
 @router.get("/landing-points/{lp_id}/assessments/history", response_model=list[AssessmentOut])

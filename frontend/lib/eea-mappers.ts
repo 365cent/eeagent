@@ -144,8 +144,8 @@ export type LandingRow = {
   domain: string
   role: string
   standards: number
-  score: number
-  category: string
+  score: number | null
+  category: string | null
 }
 
 export function mapLandingRow(
@@ -158,8 +158,8 @@ export function mapLandingRow(
     domain: row.domain_name || '—',
     role: row.role_description ?? '—',
     standards: row.standard_count ?? 0,
-    score: assessment?.score_total ?? 0,
-    category: assessment?.classification ?? '—',
+    score: assessment?.score_total ?? null,
+    category: assessment?.classification ?? null,
   }
 }
 

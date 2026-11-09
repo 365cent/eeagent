@@ -3,15 +3,15 @@
 FastAPI + PostgreSQL 后端，实现《平台实施计划》第 3–8 节的推导链路：
 原始信号 → 技术主题 → 需求点 → 车辆功能 → 技术落脚点 → 部署标准 → 战略研判。
 
-- Schema：`docs/platform-implementation-plan.md` §4.1 基线 + 演进迁移（现行 **13 基表 + 2 视图**，Alembic 管理；0003 文档表、0005 访问留痕、0006 信号↔文档关联为计划外新增）
+- Schema：`docs/platform-implementation-plan.md` §4.1 基线 + 演进迁移（现行 **15 基表 + 2 视图**，Alembic 管理；0003 文档表、0005 访问留痕、0006 信号↔文档关联、0008 持久采集任务、0009 审计前后值、0010 功能卡与五个技术域词项、0011 需求五步证据链为计划外新增；当前 head 为 0011）
 - API 文档（服务启动后）：http://127.0.0.1:8000/docs（交互式 Swagger UI）、http://127.0.0.1:8000/llms.txt（LLM 友好全量文档）、http://127.0.0.1:8000/（极简 HTML 索引）
 - 无需安装任何系统级服务：PostgreSQL 便携版自动下载到 `backend/.pg/`（git 忽略）
 
 ### 内网访问（LAN）
 
-API 默认监听 `0.0.0.0:8000`（`API_HOST` 可覆盖），因此同一内网可直接用 `http://<本机 IPv4>:8000` 访问，例如 `http://10.215.8.74:8000`；前端按浏览器地址自动推导 API 基址。CORS 放行 localhost 与私有网段（`10.x` / `192.168.x` / `172.16-31.x`）的任意端口。
+本地开发 API 默认监听 `0.0.0.0:8000`（`API_HOST` 可覆盖），因此同一内网可用 `http://<本机 IPv4>:8000` 访问；开发前端连接该端口。生产服务单元只绑定 loopback，由 TLS 反向代理同源转发 `/api/`。CORS 放行 localhost 与私有网段（`10.x` / `192.168.x` / `172.16-31.x`）的任意端口。
 
-`POST /session/visit` 以 **客户端 IP 作为身份**（暂无登录系统），记录简化后的浏览器版本 + OS；`GET /session/history` 返回该 IP 的登录历史，个人资料页直接展示。原始 UA 仅截断保存，不做指纹。
+`POST /session/visit` 的 IP 仅用于访问留痕，不代表用户身份。生产审计写入必须经受信反向代理提供的用户和角色标识；API 只接受来自 `TRUSTED_PROXY_IPS` 的身份头。代理需移除客户端同名头并从已验证会话重设，具体用户/角色映射依部署环境配置。开发环境使用服务端配置的本地操作者。
 
 体积限制（文档）：`DOC_RAW_UPLOAD_MAX_BYTES` 与 `DOC_INGEST_MAX_BYTES` 默认各 **120 MiB**；超过上传上限返回 413，超过解析上限只存 blob（`ingest_status=skipped`）。
 
@@ -22,7 +22,7 @@ cd backend
 .venv\Scripts\python scriptsootstrap.py
 ```
 
-自动完成：下载便携 PostgreSQL → initdb → 启动（127.0.0.1:54329，仅本机）→ 建库 → Alembic 迁移 → 种子数据（封闭词表 + eFuse 验收链路数据）。
+自动完成：下载便携 PostgreSQL → initdb → 启动（127.0.0.1:54329，仅本机）→ 建库 → Alembic 迁移 → 初始化封闭参考词表与流程图确认的五个技术域；不生成合成信号或业务决策。
 
 ## 日常启动
 
@@ -52,17 +52,25 @@ cd backend
 | signals | `GET/POST /signals`（传 `document_id` 走文档来源路径）、`POST /signals/capture`（multipart 网页/HTML）、`POST /signals/{id}/assistant/messages`（证据 LLM 助手）、`GET /signals/{id}/body`、`GET /signals/{id}/archive`（SingleFile 回放）、`PATCH /signals/{id}`、`PUT /signals/{id}/tags`、`POST /signals/{id}/auto-aggregate`（文档来源信号 409）、`PUT /signals/{id}/theme`；`SignalDetail` 含 `linked_demand_points` | REQ-SIG-01…11 |
 | vocab | `GET /ref-codes`、`GET/POST /vocab`、`GET /vocab/usage` | REQ-TAG-01…06 |
 | themes | `GET/POST /themes`（含信号频次/来源数指标） | REQ-DEM-02/14/15 |
-| demands | `GET/POST/PATCH /demands` | REQ-DEM-01…13 |
-| functions | `GET/POST/PATCH /functions`（发布受正向+反向校验门控） | REQ-MAP-01…06 |
-| landing-points | `GET/POST /landing-points` | REQ-TECH-01…04 |
+| demands | `GET/POST/PATCH /demands`（五步逐项引用留存信号；确认要求不同来源主体、渠道及技术标签证据，并仅管理员可确认） | REQ-DEM-01…13 |
+| functions | `GET/POST/PATCH /functions`（复核当前需求证据；发布受正向+反向校验门控） | REQ-MAP-01…06 |
+| landing-points | `GET/POST/PATCH /landing-points`（更新角色/技术域时写入前后值审计） | REQ-TECH-01…04 |
 | panorama | `GET /panorama`（图2-5 技术全景：环节 → 需求点 → 功能 → 落脚点，含域与标准数） | REQ-TECH-04 |
-| standards | `GET/PUT /landing-points/{id}/standards`（3×3 网格，空格留空） | REQ-STD-01…03 |
+| standards | `GET/PUT /landing-points/{id}/standards`（3×3 网格；缺行=未填写、NULL=明确留空，写入必须显式传文本或 NULL） | REQ-STD-01…03 |
 | strategy | `GET /strategy/assessments`、`POST /strategy/landing-points/{id}/assessments`（版本追加）、`.../history` | REQ-STR-01…07 |
 | trace | `GET /trace/landing-points/{id}`、`GET /audit` | REQ-RULE-02/03 |
 | overview | `GET /overview` | REQ-UI-02 |
 | docs（根路径） | `GET /llms.txt`（LLM 友好全量文档：每个操作内联摘要、参数与请求体/成功响应的**全部字段**——类型/格式/枚举值/取值范围/默认值/必填可选，$ref 字段展开一层，免二次拉取）、`GET /`（极简 HTML 索引：分组路由清单+计数与 `/llms.txt`、`/docs`、`/openapi.json` 三链接，无 JS/外部资源）、`GET /docs`、`GET /openapi.json` | —（前两者由 `/openapi.json` 请求时实时渲染并缓存，无手工路由清单，不会与代码漂移；后两者为 FastAPI 默认端点） |
 
-### POST /api/v1/signals/capture — 网页采集（multipart）
+### POST /api/v1/capture — 统一采集入口（multipart）
+
+生产页面采集由用户侧的 Go/浏览器工具完成网页读取，再上传原始 URL 与 HTML 文件。字段 `url` + `file` 接受 SingleFile 快照，`submission_id` 为可选 UUID；服务端支持此字段时，相同 ID 和请求摘要安全返回既有结果，不同请求复用 ID 返回 409。也支持上传文档文件及 `channel_code`、`publisher`、`source_label` 元数据。响应为 `CaptureResult`（含 `signal`，文档时另含 `document`）。文件大小受 `DOC_RAW_UPLOAD_MAX_BYTES` 限制。
+
+生产模式禁用 URL-only 服务端抓取；只有本机开发设置 `CAPTURE_SERVER_FETCH_ENABLED=true` 才尝试该路径，`APP_ENV=production` 时无条件拒绝。公网 URL 必须通过用户侧浏览器工具上传快照。
+
+异步长任务使用 `POST /api/v1/capture/jobs`（multipart，必填稳定 `submission_id`）立即持久化上传对象和任务并返回 202。客户端用 `GET /api/v1/capture/jobs/{id}` 轮询；失败任务可 `POST .../retry`，尚未领取的任务可 `POST .../cancel`。采集处理由独立进程 `python -m app.worker` 执行；该入口和 systemd 模板尚未完成 Linux 生命周期验收。旧 `POST /capture` 同步接口继续兼容。任务当前尚未按可信用户隔离，权限接入见 OPS-03。
+
+### POST /api/v1/signals/capture — 旧版网页采集端点（multipart）
 
 上传 SingleFile 归档 HTML，服务端落盘快照、抽取正文/元数据并走共用创建管线（预打标签 + 自动归集，`app/api/v1/signals.py:234`）。
 

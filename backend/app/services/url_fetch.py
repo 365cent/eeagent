@@ -36,6 +36,10 @@ class FetchError(RuntimeError):
     """User-facing fetch failure; `message` goes straight into a 422 detail."""
 
 
+class RetryableFetchError(FetchError):
+    """Transient network/upstream failure eligible for bounded worker retry."""
+
+
 @dataclass(slots=True)
 class FetchedPage:
     data: bytes
@@ -72,6 +76,7 @@ async def fetch_url(url: str) -> FetchedPage:
         ) as client:
             async with client.stream("GET", url) as response:
                 _check_size(response, cap)
+                response.raise_for_status()
                 chunks: list[bytes] = []
                 received = 0
                 async for chunk in response.aiter_bytes():
@@ -87,9 +92,12 @@ async def fetch_url(url: str) -> FetchedPage:
     except FetchError:
         raise
     except httpx.HTTPStatusError as exc:
-        raise FetchError(f"目标站点返回 {exc.response.status_code}，无法抓取") from exc
+        message = f"目标站点返回 {exc.response.status_code}，无法抓取"
+        if exc.response.status_code == 429 or exc.response.status_code >= 500:
+            raise RetryableFetchError(message) from exc
+        raise FetchError(message) from exc
     except httpx.HTTPError as exc:
-        raise FetchError(f"抓取失败：{exc.__class__.__name__}") from exc
+        raise RetryableFetchError(f"抓取失败：{exc.__class__.__name__}") from exc
     if not data:
         raise FetchError("目标页面返回空内容（可能是 JS 渲染页），请用浏览器扩展采集")
     return FetchedPage(

@@ -8,14 +8,36 @@ default backend/.pg/objects); the DB keeps only the object reference
 from __future__ import annotations
 
 import hashlib
+import os
+import tempfile
 from pathlib import Path
 
 from app.core.config import get_settings
-from app.services.tagging import sha256_text
 
 
 def _object_path(key: str) -> Path:
-    return Path(get_settings().object_dir) / key
+    root = Path(get_settings().object_dir).resolve()
+    path = (root / key).resolve()
+    if not path.is_relative_to(root):
+        raise ValueError("object key must stay inside OBJECT_DIR")
+    return path
+
+
+def _atomic_write(path: Path, data: bytes) -> None:
+    """Write a complete object before publishing its content-addressed path."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temporary, path)
+    finally:
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
 
 
 def sha256_bytes(data: bytes) -> str:
@@ -30,8 +52,7 @@ def save_bytes(data: bytes, *, folder: str, ext: str) -> str:
     same file, so concurrent duplicate writes cannot diverge."""
     key = f"{folder}/{sha256_bytes(data)}.{ext}"
     path = _object_path(key)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(data)
+    _atomic_write(path, data)
     return key
 
 
@@ -45,11 +66,7 @@ def load_bytes(key: str) -> bytes | None:
 
 def save_body(text: str) -> str:
     """Persist a snapshot body and return its content-addressed object key."""
-    key = f"signals/{sha256_text(text)}.txt"
-    path = _object_path(key)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(text, encoding="utf-8")
-    return key
+    return save_bytes(text.encode("utf-8"), folder="signals", ext="txt")
 
 
 def load_body(key: str) -> str | None:

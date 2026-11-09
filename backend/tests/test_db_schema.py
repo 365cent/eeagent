@@ -10,7 +10,12 @@ import psycopg
 import pytest
 
 from tests.conftest import SETTINGS
-from tests.support import create_confirmed_demand, create_function, create_landing_point
+from tests.support import (
+    create_confirmed_demand,
+    create_function,
+    create_landing_point,
+    publish_function,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -30,10 +35,12 @@ EXPECTED_TABLES = {
     "eea_correction_audit",
     "eea_document",
     "eea_access_log",
+    "eea_capture_job",
     "eea_vehicle_function",
     "eea_tech_landing_point",
     "eea_deployment_standard",
     "eea_strategic_assessment",
+    "eea_strategic_funnel",
 }
 
 EXPECTED_VIEWS = {"eea_v_tech_theme_metrics", "eea_v_tech_theme_display_tags"}
@@ -44,9 +51,8 @@ def _sync():
 
 
 def test_migration_creates_exactly_the_enumerated_tables_and_views():
-    """SCHEMA-PROPOSAL-BASIS: the phase-1 set is 11 base tables plus the W2
-    raw-document table (eea_document) + access history (eea_access_log) — 13 — plus 2 views (alembic_version
-    aside) — no others."""
+    """Schema inventory includes the original 11 tables, raw documents,
+    access history and the durable capture queue, plus the two views."""
     with _sync() as conn:
         rows = conn.execute(
             "SELECT table_name, table_type FROM information_schema.tables "
@@ -64,6 +70,7 @@ async def test_two_current_assessments_for_one_landing_point_are_impossible(clie
     one is_current row per landing point."""
     demand = await create_confirmed_demand(client)
     func = await create_function(client, demand["id"])
+    await publish_function(client, func["id"])
     lp = await create_landing_point(client, func["id"])
 
     # raw SQL must supply the id: the ORM's uuid default is Python-side
@@ -86,6 +93,7 @@ async def test_score_total_is_generated_not_writable(client):
     column — direct writes are rejected (SQLSTATE 428C9, generated_always_violation)."""
     demand = await create_confirmed_demand(client)
     func = await create_function(client, demand["id"])
+    await publish_function(client, func["id"])
     lp = await create_landing_point(client, func["id"])
 
     insert_sql = (

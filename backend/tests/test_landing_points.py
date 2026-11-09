@@ -3,14 +3,21 @@ vocabulary, role recording (REQ-TECH-01/02/03, SCHEMA-LANDING-DOMAIN)."""
 
 import pytest
 
-from tests.support import create_confirmed_demand, create_function, create_landing_point
+from tests.support import (
+    create_confirmed_demand,
+    create_function,
+    create_landing_point,
+    publish_function,
+)
 
 pytestmark = pytest.mark.anyio
 
 
 async def _function(client):
     demand = await create_confirmed_demand(client)
-    return await create_function(client, demand["id"])
+    func = await create_function(client, demand["id"])
+    await publish_function(client, func["id"])
+    return func
 
 
 async def test_function_decomposes_into_multiple_landing_points(client):
@@ -77,6 +84,37 @@ async def test_landing_point_requires_existing_function(client):
     assert r.status_code == 404
 
 
+async def test_landing_point_requires_published_function(client):
+    demand = await create_confirmed_demand(client)
+    func = await create_function(client, demand["id"])
+    r = await client.post(
+        "/api/v1/landing-points",
+        json={
+            "vehicle_function_id": func["id"],
+            "name": "eFuse",
+            "domain": "硬件",
+        },
+    )
+    assert r.status_code == 422
+    assert "已发布功能" in r.json()["detail"]
+
+
+async def test_demand_review_change_invalidates_published_functions(client):
+    demand = await create_confirmed_demand(client)
+    func = await create_function(client, demand["id"])
+    await publish_function(client, func["id"])
+    r = await client.patch(f"/api/v1/demands/{demand['id']}", json={"review_status": "pending"})
+    assert r.status_code == 200
+    current_function = (await client.get(f"/api/v1/functions/{func['id']}" )).json()
+    assert current_function["published"] is False
+    r = await client.post(
+        "/api/v1/landing-points",
+        json={"vehicle_function_id": func["id"], "name": "eFuse", "domain": "硬件"},
+    )
+    assert r.status_code == 422
+    assert "已发布功能" in r.json()["detail"]
+
+
 async def test_landing_point_detail_and_404(client):
     func = await _function(client)
     lp = await create_landing_point(client, func["id"])
@@ -85,3 +123,35 @@ async def test_landing_point_detail_and_404(client):
     assert r.json()["id"] == lp["id"]
     r = await client.get("/api/v1/landing-points/00000000-0000-0000-0000-0000000000ff")
     assert r.status_code == 404
+
+
+async def test_landing_point_patch_updates_domain_and_records_audit(client):
+    lp = await create_landing_point(client, (await _function(client))["id"])
+    response = await client.patch(
+        f"/api/v1/landing-points/{lp['id']}",
+        json={
+            "name": "配电保护执行器",
+            "domain": "通信",
+            "role_description": "提供状态回传与保护执行。",
+        },
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["name"] == "配电保护执行器"
+    assert response.json()["domain_name"] == "通信"
+    assert response.json()["role_description"] == "提供状态回传与保护执行。"
+
+    audit = (await client.get("/api/v1/audit", params={"entity_id": lp["id"]})).json()
+    changes = {row["field_name"]: row for row in audit}
+    assert changes["name"]["old_value"] == lp["name"]
+    assert changes["name"]["new_value"] == "配电保护执行器"
+    assert changes["domain"]["old_value"] == lp["domain_name"]
+    assert changes["domain"]["new_value"] == "通信"
+    assert changes["role_description"]["new_value"] == "提供状态回传与保护执行。"
+
+
+async def test_landing_point_patch_rejects_blank_name(client):
+    lp = await create_landing_point(client, (await _function(client))["id"])
+    response = await client.patch(f"/api/v1/landing-points/{lp['id']}", json={"name": "  "})
+    assert response.status_code == 422
+    detail = (await client.get(f"/api/v1/landing-points/{lp['id']}")).json()
+    assert detail["name"] == lp["name"]

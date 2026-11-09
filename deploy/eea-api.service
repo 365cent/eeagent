@@ -1,0 +1,25 @@
+[Unit]
+Description=EEA FastAPI service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=eea
+Group=eea
+WorkingDirectory=/opt/eea/current/backend
+EnvironmentFile=/etc/eea/eea-api.env
+Environment=PYTHONUNBUFFERED=1
+ExecStart=/opt/eea/current/backend/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=30s
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/eea/objects
+
+[Install]
+WantedBy=multi-user.target

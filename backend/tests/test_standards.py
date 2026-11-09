@@ -2,9 +2,17 @@
 cells and the no-fabrication rule (REQ-STD-01/02/03,
 std-empty-cell-representation, SCHEMA-STD-GRID)."""
 
+import asyncio
+
 import pytest
 
-from tests.support import create_confirmed_demand, create_function, create_landing_point, put_standard
+from tests.support import (
+    create_confirmed_demand,
+    create_function,
+    create_landing_point,
+    publish_function,
+    put_standard,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -15,6 +23,7 @@ CONSTRAINT_TYPES = ["工程化", "经济性", "安全合规"]
 async def _lp(client):
     demand = await create_confirmed_demand(client)
     func = await create_function(client, demand["id"])
+    await publish_function(client, func["id"])
     return await create_landing_point(client, func["id"])
 
 
@@ -52,6 +61,17 @@ async def test_invalid_phase_or_constraint_type_rejected(client):
     assert grid["cells"] == []
 
 
+async def test_cell_requires_explicit_text_or_null(client):
+    lp = await _lp(client)
+    response = await client.put(
+        f"/api/v1/landing-points/{lp['id']}/standards",
+        json={"phase": "运营", "constraint_type": "经济性"},
+    )
+    assert response.status_code == 422
+    grid = (await client.get(f"/api/v1/landing-points/{lp['id']}/standards")).json()
+    assert grid["cells"] == []
+
+
 async def test_cell_is_upserted_in_place_never_duplicated(client):
     """SCHEMA-STD-GRID: at most one row per (phase, constraint_type)."""
     lp = await _lp(client)
@@ -82,6 +102,24 @@ async def test_blank_cell_upsert_is_idempotent(client):
     assert len(second["cells"]) == 1
 
 
+async def test_concurrent_first_writes_to_one_cell_are_serialized(client):
+    lp = await _lp(client)
+    responses = await asyncio.gather(
+        client.put(
+            f"/api/v1/landing-points/{lp['id']}/standards",
+            json={"phase": "制造", "constraint_type": "安全合规", "requirement_text": "甲"},
+        ),
+        client.put(
+            f"/api/v1/landing-points/{lp['id']}/standards",
+            json={"phase": "制造", "constraint_type": "安全合规", "requirement_text": "乙"},
+        ),
+    )
+    assert [response.status_code for response in responses] == [200, 200]
+    cells = _cells((await client.get(f"/api/v1/landing-points/{lp['id']}/standards")).json())
+    assert len(cells) == 1
+    assert cells[("制造", "安全合规")]["requirement_text"] in {"甲", "乙"}
+
+
 async def test_null_put_on_filled_cell_keeps_the_row(client):
     """A filled cell set to null stays as an explicit blank — the row is
     never deleted, so 留空 remains distinguishable from 尚未填写."""
@@ -91,6 +129,21 @@ async def test_null_put_on_filled_cell_keeps_the_row(client):
     cells = _cells(grid)
     assert ("设计", "经济性") in cells
     assert cells[("设计", "经济性")]["requirement_text"] is None
+
+
+async def test_standard_correction_records_before_after_actor_and_time(client):
+    lp = await _lp(client)
+    first = await put_standard(client, lp["id"], "设计", "工程化", "初版标准")
+    standard_id = _cells(first)[("设计", "工程化")]["id"]
+    await put_standard(client, lp["id"], "设计", "工程化", "修订标准")
+    audit = (
+        await client.get("/api/v1/audit", params={"entity_id": standard_id})
+    ).json()
+    assert len(audit) == 1
+    assert audit[0]["old_value"] == "初版标准"
+    assert audit[0]["new_value"] == "修订标准"
+    assert audit[0]["operator_subject"] == "eea-test-actor"
+    assert audit[0]["corrected_at"]
 
 
 async def test_no_rows_are_fabricated_for_untouched_cells(client):

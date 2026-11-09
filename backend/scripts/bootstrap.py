@@ -5,7 +5,7 @@ Usage: uv run python scripts/bootstrap.py   (or: .venv\\Scripts\\python scripts\
 1. Downloads portable PostgreSQL binaries into backend/.pg/ (no Windows service, no admin).
 2. initdb a data dir, start postgres on 127.0.0.1:54329.
 3. Create role/db `eea`.
-4. Run Alembic migrations + seed (closed vocabularies + eFuse harness).
+4. Run Alembic migrations + seed (closed vocabularies and five confirmed technical domains only).
 """
 import os
 import subprocess

@@ -1,12 +1,13 @@
 'use client'
 
 import { useState } from 'react'
-import { Button, Card, Col, Progress, Row, Space, Table, Tag, Typography } from 'antd'
+import { Button, Card, Col, Row, Space, Table, Tag, Typography } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import { PageHeader } from '@/components/shared/page-header'
 import { PlatformEmptyState } from '@/components/shared/empty-state'
 import { MetricHint } from '@/components/shared/metric-hint'
-import { useDemandRows, useRefCodeMaps, useSignalsList, useThemeRows, useVocabUsage } from '@/hooks/use-eea-queries'
+import { DemandPointWorkbench } from '@/components/topics/demand-point-workbench'
+import { useRefCodeMaps, useSignalsList, useThemeRows, useVocabUsage } from '@/hooks/use-eea-queries'
 import { labelFor, shortStageLabel } from '@/lib/eea-mappers'
 import { metricsFootnote, signalFrequencyHint, sourceCountHint } from '@/lib/metrics-copy'
 import type { ThemeDetail } from '@/lib/api/types'
@@ -42,13 +43,9 @@ function ThemeSignals({ themeId, onNavigate }: { themeId: string; onNavigate: Na
 
 export function TopicsView({ onNavigate }: { onNavigate: NavigateFn }) {
   const { maps } = useRefCodeMaps()
-  const { rows: demandRows, isSuccess: demandsReady, isError: demandsError } = useDemandRows()
   const { data: themes, rows: themeRows, isSuccess: themesReady } = useThemeRows()
   const vocab = useVocabUsage()
   const [openThemeId, setOpenThemeId] = useState<string | null>(null)
-
-  const demandSource = demandsReady || demandsError ? demandRows : []
-  const showDemandEmpty = (demandsReady || demandsError) && demandSource.length === 0
 
   return (
     <>
@@ -172,68 +169,7 @@ export function TopicsView({ onNavigate }: { onNavigate: NavigateFn }) {
           ]}
         />
       </Card>
-      <Card className="panel-card view-card" title="需求点工作台">
-        {showDemandEmpty ? (
-          <PlatformEmptyState title="暂无需求点" description="主题归集并完成交叉验证后，需求点会出现在这里。" />
-        ) : (
-          <Table
-            rowKey="key"
-            pagination={false}
-            dataSource={demandSource}
-            columns={[
-              {
-                title: '需求点',
-                dataIndex: 'name',
-                render: (value: string, record) => (
-                  <div>
-                    <Text strong>{value}</Text>
-                    <div className="signal-meta">{record.evidence}</div>
-                  </div>
-                ),
-              },
-              { title: '利益相关方', dataIndex: 'stage' },
-              {
-                title: <MetricHint label="信号频次" hint={signalFrequencyHint} />,
-                dataIndex: 'signals',
-              },
-              {
-                title: <MetricHint label="来源数" hint={sourceCountHint} />,
-                dataIndex: 'sources',
-              },
-              { title: '映射功能', dataIndex: 'functions' },
-              {
-                title: '复核状态',
-                dataIndex: 'status',
-                render: (value: string) => <Tag color={value === '已复核' ? 'success' : 'warning'}>{value}</Tag>,
-              },
-            ]}
-          />
-        )}
-      </Card>
-      {!showDemandEmpty && demandSource.length > 0 ? (
-        <Card className="panel-card view-card" title="交叉验证进度">
-          <div className="validation-grid">
-            {demandSource.map((item) => (
-              <div className="validation-card" key={item.key}>
-                <div className="validation-title">
-                  <Text strong>{item.name}</Text>
-                  <Tag color={item.status === '已复核' ? 'success' : 'warning'}>{item.status}</Tag>
-                </div>
-                <Progress
-                  percent={Math.min(100, item.sources * 10)}
-                  strokeColor="#2563eb"
-                  railColor="#e8eef8"
-                />
-                <Text type="secondary">
-                  <MetricHint label={`${item.signals} 条信号`} hint={signalFrequencyHint} />
-                  {' · '}
-                  <MetricHint label={`${item.sources} 个去重来源`} hint={sourceCountHint} />
-                </Text>
-              </div>
-            ))}
-          </div>
-        </Card>
-      ) : null}
+      <DemandPointWorkbench />
     </>
   )
 }

@@ -9,6 +9,7 @@ from tests.support import (
     create_confirmed_demand,
     create_function,
     create_landing_point,
+    publish_function,
     put_standard,
 )
 
@@ -73,6 +74,7 @@ async def test_panorama_counts_match_underlying_resources(client):
         client, name="座舱集中算力需求", value_chain_stage_code="delivery_oem"
     )
     other_func = await create_function(client, other_demand["id"], name="中央计算平台")
+    await publish_function(client, other_func["id"])
     await create_landing_point(client, other_func["id"], name="域控制器", domain="硬件")
     await create_landing_point(client, other_func["id"], name="调度中间件", domain="软件")
 

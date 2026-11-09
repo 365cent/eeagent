@@ -25,6 +25,16 @@ func TestLayoutFitsWindow(t *testing.T) {
 	if !contains(f.panel, f.save) || !contains(f.panel, f.cancel) {
 		t.Fatalf("panel buttons outside panel")
 	}
+	for _, b := range []box{f.linkNav, f.manualNav, f.jobsNav, f.manualURL, f.manualTitle, f.manualBody, f.jobPrev, f.jobNext} {
+		if b.empty() {
+			t.Fatalf("interactive area is empty: %+v", b)
+		}
+	}
+	for i, row := range f.jobRows {
+		if !contains(f.card, row) || !contains(row, f.jobPrimary[i]) || !contains(row, f.jobSecondary[i]) {
+			t.Fatalf("job row/action outside card: row=%+v primary=%+v secondary=%+v", row, f.jobPrimary[i], f.jobSecondary[i])
+		}
+	}
 	for _, b := range []box{f.apiField, f.parallelField, f.maxField, f.timeField, f.engineRow, f.headlessRow} {
 		if !contains(f.panel, b) {
 			t.Fatalf("settings box %+v outside panel %+v", b, f.panel)

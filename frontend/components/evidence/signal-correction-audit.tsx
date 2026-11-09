@@ -1,6 +1,6 @@
 'use client'
 
-import { Collapse, Table, Typography } from 'antd'
+import { Button, Collapse, Space, Table, Typography } from 'antd'
 import { useCorrectionAudit, useRefCodeMaps } from '@/hooks/use-eea-queries'
 import type { AuditValue } from '@/lib/api/types'
 import { labelFor, type RefCodeMaps } from '@/lib/eea-mappers'
@@ -18,6 +18,7 @@ const FIELD_LABELS: Record<string, string> = {
 
 function formatAuditValue(field: string, value: AuditValue, maps: RefCodeMaps): string {
   if (value == null) return '—'
+  if (Array.isArray(value)) return value.map(String).join(' · ') || '—'
   if (typeof value === 'object') return JSON.stringify(value)
   if (field === 'value_chain_stage_code') return labelFor(maps, 'value_chain_stage', value)
   if (field === 'signal_type_code') return labelFor(maps, 'signal_type', value)
@@ -26,7 +27,7 @@ function formatAuditValue(field: string, value: AuditValue, maps: RefCodeMaps): 
 }
 
 export function SignalCorrectionAudit({ signalId }: { signalId: string }) {
-  const { data, isLoading, isSuccess } = useCorrectionAudit(signalId)
+  const { data, isLoading, isSuccess, isError, refetch } = useCorrectionAudit(signalId)
   const { maps } = useRefCodeMaps()
   const rows = data ?? []
 
@@ -38,43 +39,54 @@ export function SignalCorrectionAudit({ signalId }: { signalId: string }) {
           key: 'audit',
           label: `修正记录${isSuccess ? `（${rows.length}）` : ''}`,
           children: (
-            <Table
-              size="small"
-              rowKey="id"
-              loading={isLoading}
-              pagination={false}
-              dataSource={rows}
-              locale={{
-                emptyText: <PlatformEmptyState title="暂无人工修正" description="保存分类、标签或主题后，原值与新值会记在这里。" />,
-              }}
-              columns={[
-                {
-                  title: '字段',
-                  dataIndex: 'field_name',
-                  render: (value: string) => FIELD_LABELS[value] ?? value,
-                },
-                {
-                  title: '原值',
-                  dataIndex: 'machine_value',
-                  render: (value: AuditValue, record) => (
-                    <Text>{formatAuditValue(record.field_name, value, maps)}</Text>
-                  ),
-                },
-                {
-                  title: '新值',
-                  dataIndex: 'human_value',
-                  render: (value: AuditValue, record) => (
-                    <Text>{formatAuditValue(record.field_name, value, maps)}</Text>
-                  ),
-                },
-                { title: '人员', dataIndex: 'operator_subject' },
-                {
-                  title: '时间',
-                  dataIndex: 'corrected_at',
-                  render: (value: string) => value?.replace('T', ' ').slice(0, 16) ?? '—',
-                },
-              ]}
-            />
+            isError ? (
+              <Space size={8}>
+                <Text type="danger">修正审计加载失败</Text>
+                <Button size="small" onClick={() => void refetch()}>重试</Button>
+              </Space>
+            ) : (
+              <Table
+                size="small"
+                rowKey="id"
+                loading={isLoading}
+                pagination={false}
+                dataSource={rows}
+                locale={{
+                  emptyText: <PlatformEmptyState title="暂无人工修正" description="保存分类或标签后，服务端记录的原值、新值、操作人和时间会显示在这里。" />,
+                }}
+                columns={[
+                  {
+                    title: '字段',
+                    dataIndex: 'field_name',
+                    render: (value: string) => FIELD_LABELS[value] ?? value,
+                  },
+                  {
+                    title: '原值',
+                    dataIndex: 'old_value',
+                    render: (value: AuditValue, record) => (
+                      <Text>{formatAuditValue(record.field_name, value, maps)}</Text>
+                    ),
+                  },
+                  {
+                    title: '新值',
+                    dataIndex: 'new_value',
+                    render: (value: AuditValue, record) => (
+                      <Text>{formatAuditValue(record.field_name, value, maps)}</Text>
+                    ),
+                  },
+                  {
+                    title: '服务端操作人',
+                    dataIndex: 'operator_subject',
+                    render: (value: string, record) => `${value}（${record.operator_role}）`,
+                  },
+                  {
+                    title: '服务端时间',
+                    dataIndex: 'corrected_at',
+                    render: (value: string) => value?.replace('T', ' ') ?? '—',
+                  },
+                ]}
+              />
+            )
           ),
         },
       ]}

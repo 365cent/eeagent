@@ -1,0 +1,117 @@
+# Delivery Record
+
+This record keeps evidence for implementation slices removed from the remaining-work TODOs. A slice does not close its parent task; acceptance stays open until the subsystem TODO criteria and required platform evidence pass.
+
+## 2026-11-05
+
+### BE-01 — capture idempotency and durable worker slice
+
+- Added request-fingerprint idempotency for capture submissions, bounded upload reads, and a production guard against server-side URL fetching.
+- Added the durable `capture_job` table and API, object-backed request payloads, leased PostgreSQL worker, bounded retry/backoff, terminal status, retry, and queued-job cancellation. The synchronous route remains available for compatibility.
+- Evidence: [capture API](../backend/app/api/v1/capture.py), [job service](../backend/app/services/capture_jobs.py), [worker entry](../backend/app/worker.py), [job model](../backend/app/models/models.py), [migration 0008](../backend/migrations/versions/0008_capture_jobs.py), [worker service unit](../deploy/eea-worker.service), and [backend TODO acceptance remainder](../backend/TODO.md#be-01-统一采集与可靠任务).
+- Checks: Python AST parsing succeeded for nine changed backend Python files. No test suite or database migration was run. Linux worker lifecycle, migration upgrade on an existing database, permissions, authentication, cooperative running-job cancellation, and cleanup remain unverified or incomplete.
+
+### CC-02 — asynchronous capture and durable client queue slice
+
+- The Go client prefers `POST /api/v1/capture/jobs`, uses a stable `submission_id`, polls for a terminal result, resumes an accepted remote job, and retries uncertain submissions with the same key. It honors bounded `Retry-After` delays for retryable responses.
+- The local queue stores job metadata in a versioned atomic state file and pending page snapshots in separate files under `queue_dir`. GUI startup restores unfinished work; CLI supports `upload --resume`. Browser credentials are not included in queue state.
+- Evidence: [API client](../client/internal/platform/client.go), [queue](../client/internal/queue/queue.go), [persistence store](../client/internal/queue/persistence.go), [CLI](../client/internal/cli/cli.go), [GUI integration](../client/internal/ui/app.go), [configuration](../client/internal/config/config.go), and [client TODO acceptance remainder](../client/TODO.md#cc-02-统一-api-与任务恢复).
+- Checks: `gofmt` and `go build ./internal/config ./internal/platform ./internal/queue ./internal/cli` passed on macOS. A subagent reported a Windows/amd64 cross-build of the queue package before GUI integration; this is not a Windows runtime check or a build of the final GUI change. No tests or real browser checks were run. Cross-restart behavior, Windows file permissions, GUI retry/cancel actions, per-job GUI history, and document migration to the async route remain unverified or incomplete.
+
+### DOC-03 — current capture route and worker index slice
+
+- Updated the backend README, project index, and Mac development guide to identify the async capture route, migration head, worker entry point, and worker service template.
+- Evidence: [project index](PROJECT-INDEX.md), [Mac development guide](DEVELOPMENT-MAC.md), [backend README](../backend/README.md), and [docs TODO acceptance remainder](TODO.md#doc-03-架构数据和接口同步).
+- Checks: content and links were reviewed in the workspace; no application test was run. Full architecture, identity, audit, and business-state documentation remains open.
+
+### FE-01 — API-backed overview and technology slice
+
+- The overview and technology views use API query results, show loading/error/empty states, and no longer render the removed hard-coded metrics, technology graph, or sample landing points.
+- Evidence: [dashboard workspace](../frontend/views/dashboard/workspace.tsx), [dashboard query loader](../frontend/components/dashboard-client-loader.tsx), and [frontend TODO acceptance remainder](../frontend/TODO.md#fe-01-页面职责与真实数据).
+- Checks: no frontend build or browser check is recorded for this slice. Strategy-page behavior, full view separation, and the prescribed local Ant Design/Next.js references remain open.
+
+### OPS-04 — service unit templates
+
+- Added foreground systemd templates for the API, Next.js web process, and durable capture worker, with loopback binding for the web-facing services and external environment/object-directory conventions.
+- Evidence: [deployment templates](../deploy/), [deployment guide](../deploy/README.md), and [deployment TODO acceptance remainder](../deploy/TODO.md#ops-04-服务任务与可观测性).
+- Checks: templates and command paths were reviewed locally. No Linux service, reverse-proxy, permission, migration, restart, or health-check validation was run.
+
+## 2026-11-09
+
+### BE-03/06/07/08/09 — trusted edits and function publish-gate slice
+
+- Added server-derived operator identity for development/test and production identity headers accepted only from configured trusted proxy addresses. Correction records now keep explicit before/after values with subject, role, and timestamp.
+- Demand points are created pending review. Confirmation requires two real retained signals in the selected theme, distinct source URLs, publishers and channels, differing stored technical-tag sets, and at least two distinct perspectives. Only `taxonomy_admin` or `platform_admin` can confirm. The same persisted evidence is rechecked before function or landing-point changes; changing confirmed demand evidence demotes it and revokes downstream publication.
+- Demand derivations require five ordered steps, each with content and citations to retained signals in the selected source theme. Pending-review, failed, archived, cross-theme, or missing evidence is rejected; additive migration `0011_demand_derivation_trace` stores the trace.
+- Function creation requires five complete forward steps. Publishing requires a same-request forward and reverse confirmation, necessary rationale, a coverage explanation for every listed core need, no uncovered/duplicate/extra need, no unresolved contradiction, a consistent conclusion, human confirmation, a complete card, administrator-managed recommendation/target-domain vocabulary, and a currently valid demand. Edits to published reasoning revoke publication.
+- Landing-point PATCH edits name, domain and role with before/after audit. Standard writes require explicit text or `null`; missing cells stay unfilled, `null` marks a reviewed blank. A per-cell PostgreSQL advisory transaction lock serializes concurrent first writes and updates.
+- Added additive migrations `0009_audit_before_after`, `0010_fn_card_domains`, and `0011_demand_derivation_trace`; seeded only the five user-confirmed technical-domain terms. The development seed no longer creates synthetic business records. Recommendation levels and vehicle/application target-domain values remain administrator-managed and are not invented.
+- Evidence: [identity resolver](../backend/app/core/identity.py), [audit service](../backend/app/services/audit.py), [demand validation](../backend/app/services/demand_validation.py), [demand API](../backend/app/api/v1/demands.py), [function validator](../backend/app/services/function_validation.py), [function API](../backend/app/api/v1/functions.py), [landing-point API](../backend/app/api/v1/landing_points.py), [standards API](../backend/app/api/v1/standards.py), [reference seed](../backend/app/seed.py), [migrations](../backend/migrations/versions/), and [backend TODO remainder](../backend/TODO.md).
+- Checks: full macOS backend suite on isolated local PostgreSQL `eea_test`: **285 passed, 1 skipped**. This does not verify the production identity proxy, Linux service behavior, or Windows client.
+
+### FE-05 — demand point workbench slice
+
+- Replaced the read-only/mock demand table with a live workbench on the topics page. It selects real themes and retained signals, requires five evidence-backed derivation steps, separately records cross-validation evidence, preserves original time text including unknown dates, and creates records as pending. Confirmation is a separate server-authorized action; the server checks source, publisher, channel and stored tags.
+- Evidence: [demand workbench](../frontend/components/topics/demand-point-workbench.tsx), [topics page](../frontend/components/topics/topics-view.tsx), [API client and types](../frontend/lib/api/eea-api.ts), and [frontend TODO remainder](../frontend/TODO.md#fe-05-需求点工作台).
+- Checks: `next build` passed; Ant Design lint passed with zero issues for the workbench and topics page; full backend suite passed **285 tests, 1 skipped**. No browser run was made for this FE-05 slice; the earlier browser smoke check covers FE-06 only. Linux role mapping and real business-sample acceptance remain open.
+
+### CC-02 — macOS queue contract follow-up
+
+- Updated Go test servers to advertise the supported legacy route through OpenAPI before accepting multipart uploads, matching the client’s capability probe and explicit fallback contract.
+- Evidence: [platform tests](../client/internal/platform/client_test.go), [queue tests](../client/internal/queue/queue_test.go), and [client TODO remainder](../client/TODO.md#cc-02-统一-api-与任务恢复).
+- Checks: Go `1.24.0` on macOS: `go test -short ./internal/archive ./internal/cdp ./internal/capture ./internal/config ./internal/netinfo ./internal/platform ./internal/queue` passed. Windows GUI and real-browser checks remain unverified.
+
+### FE-03 — tag review editor slice
+
+- Signal classification exposes LLM/fallback recommendations for value-chain stage and signal type, plus technology-tag suggestions; the researcher explicitly adopts changes. Technology tags can be chosen from the shared vocabulary or added as open terms. The correction view displays old/new values, actor, and time from the API.
+- Evidence: [classification editor](../frontend/components/evidence/signal-classification-editor.tsx), [tag editor](../frontend/components/evidence/signal-tags-editor.tsx), [audit view](../frontend/components/evidence/signal-correction-audit.tsx), and [frontend TODO remainder](../frontend/TODO.md#fe-03-标签分类与复核).
+- Checks: scoped Ant Design lint and production frontend build passed; full classification role/quality/real-gateway acceptance remains open.
+
+### FE-06 — function derivation editor slice
+
+- TechnologyView uses persisted demands/functions and vocabulary. It provides the five-step derivation, reverse necessity and need-coverage checklist, contradiction/conclusion confirmation, recommendation level, multi-select L0–L5, target domain, recommendation reason, and L2/L4 differences. Drafts save separately; publication submits fresh forward/reverse checks together and surfaces server errors. The coverage rows synchronize from the forward core-needs list.
+- Evidence: [function editor](../frontend/components/technology/function-derivation-editor.tsx), [TechnologyView integration](../frontend/views/dashboard/workspace.tsx), [API client/types](../frontend/lib/api/eea-api.ts), and [frontend TODO remainder](../frontend/TODO.md#fe-06-车辆功能与双向验证).
+- Checks: `next build` passed; scoped Ant Design lint passed for the editor and workspace; backend function tests passed (21) including missing-step, reverse inconsistency, incomplete coverage, and publish-gate cases. The full backend suite passed **276 tests, 1 skipped**. Ego-browser on macOS verified the live empty state and API-backed technology page, blocked an empty five-step save without creating a function, and saved a completed five-step draft with `published=false`. Temporary records were removed from `eea_test`; its demand/function/audit tables were verified empty afterward. This smoke check does not cover full eFuse acceptance or publication, because real recommendation-level and target-domain vocabulary has not been provided.
+
+### FE-07/08 — landing-point and standards grid slice
+
+- Added a live landing-point workbench backed by the functions, landing-points, standards, and domain-vocabulary APIs. It supports viewing/editing points, creates only under published functions, and lets an operator select an existing domain or enter a new one that the server adds to the shared vocabulary.
+- Added the 3×3 design/manufacturing/operations grid. Missing rows, `NULL` explicit blanks, and text remain distinct. Saves require an explicit choice, check for concurrent edits before overwriting, and refresh landing-point counts, panorama, vocabulary and trace queries. The technology panorama now renders API-backed associations and no sample graph.
+- Evidence: [landing-point workbench](../frontend/components/technology/landing-point-workbench.tsx), [technology view](../frontend/views/dashboard/workspace.tsx), [API client and types](../frontend/lib/api/eea-api.ts), [landing-point API](../backend/app/api/v1/landing_points.py), [standards API](../backend/app/api/v1/standards.py), and [frontend TODO remainder](../frontend/TODO.md#fe-07-技术全景与落脚点).
+- Checks: macOS `next build`, `tsc --noEmit`, and scoped Ant Design lint passed. Browser verification against the local API showed the five confirmed domains, landing-point create/view, a user-entered domain persisted to the shared vocabulary, and the missing/NULL/text cell states. A reload retained the new point in the API-backed panorama. Temporary synthetic records were removed from isolated `eea_test`; signal, demand, function, landing-point, and standard counts are zero, with only the five confirmed domain terms restored. The full backend suite passed **285 tests, 1 skipped** on isolated `eea_test`, including landing-point PATCH and standard-cell serialization cases. Reopening the grid after reload, audit walk-through, real eFuse acceptance, trace-page review, Linux, and Windows checks remain open.
+
+### FE-12 — production same-origin API routing slice
+
+- The browser now uses `/api/v1` through the current origin in production. Local Next development continues to call the API on port 8000; `NEXT_PUBLIC_EEA_API_BASE` remains an explicit override.
+- Evidence: [API base config](../frontend/lib/api/config.ts) and [frontend TODO remainder](../frontend/TODO.md#fe-12-前端验收与-linux-接入).
+- Checks: included in the successful production frontend build. TLS and reverse-proxy routing remain unverified on Linux.
+
+### DOC-03 — migration and identity documentation sync
+
+- Updated current Alembic head references to `0011`, documented the Mac `eea_test` procedure and local reviewer role, removed the incorrect claim that an IP address is a user identity, and removed the synthetic eFuse chain from the local seed. A test confirms repeat-safe vocabulary seeding without synthetic business records.
+- Evidence: [backend README](../backend/README.md), [Mac development guide](DEVELOPMENT-MAC.md), [root TODO](../TODO.md), and subsystem TODOs.
+- Checks: local content and migration-head references reviewed. No Linux documentation validation was run.
+
+### DOC-02 — external input register slice
+
+- Added a source-aware register for the user-provided workflow image, original project documents, business sample sets, skills, vocabularies, Tier1 strategy input, methodology text, collector extension, Linux infrastructure, and production responsibilities. Unknown providers, dates, versions, and license terms remain explicitly unrecorded.
+- Evidence: [input register](INPUT-REGISTER.md), [Docs TODO](TODO.md#doc-02-业务与环境输入), and [project index](PROJECT-INDEX.md).
+- Checks: local Markdown links passed a five-file check and the register was compared with DOC-02 requirements. No external input was requested or fabricated; DOC-02 remains open until named owners and actual source materials are registered.
+
+### BE-10 / FE-09 / DOC-05 — strategic funnel and acceptance-record slices
+
+- BE-10 adds the persisted four-step strategy draft and append-only assessment snapshots. The API gates industry-scan and Tier1 adaptation, exits rejected candidates without scores, requires five integer scores with rationales, calculates the total on the server, requires an explicit strategy class, and records edits with actor/time and old/new values. The legacy assessment endpoint uses the same gate. Migration `0012_strategy_funnel` is additive.
+- FE-09 replaces the strategy demo with the API-backed four-step workbench and version timeline. An earlier final assessment stays visible as a prior version marked for review when the current draft has changed.
+- DOC-05 now links a reusable blank acceptance-run record template. It distinguishes Mac checks from Linux, Windows, and real-business evidence; copies begin as “未运行”.
+- Evidence: [strategy funnel service](../backend/app/services/strategy_funnel.py), [migration 0012](../backend/migrations/versions/0012_strategic_funnel.py), [strategy workbench](../frontend/components/strategy/strategy-funnel-workbench.tsx), [acceptance template](ACCEPTANCE-EXECUTION-RECORD-TEMPLATE.md), and [remaining acceptance criteria](../backend/TODO.md#be-10-战略四步漏斗), [frontend TODO](../frontend/TODO.md#fe-09-战略四步与改判), and [docs TODO](TODO.md#doc-05-验收执行与缺陷记录).
+- Checks: macOS isolated `eea_test` backend focus tests **23 passed** and full backend suite **291 passed, 1 skipped**; migration `0012` was applied to that isolated database. Frontend `next build` passed; scoped Ant Design lint for the workbench and workspace reported zero issues; scoped diff check and Python `compileall` passed. The docs template link/marker checks passed.
+- Remaining: the FE-09 live API/browser path was not run; BE-11 database-driven counts are in progress. Real Tier1/score rationale and eFuse acceptance inputs are outstanding, as are Linux and production identity checks. This is an implementation slice, not full BE-10/FE-09/DOC-05 acceptance.
+
+### BE-11 / FE-01 / FE-10 — real overview and trace slice
+
+- `/overview` now returns database-backed counts for distinct normalized source URLs, exact signal states, open/failed capture jobs, failed document ingestion, substantive standards, and UTC-week additions. Four strategy-stage counts are exclusive by each landing point's current persisted funnel state; step four includes draft-finalization-ready and completed items.
+- The landing-point trace includes the present/missing stages, unresolved evidence/document references, theme membership and demand-evidence relationships, persisted archive/body/document references, demand/function review state, and all assessment versions. Archived signal status comes from `evidence_status_code='archived'`.
+- The overview and signal screens show source/status/week/failure counts with their count definitions. The trace screen links to a selected landing-point deep link and presents the five-step demand basis, function forward/reverse records, nine deployment-standard cells, evidence, document figure count and strategy history.
+- Basis freshness is returned as `unknown_untracked`: DemandPoint has no review timestamp baseline. The UI states that limitation instead of deriving freshness from creation dates. Object-key presence does not prove storage readability; the linked endpoints remain the check.
+- Evidence: [overview API](../backend/app/api/v1/overview.py), [trace API](../backend/app/api/v1/trace.py), [trace tests](../backend/tests/test_trace_audit_overview.py), [trace view](../frontend/views/dashboard/workspace.tsx), and [remaining acceptance criteria](../backend/TODO.md#be-11-追溯与真实总览), [FE-01](../frontend/TODO.md#fe-01-页面职责与真实数据), and [FE-10](../frontend/TODO.md#fe-10-全链追溯与导出).
+- Checks: macOS isolated `eea_test` trace/overview tests **20 passed**; frontend `next build`, `tsc --noEmit`, and scoped Ant Design lint for the workspace passed. No live trace-browser run was made for this slice. Full backend suite, Firefox/Chrome route refresh, Linux, real business-source, and storage-object readability checks remain open.

@@ -32,20 +32,27 @@ var winScale = scale{x: wui.DpiX, y: wui.DpiY}
 
 // frame holds every painted hit area for a given client size.
 type frame struct {
-	header                       box
-	settings, min, close         box
-	card                         box
-	area                         box
-	hint, send                   box
-	status                       box
-	panel                        box
-	apiLabel, apiField           box
-	parallelLabel, parallelField box
-	maxLabel, maxField           box
-	timeLabel, timeField         box
-	engineRow, headlessRow       box
-	profile, note                box
-	save, cancel                 box
+	header                        box
+	settings, min, close          box
+	linkNav, manualNav, jobsNav   box
+	card                          box
+	area                          box
+	hint, send                    box
+	manualURLLabel, manualURL     box
+	manualTitleLabel, manualTitle box
+	manualBodyLabel, manualBody   box
+	jobRows                       [6]box
+	jobPrimary, jobSecondary      [6]box
+	jobPrev, jobNext, jobPage     box
+	status                        box
+	panel                         box
+	apiLabel, apiField            box
+	parallelLabel, parallelField  box
+	maxLabel, maxField            box
+	timeLabel, timeField          box
+	engineRow, headlessRow        box
+	profile, note                 box
+	save, cancel                  box
 }
 
 // layoutFrame lays out the window at the given client size.
@@ -58,12 +65,30 @@ func layoutFrame(w, h int, s scale) frame {
 	f.close = box{right - int32(px(22)), int32(py(11)), right, int32(py(33))}
 	f.min = box{f.close.l - int32(px(12)) - int32(px(22)), int32(py(11)), f.close.l - int32(px(12)), int32(py(33))}
 	f.settings = box{f.min.l - int32(px(16)) - int32(px(46)), int32(py(11)), f.min.l - int32(px(16)), int32(py(33))}
+	f.linkNav = box{int32(px(132)), int32(py(11)), int32(px(180)), int32(py(33))}
+	f.manualNav = box{int32(px(183)), int32(py(11)), int32(px(260)), int32(py(33))}
+	f.jobsNav = box{int32(px(262)), int32(py(11)), int32(px(308)), int32(py(33))}
 
 	margin := int32(px(16))
 	f.card = box{margin, int32(py(52)), int32(w) - margin, int32(py(252))}
 	f.area = box{f.card.l + int32(px(14)), f.card.t + int32(py(14)), f.card.r - int32(px(14)), f.card.b - int32(py(38))}
 	f.send = box{f.card.r - int32(px(14)) - int32(px(78)), f.card.b - int32(py(40)), f.card.r - int32(px(14)), f.card.b - int32(py(12))}
 	f.hint = box{f.area.l, f.card.b - int32(py(26)), f.send.l - int32(px(8)), f.card.b - int32(py(12))}
+	f.manualURLLabel = box{f.card.l + int32(px(14)), f.card.t + int32(py(7)), f.card.r - int32(px(14)), f.card.t + int32(py(19))}
+	f.manualURL = box{f.card.l + int32(px(14)), f.card.t + int32(py(20)), f.card.r - int32(px(14)), f.card.t + int32(py(44))}
+	f.manualTitleLabel = box{f.card.l + int32(px(14)), f.card.t + int32(py(48)), f.card.r - int32(px(14)), f.card.t + int32(py(60))}
+	f.manualTitle = box{f.card.l + int32(px(14)), f.card.t + int32(py(61)), f.card.r - int32(px(14)), f.card.t + int32(py(85))}
+	f.manualBodyLabel = box{f.card.l + int32(px(14)), f.card.t + int32(py(89)), f.card.r - int32(px(14)), f.card.t + int32(py(101))}
+	f.manualBody = box{f.card.l + int32(px(14)), f.card.t + int32(py(102)), f.card.r - int32(px(14)), f.send.t - int32(py(5))}
+	for i := range f.jobRows {
+		top := f.card.t + int32(py(8+i*28))
+		f.jobRows[i] = box{f.card.l + int32(px(12)), top, f.card.r - int32(px(12)), top + int32(py(25))}
+		f.jobPrimary[i] = box{f.card.r - int32(px(12)) - int32(px(52)), top + int32(py(1)), f.card.r - int32(px(12)), top + int32(py(24))}
+		f.jobSecondary[i] = box{f.jobPrimary[i].l - int32(px(62)), top + int32(py(1)), f.jobPrimary[i].l - int32(px(4)), top + int32(py(24))}
+	}
+	f.jobPrev = box{f.card.l + int32(px(14)), f.card.b - int32(py(25)), f.card.l + int32(px(58)), f.card.b - int32(py(7))}
+	f.jobPage = box{f.jobPrev.r + int32(px(5)), f.jobPrev.t, f.card.r - int32(px(58)), f.jobPrev.b}
+	f.jobNext = box{f.card.r - int32(px(58)), f.jobPrev.t, f.card.r - int32(px(14)), f.jobPrev.b}
 	f.status = box{int32(px(20)), int32(py(262)), int32(w) - int32(px(20)), int32(py(282))}
 
 	f.panel = box{margin, f.card.t, int32(w) - margin, int32(py(292))}

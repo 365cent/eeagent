@@ -1,0 +1,24 @@
+[Unit]
+Description=EEA Next.js web service
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=eea
+Group=eea
+WorkingDirectory=/opt/eea/current/frontend
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /opt/eea/current/frontend/node_modules/next/dist/bin/next start --hostname 127.0.0.1 --port 3000
+Restart=on-failure
+RestartSec=3s
+TimeoutStopSec=30s
+UMask=0027
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/eea/current/frontend/.next/cache
+
+[Install]
+WantedBy=multi-user.target

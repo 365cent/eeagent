@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
+import { useQuery } from '@tanstack/react-query'
 import {
   AlertOutlined,
   ApartmentOutlined,
@@ -49,31 +50,29 @@ import { App as AntApp, Alert, Button, Card, Checkbox, Col, Divider, Dropdown, I
 import { Drawer as VaulDrawer } from 'vaul'
 import { ProCard } from '@ant-design/pro-components'
 import type { ColumnsType } from 'antd/es/table'
-import { DeductionChainRadar } from '@/components/deduction-chain-radar'
 import { PlatformLayout } from '@/components/layout/platform-layout'
-import { StrategyFunnelCard } from '@/components/overview/strategy-funnel-card'
 import { PageHeader } from '@/components/shared/page-header'
 import { mainMenuItems } from '@/config/menu'
 import { utilityPages } from '@/config/utility-pages'
 import { ALL_VIEW_KEYS } from '@/config/routes'
-import { landingPoints, strategyStageLabels } from '@/mocks/demands'
-import { signals, statusColors } from '@/mocks/signals'
-import { overviewFunnelSteps, overviewTraceMetrics, signalTrendBars, themes } from '@/mocks/themes'
 import {
   useDemandRows,
   useLandingRows,
   useOverviewStats,
   usePanoramaStages,
   useSignalDetail,
-  useSignalsWithFallback,
+  useTraceChain,
+  useSignalsListFiltered,
   useThemeRows,
   useRefCodeMaps,
+  eeaQueryKeys,
 } from '@/hooks/use-eea-queries'
-import { overviewToFunnelSteps, overviewToTraceMetrics, formatApiDate, type OverviewThemeRow } from '@/lib/eea-mappers'
+import { overviewToTraceMetrics, formatApiDate } from '@/lib/eea-mappers'
 import { setLivePlatformSearchData } from '@/lib/live-platform-data'
 import { resetPlatformSearchIndex } from '@/lib/platform-search-index'
 import { isUuid } from '@/lib/api/api-errors'
-import { signalArchiveUrl, documentCanonicalUrl } from '@/lib/api/client'
+import { EeaApiError, signalArchiveUrl, documentCanonicalUrl } from '@/lib/api/client'
+import { fetchLandingPoints } from '@/lib/api/eea-api'
 import { buildAppPath } from '@/lib/navigation'
 import { sourceExcerptSnippet } from '@/lib/evidence/audio-overview-segments'
 import type { AppRouteOptions, NavigateFn, Signal } from '@/types/platform'
@@ -90,6 +89,9 @@ import { SignalThemeAssign } from '@/components/evidence/signal-theme-assign'
 import { TopicsView } from '@/components/topics/topics-view'
 import { CreateTopicForm } from '@/components/topics/create-topic-form'
 import { VocabKnowledgePanel } from '@/components/topics/vocab-knowledge-panel'
+import { FunctionDerivationEditor } from '@/components/technology/function-derivation-editor'
+import { LandingPointWorkbench } from '@/components/technology/landing-point-workbench'
+import { StrategyFunnelWorkbench } from '@/components/strategy/strategy-funnel-workbench'
 import { PlatformEmptyState, signalsTableLocale } from '@/components/shared/empty-state'
 import { NewSignalImportPage } from '@/components/import/new-signal-import'
 import { WorkflowStudio } from '@/components/workflow-studio'
@@ -97,6 +99,22 @@ import { PlatformSettingsPage } from '@/views/utility/platform-settings-page'
 import { ProfilePage } from '@/views/utility/profile-page'
 
 const { Text, Title, Paragraph } = Typography
+
+const statusColors: Record<string, string> = {
+  已留存: 'success',
+  待人工复核: 'warning',
+  抓取中: 'processing',
+  抓取失败: 'error',
+}
+
+function QueryFailure({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <Space orientation="vertical" size={8}>
+      <Text type="danger">{message}</Text>
+      <Button size="small" onClick={onRetry}>重试</Button>
+    </Space>
+  )
+}
 
 function SignalQuickPreviewDrawer({
   signal,
@@ -172,15 +190,13 @@ export function SignalRowActions({
         onQuickPreview?.(record)
         break
       case 'topic':
-        messageApi.success(`已将「${record.title}」加入待归集队列`)
-        onNavigate('createTopic')
+        onNavigate(`singal/${record.key}`)
         break
       case 'trace':
         onNavigate('traceDetail')
         break
       case 'review':
-        messageApi.info('已打开人工复核工作台')
-        onNavigate('signals')
+        onNavigate(`singal/${record.key}`)
         break
       case 'copy': {
         const link = `${window.location.origin}${buildAppPath({ view: 'singal', id: record.key })}`
@@ -191,7 +207,7 @@ export function SignalRowActions({
         break
       }
       case 'archive':
-        messageApi.warning(`「${record.title}」已标记为归档停用（演示）`)
+        messageApi.warning('当前没有可用的信号归档接口，尚未修改数据。')
         break
       default:
         break
@@ -270,464 +286,419 @@ export function SignalsView({
   onPreviewSignal: (signal: Signal | null) => void
 }) {
   const [stage, setStage] = useState('全部环节')
-  const { rows: signalRows, isLoading, usingMock } = useSignalsWithFallback({ query, stageChip: stage, themeId })
-  const { data: overview, isSuccess: overviewReady } = useOverviewStats()
-  const totalSignals = overviewReady ? (overview?.signals ?? 0) : signalRows.length
-  const retained = overviewReady
-    ? (overview ? overview.signals - overview.signals_pending_review : 0)
-    : signalRows.filter((s) => s.status === '已留存').length
-  const pending = overviewReady ? (overview?.signals_pending_review ?? 0) : signalRows.filter((s) => s.status === '待人工复核').length
+  const { rows: signalRows, isLoading, isError, refetch } = useSignalsListFiltered({ query, stageChip: stage, themeId })
+  const refCodeQuery = useRefCodeMaps()
+  const overviewQuery = useOverviewStats()
+  const overviewReady = overviewQuery.isSuccess
+  const overview = overviewQuery.data
   const columns = buildSignalTableColumns({
     onNavigate,
     onTitleClick: onPreviewSignal,
     onQuickPreview: onPreviewSignal,
   })
-  return <><PageHeader eyebrow="01 · 原始信息采集" title="信号与证据库" description="收集产业信号，留存可追溯证据，并通过封闭词表完成机器预标。" action={<Button type="primary" icon={<PlusOutlined />} onClick={() => onNavigate('newSignal')}>粘贴 URL 抓取</Button>} />{usingMock ? <Alert type="warning" showIcon title="演示数据" description="无法连接 API，当前列表为离线演示数据。" style={{ marginBottom: 16 }} /> : null}{themeId ? <Alert type="info" showIcon style={{ marginBottom: 16 }} title="正在查看该主题下的信号" action={<Button size="small" onClick={onClearTheme}>清除主题筛选</Button>} /> : null}<Row gutter={16} className="summary-row"><Col span={6}><Card><Statistic title="全部信号" value={totalSignals} /></Card></Col><Col span={6}><Card><Statistic title="已留存" value={retained} styles={{ content: { color: '#16a34a' } }} /></Card></Col><Col span={6}><Card><Statistic title="待人工复核" value={pending} styles={{ content: { color: '#d97706' } }} /></Card></Col><Col span={6}><Card><Statistic title="本周新增" value={totalSignals} styles={{ content: { color: '#2563eb' } }} /></Card></Col></Row><Card className="panel-card view-card" title="证据列表" extra={<Space wrap><Input allowClear prefix={<SearchOutlined />} placeholder="搜索标题、发布主体或标签" value={query} onChange={(e) => setQuery(e.target.value)} /><Select value={stage} onChange={setStage} options={['全部环节', '创造端', '传递端', '兑现端', '规制端'].map((value) => ({ value, label: value }))} /></Space>}><Table rowKey="key" loading={isLoading} columns={columns} dataSource={signalRows} pagination={{ pageSize: 6 }} scroll={{ x: 960 }} locale={signalsTableLocale(() => onNavigate('newSignal'))} /></Card></>
-}
-
-const technologyGraphCategoryColors: Record<string, string> = {
-  需求: '#2563eb',
-  硬件: '#0891b2',
-  电源: '#16a34a',
-  标准: '#7c3aed',
-  平台: '#f59e0b',
-  互联: '#ea580c',
-  能力: '#0d9488',
-  落地: '#64748b',
-}
-
-/** Soft limits allow extra room; hard limits are where the viewport springs back to. */
-const technologyGraphViewport = {
-  zoomMinHard: 0.58,
-  zoomMaxHard: 1.72,
-  zoomMinSoft: 0.5,
-  zoomMaxSoft: 1.9,
-  panHard: [0.22, 0.28, 0.22, 0.28] as [number, number, number, number],
-  panSoft: [0.36, 0.42, 0.36, 0.42] as [number, number, number, number],
-  nodeHardPad: 72,
-  nodeSoftPad: 168,
-}
-
-const technologyGraphBounce = {
-  duration: 520,
-  easing: 'cubic-bezier(0.34, 1.56, 0.64, 1)',
-}
-
-type TechnologyGraphBounds = { minX: number; minY: number; maxX: number; maxY: number }
-
-type TechnologyGraphSession = {
-  baseline: { viewportCenter: [number, number]; zoom: number; width: number; height: number }
-  contentBounds: TechnologyGraphBounds
-}
-
-const technologyGraphSessions = new WeakMap<import('@antv/g6').Graph, TechnologyGraphSession>()
-
-function computeTechnologyContentBounds(graph: import('@antv/g6').Graph): TechnologyGraphBounds {
-  const nodes = graph.getNodeData()
-  let minX = Infinity
-  let minY = Infinity
-  let maxX = -Infinity
-  let maxY = -Infinity
-  for (const node of nodes) {
-    const [x, y] = graph.getElementPosition(node.id)
-    minX = Math.min(minX, x)
-    minY = Math.min(minY, y)
-    maxX = Math.max(maxX, x)
-    maxY = Math.max(maxY, y)
-  }
-  if (!Number.isFinite(minX)) {
-    return { minX: 0, minY: 0, maxX: 0, maxY: 0 }
-  }
-  return { minX, minY, maxX, maxY }
-}
-
-/** Same coordinate space as G6 drag-canvas (viewport center on canvas). */
-function clampTechnologyViewportCenter(
-  center: [number, number],
-  home: [number, number],
-  width: number,
-  height: number,
-  pan: [number, number, number, number],
-): [number, number] {
-  const [top, right, bottom, left] = pan
-  const [hx, hy] = home
-  const minX = hx - width * left
-  const maxX = hx + width * right
-  const minY = hy - height * top
-  const maxY = hy + height * bottom
-  return [Math.min(Math.max(center[0], minX), maxX), Math.min(Math.max(center[1], minY), maxY)]
-}
-
-function isOutsideTechnologyViewportPan(
-  center: [number, number],
-  session: TechnologyGraphSession,
-  pan: [number, number, number, number],
-): boolean {
-  const { baseline } = session
-  const clamped = clampTechnologyViewportCenter(
-    center,
-    baseline.viewportCenter,
-    baseline.width,
-    baseline.height,
-    pan,
+  return (
+    <>
+      <PageHeader eyebrow="01 · 原始信息采集" title="信号与证据库" description="收集产业信号，留存可追溯证据，并通过封闭词表完成机器预标。" action={<Button type="primary" icon={<PlusOutlined />} onClick={() => onNavigate('newSignal')}>粘贴 URL 抓取</Button>} />
+      {themeId ? <Alert type="info" showIcon style={{ marginBottom: 16 }} title="正在查看该主题下的信号" action={<Button size="small" onClick={onClearTheme}>清除主题筛选</Button>} /> : null}
+      {overviewQuery.isError ? <QueryFailure message="信号统计加载失败，请检查服务连接后重试。" onRetry={() => { void overviewQuery.refetch() }} /> : null}
+      <Row gutter={16} className="summary-row">
+        <Col span={6}><Card><Statistic title="全部信号" value={overviewReady ? overview?.signals ?? 0 : '—'} /></Card></Col>
+        <Col span={6}><Card><Statistic title={<Tooltip title="按非空 url_normalized 去重，包含已归档信号。">去重来源数</Tooltip>} value={overviewReady ? overview?.signal_sources ?? '—' : '—'} /></Card></Col>
+        <Col span={6}><Card><Statistic title="已留存" value={overviewReady ? overview?.signals_retained ?? '—' : '—'} styles={{ content: { color: '#16a34a' } }} /></Card></Col>
+        <Col span={6}><Card><Statistic title="待人工复核" value={overviewReady ? overview?.signals_pending_review ?? 0 : '—'} styles={{ content: { color: '#d97706' } }} /></Card></Col>
+      </Row>
+      <Card className="panel-card view-card" title="证据列表" extra={<Space wrap><Input allowClear prefix={<SearchOutlined />} placeholder="搜索标题、发布主体或标签" value={query} onChange={(e) => setQuery(e.target.value)} /><Select value={stage} onChange={setStage} options={['全部环节', '创造端', '传递端', '兑现端', '规制端'].map((value) => ({ label: value, value }))} /></Space>}>
+        {isError || refCodeQuery.isError ? (
+          <QueryFailure message="信号列表加载失败，请检查服务连接后重试。" onRetry={() => { void (refCodeQuery.isError ? refCodeQuery.refetch() : refetch()) }} />
+        ) : !refCodeQuery.isSuccess || isLoading ? (
+          <Spin />
+        ) : (
+          <Table rowKey="key" columns={columns} dataSource={signalRows} pagination={{ pageSize: 6 }} scroll={{ x: 960 }} locale={signalsTableLocale(() => onNavigate('newSignal'))} />
+        )}
+      </Card>
+    </>
   )
-  return Math.abs(clamped[0] - center[0]) > 0.5 || Math.abs(clamped[1] - center[1]) > 0.5
 }
 
-function clampTechnologyZoom(zoom: number, baselineZoom: number, minRatio: number, maxRatio: number) {
-  return Math.min(Math.max(zoom, baselineZoom * minRatio), baselineZoom * maxRatio)
-}
 
-function clampTechnologyNodePosition(
-  position: [number, number],
-  bounds: TechnologyGraphBounds,
-  pad: number,
-): [number, number] {
-  return [
-    Math.min(Math.max(position[0], bounds.minX - pad), bounds.maxX + pad),
-    Math.min(Math.max(position[1], bounds.minY - pad), bounds.maxY + pad),
-  ]
-}
 
-async function bounceTechnologyGraphViewport(graph: import('@antv/g6').Graph) {
-  const session = technologyGraphSessions.get(graph)
-  if (!session) return
-
-  const { baseline } = session
-  const { zoomMinHard, zoomMaxHard, panHard } = technologyGraphViewport
-
-  const viewportCenter = graph.getViewportCenter()
-  const currentCenter: [number, number] = [viewportCenter[0], viewportCenter[1]]
-  const targetCenter = clampTechnologyViewportCenter(
-    currentCenter,
-    baseline.viewportCenter,
-    baseline.width,
-    baseline.height,
-    panHard,
+export function TraceView({ onNavigate }: { onNavigate: NavigateFn }) {
+  const panoramaQuery = usePanoramaStages()
+  const stages = panoramaQuery.data ?? []
+  const relationships = stages.flatMap((stage) =>
+    stage.demand_points.flatMap((demand) =>
+      demand.functions.flatMap((vehicleFunction) =>
+        vehicleFunction.landing_points.map((landingPoint) => ({
+          key: `${stage.stage_code}-${demand.id}-${vehicleFunction.id}-${landingPoint.id}`,
+          stage: stage.stage_label,
+          demand: demand.name,
+          vehicleFunction: vehicleFunction.name,
+          landingPoint: landingPoint.name,
+        landingPointId: landingPoint.id,
+          domain: landingPoint.domain_name,
+        })),
+      ),
+    ),
   )
-  const currentZoom = graph.getZoom()
-  const targetZoom = clampTechnologyZoom(currentZoom, baseline.zoom, zoomMinHard, zoomMaxHard)
 
-  const tasks: Promise<void>[] = []
-  if (Math.abs(targetCenter[0] - currentCenter[0]) > 0.5 || Math.abs(targetCenter[1] - currentCenter[1]) > 0.5) {
-    const delta: [number, number] = [currentCenter[0] - targetCenter[0], currentCenter[1] - targetCenter[1]]
-    tasks.push(graph.translateBy(delta, technologyGraphBounce))
-  }
-  if (Math.abs(targetZoom - currentZoom) > 0.001) {
-    tasks.push(graph.zoomTo(targetZoom, technologyGraphBounce))
-  }
-  if (tasks.length > 0) await Promise.all(tasks)
-}
-
-async function bounceTechnologyGraphNodes(graph: import('@antv/g6').Graph, ids: string[]) {
-  const session = technologyGraphSessions.get(graph)
-  if (!session || ids.length === 0) return
-
-  const { contentBounds } = session
-  const { nodeHardPad } = technologyGraphViewport
-  const positions: Record<string, [number, number]> = {}
-  let needsBounce = false
-
-  for (const id of ids) {
-    const current = graph.getElementPosition(id) as [number, number]
-    const target = clampTechnologyNodePosition(current, contentBounds, nodeHardPad)
-    if (target[0] !== current[0] || target[1] !== current[1]) {
-      positions[id] = target
-      needsBounce = true
-    }
-  }
-
-  if (needsBounce) {
-    await graph.translateElementTo(positions, true)
-  }
-}
-
-const technologyGraphEdges = [
-  { source: 'demand', target: 'controller' },
-  { source: 'demand', target: 'power' },
-  { source: 'controller', target: 'efuse' },
-  { source: 'controller', target: 'compute' },
-  { source: 'power', target: 'efuse' },
-  { source: 'efuse', target: 'safety' },
-  { source: 'compute', target: 'serdes' },
-  { source: 'safety', target: 'health' },
-  { source: 'health', target: 'deploy' },
-  { source: 'serdes', target: 'deploy' },
-] as const
-
-function buildTechnologyGraphNodes(width: number, height: number) {
-  const x = (ratio: number) => ratio * width
-  const y = (ratio: number) => ratio * height
-  const specs = [
-    { id: 'demand', label: '需求点', category: '需求', px: 0.1, py: 0.5 },
-    { id: 'controller', label: '区域控制器', category: '硬件', px: 0.26, py: 0.24 },
-    { id: 'power', label: '智能配电', category: '电源', px: 0.26, py: 0.76 },
-    { id: 'efuse', label: 'eFuse', category: '硬件', px: 0.44, py: 0.5 },
-    { id: 'safety', label: '功能安全', category: '标准', px: 0.56, py: 0.22 },
-    { id: 'compute', label: '中央计算', category: '平台', px: 0.5, py: 0.78 },
-    { id: 'serdes', label: 'SerDes', category: '互联', px: 0.68, py: 0.72 },
-    { id: 'health', label: '健康监测', category: '能力', px: 0.74, py: 0.38 },
-    { id: 'deploy', label: '部署方案', category: '落地', px: 0.9, py: 0.5 },
-  ] as const
-
-  return specs.map(({ id, label, category, px, py }) => ({
-    id,
-    data: { label, category },
-    style: { x: x(px), y: y(py) },
-  }))
-}
-
-async function syncTechnologyGraphViewport(graph: import('@antv/g6').Graph) {
-  await graph.fitView()
-  const [width, height] = graph.getSize()
-  const baselineZoom = graph.getZoom()
-  const viewportCenter = graph.getViewportCenter()
-  const { zoomMinSoft, zoomMaxSoft } = technologyGraphViewport
-
-  technologyGraphSessions.set(graph, {
-    baseline: {
-      viewportCenter: [viewportCenter[0], viewportCenter[1]],
-      zoom: baselineZoom,
-      width,
-      height,
-    },
-    contentBounds: computeTechnologyContentBounds(graph),
-  })
-
-  graph.setZoomRange([baselineZoom * zoomMinSoft, baselineZoom * zoomMaxSoft])
-}
-
-function TechnologyForceGraph() {
-  const containerRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    let disposed = false
-    let graph: import('@antv/g6').Graph | null = null
-    let resizeObserver: ResizeObserver | null = null
-    let bouncingViewport = false
-
-    const runViewportBounce = async () => {
-      if (!graph || bouncingViewport) return
-      const session = technologyGraphSessions.get(graph)
-      if (!session) return
-      const center = graph.getViewportCenter()
-      const currentCenter: [number, number] = [center[0], center[1]]
-      const zoom = graph.getZoom()
-      const { zoomMinSoft, zoomMaxSoft, panSoft } = technologyGraphViewport
-      const zoomOutsideSoft =
-        zoom < session.baseline.zoom * zoomMinSoft - 0.001
-        || zoom > session.baseline.zoom * zoomMaxSoft + 0.001
-      const panOutsideSoft = isOutsideTechnologyViewportPan(currentCenter, session, panSoft)
-      if (!panOutsideSoft && !zoomOutsideSoft) return
-
-      bouncingViewport = true
-      try {
-        await bounceTechnologyGraphViewport(graph)
-      } finally {
-        bouncingViewport = false
-      }
-    }
-
-    const mountGraph = async () => {
-      const { Graph } = await import('@antv/g6')
-      const container = containerRef.current
-      if (!container || disposed) return
-
-      const width = container.clientWidth || 900
-      const height = container.clientHeight || 520
-      const linkDistance = Math.max(220, Math.min(width * 0.16, 320))
-
-      graph = new Graph({
-        container,
-        width,
-        height,
-        padding: [48, 72, 56, 72],
-        autoFit: 'view',
-        animation: false,
-        data: {
-          nodes: buildTechnologyGraphNodes(width, height),
-          edges: technologyGraphEdges.map((edge) => ({ ...edge })),
-        },
-        node: {
-          type: 'circle',
-          style: {
-            size: 12,
-            fill: (datum: { data?: { category?: string } }) =>
-              technologyGraphCategoryColors[datum.data?.category ?? '落地'],
-            stroke: '#fff',
-            lineWidth: 2,
-            labelText: (datum: { data?: { label?: string } }) => datum.data?.label ?? '',
-            labelFill: '#334155',
-            labelPlacement: 'bottom',
-            labelOffsetY: 10,
-            labelFontSize: 12,
-            labelFontWeight: 500,
-            labelBackground: true,
-            labelBackgroundFill: '#fff',
-            labelBackgroundOpacity: 0.94,
-            labelPadding: [2, 6],
-          },
-        },
-        edge: {
-          type: 'line',
-          style: {
-            stroke: '#94a3b8',
-            strokeOpacity: 0.72,
-            lineWidth: 1,
-            endArrow: true,
-          },
-        },
-        layout: {
-          type: 'force',
-          preventOverlap: true,
-          nodeSize: 56,
-          nodeSpacing: 40,
-          collideStrength: 1,
-          nodeStrength: 1400,
-          edgeStrength: 80,
-          linkDistance,
-          gravity: 6,
-          maxIteration: 500,
-          animation: false,
-        },
-        behaviors: [
-          {
-            type: 'drag-element',
-            key: 'drag-element',
-            onFinish: (ids: string[]) => {
-              if (!graph) return
-              void bounceTechnologyGraphNodes(graph, ids)
-            },
-          },
-          'click-select',
-          {
-            type: 'drag-canvas',
-            key: 'drag-canvas',
-            onFinish: () => {
-              void runViewportBounce()
-            },
-          },
-          {
-            type: 'zoom-canvas',
-            key: 'zoom-canvas',
-            sensitivity: 0.9,
-            onFinish: () => {
-              void runViewportBounce()
-            },
-          },
-        ],
-      })
-
-      try {
-        await graph.render()
-        if (!disposed) await syncTechnologyGraphViewport(graph)
-      } catch (error: unknown) {
-        if (!disposed) console.error('[EEA] Technology force graph render failed', error)
-      }
-    }
-
-    void mountGraph()
-
-    resizeObserver = new ResizeObserver(() => {
-      const container = containerRef.current
-      if (!container || !graph || disposed) return
-      const width = container.clientWidth
-      const height = container.clientHeight
-      if (width <= 0 || height <= 0) return
-      graph.setSize(width, height)
-      void syncTechnologyGraphViewport(graph)
-    })
-    if (containerRef.current) resizeObserver.observe(containerRef.current)
-
-    return () => {
-      disposed = true
-      resizeObserver?.disconnect()
-      graph?.destroy()
-      graph = null
-    }
-  }, [])
-  return <div ref={containerRef} className="technology-force-graph" aria-label="技术关联力导向图" />
-}
-
-
-export function TraceView() {
-  const nodes = ['区域控制器', '智能配电', 'eFuse', '功能安全', '高压平台', 'SerDes', '中央计算', '车载芯片', '5G/6G-A通信', '功率半导体', '电源切换', '健康监测']
-  return <div className="trace-radar-page"><PageHeader eyebrow="03 · 需求与功能映射" title="链路追溯" description="以雷达视图浏览研究资产之间的关联、距离与价值链分布。" action={<Space><Button icon={<FilterOutlined />}>筛选</Button><Button type="primary" icon={<CloudDownloadOutlined />}>导出链路</Button></Space>} /><div className="trace-radar-toolbar"><Input prefix={<SearchOutlined />} placeholder="搜索信号、主题或技术落脚点" /><Text type="secondary">173 个元素</Text><Space wrap><Button type="primary" ghost>◉ 分段 1</Button><Button>⌁ 距离</Button><Button>◉ 颜色</Button><Button>显示</Button></Space></div><div className="trace-radar-layout"><Card className="panel-card trace-radar-canvas"><div className="radar-canvas"><div className="radar-grid grid-one" /><div className="radar-grid grid-two" /><div className="radar-grid grid-three" /><div className="radar-axis axis-a" /><div className="radar-axis axis-b" /><div className="radar-axis axis-c" /><div className="radar-axis axis-d" /><div className="radar-core"><Text>EEA</Text><strong>研究资产</strong></div>{nodes.map((node, index) => <div key={node} className={`radar-node node-${index + 1}`}><span />{node}</div>)}<div className="radar-sector sector-one">创造端</div><div className="radar-sector sector-two">传递端</div><div className="radar-sector sector-three">兑现端</div><div className="radar-sector sector-four">规制端</div></div></Card><Card className="panel-card trace-filter-panel" title="全局筛选"><Text strong>状态</Text><Select defaultValue="已发布" style={{ width: '100%', marginTop: 8 }} options={['已发布','待验收','已归档'].map((value) => ({ value, label: value }))} /><Divider /><Text strong>资产类型</Text><div className="filter-chip-list"><Tag color="blue">信号 94</Tag><Tag color="purple">主题 18</Tag><Tag color="green">需求点 36</Tag><Tag color="orange">技术落脚点 41</Tag></div><Divider /><Text strong>价值链阶段</Text><div className="filter-options">{['创造端','传递端','兑现端','规制端'].map((value) => <Checkbox key={value} defaultChecked>{value}</Checkbox>)}</div><Divider /><Text type="secondary">点击雷达节点查看关联证据与推导链。</Text></Card></div><Row gutter={18} className="trace-summary-row"><Col xs={24} lg={16}><Card className="panel-card" title="当前选中资产"><Title level={4}>低压系统智能化</Title><Text type="secondary">16 条来源 · 8 条已验证信号 · 12 个关联技术标签</Text><Divider /><Space wrap><Tag color="cyan">智能配电</Tag><Tag color="green">区域控制器</Tag><Tag color="purple">功能安全</Tag><Button type="link">查看推导链</Button></Space></Card></Col><Col xs={24} lg={8}><Card className="panel-card" title="关联健康度"><Progress type="dashboard" percent={82} strokeColor="#2563eb" /><Text type="secondary">证据完整度高于平台平均 9%</Text></Card></Col></Row></div>
+  return (
+    <>
+      <PageHeader eyebrow="03 · 需求与功能映射" title="链路追溯" description="查看服务端已保存的需求、车辆功能与技术落脚点关系。" />
+      {panoramaQuery.isError ? (
+        <QueryFailure message="链路数据加载失败，请检查服务连接后重试。" onRetry={() => { void panoramaQuery.refetch() }} />
+      ) : panoramaQuery.isLoading ? (
+        <Spin />
+      ) : relationships.length === 0 ? (
+        <PlatformEmptyState title="暂无可追溯链路" description="保存真实需求、车辆功能和技术落脚点关系后，链路将在此显示。" />
+      ) : (
+        <Card className="panel-card view-card" title="已保存的推导关系">
+          <Table
+            rowKey="key"
+            dataSource={relationships}
+            pagination={{ pageSize: 10 }}
+            columns={[
+              { title: '价值链环节', dataIndex: 'stage' },
+              { title: '需求点', dataIndex: 'demand' },
+              { title: '车辆功能', dataIndex: 'vehicleFunction' },
+              { title: '技术落脚点', dataIndex: 'landingPoint' },
+              { title: '技术域', dataIndex: 'domain' },
+              {
+                title: '操作',
+                key: 'action',
+                render: (_value: unknown, record: (typeof relationships)[number]) => (
+                  <Button type="link" onClick={() => onNavigate(`traceDetail/${record.landingPointId}`)}>
+                    查看完整链路
+                  </Button>
+                ),
+              },
+            ]}
+          />
+        </Card>
+      )}
+    </>
+  )
 }
 
 export function TechnologyView() {
-  const { data: panoramaStages } = usePanoramaStages()
-  const stages = panoramaStages?.length
-    ? panoramaStages
-    : [{ stage_label: '创造端', demand_count: 1, demand_points: [] }, { stage_label: '传递端', demand_count: 1, demand_points: [] }, { stage_label: '规制端', demand_count: 0, demand_points: [] }]
-  return <><PageHeader eyebrow="04 · 功能与技术拆解" title="技术全景图" description="按价值链环节展开需求点、车辆功能与技术落脚点，建立技术地图。" action={<Button type="primary" icon={<PlusOutlined />}>新增落脚点</Button>} /><Card className="panel-card linked-graph-card technology-graph-card" title="技术关联网络" extra={<Space><Tag color="blue">9 个节点</Tag><Tag color="green">22 条连接</Tag></Space>}><TechnologyForceGraph /></Card><div className="panorama-grid">{stages.map((stage, index) => <Card className="panel-card panorama-column" key={stage.stage_label} title={<span><span className="stage-marker" />{stage.stage_label}</span>} extra={<Tag>{stage.demand_count} 个需求</Tag>}><Text type="secondary">{index === 0 ? '供应链与器件能力' : index === 1 ? '主机厂与系统集成' : '行业标准与规定'}</Text>{stage.demand_points.flatMap((dp) => dp.functions.flatMap((fn) => fn.landing_points.map((lp) => ({ ...lp, role: fn.name })))).slice(0, 2).map((item) => <div className="landing-card" key={item.id}><div className="landing-head"><Text strong>{item.name}</Text><Tag color="blue">{item.domain_name}</Tag></div><Text type="secondary">{item.role ?? '—'}</Text><div className="landing-footer"><span>{item.standard_count} 个部署标准</span><Button type="link">打开</Button></div></div>)}{!stage.demand_points.length && landingPoints.slice(index, index + 1).map((item) => <div className="landing-card" key={item.key}><div className="landing-head"><Text strong>{item.name}</Text><Tag color="blue">{item.domain}</Tag></div><Text type="secondary">{item.role}</Text><div className="landing-footer"><span>{item.standards} 个部署标准</span><Button type="link">打开</Button></div></div>)}</Card>)}</div></>
-}
+  const panoramaQuery = usePanoramaStages()
+  const landingDetailsQuery = useQuery({
+    queryKey: eeaQueryKeys.landingPoints,
+    queryFn: () => fetchLandingPoints(),
+  })
+  const stages = panoramaQuery.data ?? []
+  const landingDetailsById = new Map((landingDetailsQuery.data ?? []).map((point) => [point.id, point]))
+  const hasPanoramaRecords = stages.some((stage) =>
+    stage.demand_count > 0 || stage.landing_point_count > 0 || stage.demand_points.length > 0,
+  )
 
-function TrafficFlowGraph() {
-  const containerRef = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    let cleanup = () => {}
-    void import('@antv/g2').then(({ Chart }) => {
-      if (!containerRef.current) return
-      const chart = new Chart({ container: containerRef.current, autoFit: false, width: 940, height: 360, padding: 28 })
-      cleanup = () => { void chart.destroy() }
-    chart.options({
-      type: 'sankey',
-      data: { value: [
-        { source: '资格筛选', target: '讨论', value: 158 },
-        { source: '讨论', target: '评估', value: 123 },
-        { source: '评估', target: '入选', value: 80 },
-        { source: '入选', target: '项目', value: 23 },
-        { source: '项目', target: '已落地', value: 8 },
-        { source: '资格筛选', target: '归档', value: 37 },
-        { source: '讨论', target: '归档', value: 35 },
-        { source: '评估', target: '归档', value: 43 },
-        { source: '入选', target: '归档', value: 57 },
-        { source: '项目', target: '归档', value: 15 },
-      ] },
-      layout: { nodeAlign: 'justify', nodePadding: 0.035, nodeSort: null },
-      scale: { color: { range: ['#2392e9', '#7ab53d', '#673ab7', '#f59e0b', '#0891b2', '#64748b'] } },
-      style: { nodeFillOpacity: 0.92, linkFillOpacity: 0.22, labelFontSize: 12, labelFill: '#334155' },
-      interaction: { tooltip: true },
-    })
-      void chart.render()
-    })
-    return () => cleanup()
-  }, [])
-  return <div ref={containerRef} className="traffic-flow-graph sankey-flow-graph" aria-label="创新进展桑基图" />
+  return (
+    <>
+      <PageHeader eyebrow="04 · 功能与技术拆解" title="技术全景图" description="按价值链环节展开需求点、车辆功能与技术落脚点，建立技术地图。" />
+      <FunctionDerivationEditor />
+      <LandingPointWorkbench />
+      {landingDetailsQuery.isError ? (
+        <QueryFailure message="落脚点角色说明加载失败，请检查服务连接后重试。" onRetry={() => { void landingDetailsQuery.refetch() }} />
+      ) : null}
+      {panoramaQuery.isError ? (
+        <QueryFailure message="技术全景加载失败，请检查服务连接后重试。" onRetry={() => { void panoramaQuery.refetch() }} />
+      ) : panoramaQuery.isLoading ? (
+        <Spin />
+      ) : !hasPanoramaRecords ? (
+        <PlatformEmptyState title="暂无技术落脚点" description="需求与车辆功能形成有效推导并保存落脚点后，将在此显示真实技术全景。" />
+      ) : (
+        <div className="panorama-grid">
+          {stages.map((stage) => {
+            const landingPointRows = stage.demand_points.flatMap((demand) =>
+              demand.functions.flatMap((vehicleFunction) =>
+                vehicleFunction.landing_points.map((landingPoint) => ({
+                  ...landingPoint,
+                  demandName: demand.name,
+                  functionName: vehicleFunction.name,
+                  roleDescription: landingDetailsById.get(landingPoint.id)?.role_description ?? null,
+                })),
+              ),
+            )
+
+            return (
+              <Card
+                className="panel-card panorama-column"
+                key={stage.stage_code}
+                title={<span><span className="stage-marker" />{stage.stage_label}</span>}
+                extra={<Tag>{stage.demand_count} 个需求</Tag>}
+              >
+                {landingPointRows.length ? landingPointRows.map((item) => (
+                  <div className="landing-card" key={item.id}>
+                    <div className="landing-head"><Text strong>{item.name}</Text><Tag color="blue">{item.domain_name}</Tag></div>
+                    <Text type="secondary">需求：{item.demandName}</Text>
+                    <Text type="secondary">车辆功能：{item.functionName}</Text>
+                    <Text type="secondary">功能内角色：{landingDetailsQuery.isSuccess ? item.roleDescription || '未填写' : '正在加载中'}</Text>
+                    <div className="landing-footer"><span>{item.standard_count} 个部署标准</span></div>
+                  </div>
+                )) : <Text type="secondary">该环节暂无技术落脚点。</Text>}
+              </Card>
+            )
+          })}
+        </div>
+      )}
+    </>
+  )
 }
 
 export function StrategyView() {
-  const [period, setPeriod] = useState('上季度')
-  const [focusedStage, setFocusedStage] = useState<string | null>(null)
-  const { rows: landingRows } = useLandingRows()
-  const tableRows = landingRows.length ? landingRows : landingPoints
-  const stages = [{ label: '资格筛选', value: '248', rate: '100%', segments: [{ value: '70%', color: 'blue' }, { value: '15%', color: 'green' }, { value: '15%', color: 'purple' }] }, { label: '讨论', value: '158', rate: '79%', segments: [{ value: '75%', color: 'blue' }, { value: '10%', color: 'green' }, { value: '15%', color: 'purple' }] }, { label: '评估', value: '123', rate: '65%', segments: [{ value: '75%', color: 'blue' }, { value: '10%', color: 'green' }, { value: '15%', color: 'purple' }] }, { label: '入选', value: '80', rate: '32%', segments: [{ value: '82%', color: 'blue' }, { value: '8%', color: 'green' }, { value: '10%', color: 'purple' }] }, { label: '项目', value: '23', rate: '9%', segments: [{ value: '83%', color: 'blue' }, { value: '8%', color: 'green' }] }, { label: '已落地', value: '8', rate: '3%', segments: [{ value: '80%', color: 'blue' }, { value: '20%', color: 'purple' }] }]
-  useEffect(() => {
-    const readStageFocus = () => {
-      const params = new URLSearchParams(window.location.search)
-      const funnel = params.get('funnel')
-      const hashStage = window.location.hash.replace(/^#stage-/, '')
-      const next = funnel ?? (window.location.hash.startsWith('#stage-') ? hashStage : null)
-      setFocusedStage(next)
-      if (next) {
-        requestAnimationFrame(() => {
-          document.getElementById(`strategy-stage-${next}`)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
-        })
-      }
-    }
-    readStageFocus()
-    window.addEventListener('popstate', readStageFocus)
-    window.addEventListener('hashchange', readStageFocus)
-    return () => {
-      window.removeEventListener('popstate', readStageFocus)
-      window.removeEventListener('hashchange', readStageFocus)
-    }
-  }, [])
-  return <div className="analyst-funnel-page"><PageHeader eyebrow="05 · 战略研判" title="创新组合" description="从研究信号到落地项目，按阶段查看技术机会的转化效率与组合表现。" action={<Button type="primary" icon={<PlusOutlined />}>发起研判</Button>} />{focusedStage && strategyStageLabels[focusedStage] ? <Tag className="strategy-stage-focus" color="blue" id={`strategy-stage-${focusedStage}`}>当前聚焦：{strategyStageLabels[focusedStage]}</Tag> : null}<div className="funnel-periods">{['本季度', '上季度', '今年', '去年', '全部'].map((item) => <Button key={item} type={period === item ? 'primary' : 'default'} shape="round" onClick={() => setPeriod(item)}>{item}</Button>)}</div><Row gutter={[16,16]} className="summary-row funnel-metrics"><Col xs={24} sm={12} lg={6}><Card><Statistic title="组合价值" value={132200456} prefix="$" /></Card></Col><Col xs={24} sm={12} lg={6}><Card><Statistic title="新增想法" value={832} suffix={<span className="funnel-delta">▲ 5%</span>} /></Card></Col><Col xs={24} sm={12} lg={6}><Card><Statistic title="新增项目" value={34} suffix={<span className="funnel-delta">▲ 3%</span>} /></Card></Col><Col xs={24} sm={12} lg={6}><Card><Statistic title="识别企业" value={28} suffix={<span className="funnel-delta">▲ 4%</span>} /></Card></Col></Row><Card className="panel-card analyst-funnel-card" title="创新进展" extra={<Space wrap><Tag color="green">● 进行中</Tag><Tag color="blue">● 已转交</Tag><Tag color="purple">● 已归档</Tag></Space>}><TrafficFlowGraph /><div className="funnel-stage-labels"><Text>研究池</Text><Text>讨论池</Text><Text>评估池</Text><Text>选择池</Text><Text>项目池</Text><Text>落地池</Text></div></Card><Card className="panel-card view-card" title="高潜方向" extra={<Button type="link">查看全部</Button>}><Table pagination={false} dataSource={tableRows.slice(0, 4)} columns={[{ title: '技术落脚点', dataIndex: 'name' }, { title: '业务匹配', render: () => <Progress percent={92} size="small" showInfo={false} /> }, { title: '综合分', dataIndex: 'score', render: (value: number) => <Text strong>{value} / 25</Text> }, { title: '策略分类', dataIndex: 'category', render: (value: string) => <Tag color={value === '短期可落地' ? 'green' : 'blue'}>{value}</Tag> }]} /></Card></div>
+  return <StrategyFunnelWorkbench />
 }
 
-function DeductionChainWorkspace() {
-  return <div className="deduction-workspace"><Card className="panel-card deduction-card deduction-radar-card" title="推导链雷达视图" extra={<Text type="secondary">价值链 · 距离</Text>}><DeductionChainRadar /></Card><Row gutter={[18, 18]}><Col xs={24} lg={15}><Card className="panel-card" title="推导说明"><Timeline items={[{ color: 'blue', content: '从原始网页提取 48V 供电网络、区域控制器和混合供电信息。' }, { color: 'green', content: '与同主题来源进行交叉验证，确认区域化供电趋势。' }, { color: 'purple', content: '映射至低压系统智能化主题和主动配电需求点。' }, { color: 'orange', content: '建议下一步补录功率半导体健康监测相关证据。' }]} /></Card></Col><Col xs={24} lg={9}><Card className="panel-card" title="链路摘要"><Statistic title="链路置信度" value={94} suffix="%" styles={{ content: { color: '#2563eb' } }} /><Divider /><Text type="secondary">5 个推导节点 · 12 条关联信号 · 3 个待验证假设</Text></Card></Col></Row></div>
+function DeductionChainWorkspace({ onNavigate, initialLandingPointId }: { onNavigate: NavigateFn; initialLandingPointId?: string }) {
+  const [landingPointId, setLandingPointId] = useState<string | undefined>(initialLandingPointId)
+  const landingQuery = useLandingRows()
+  const traceQuery = useTraceChain(landingPointId)
+  const trace = traceQuery.data
+  useEffect(() => {
+    setLandingPointId(initialLandingPointId || undefined)
+  }, [initialLandingPointId])
+  const standardPhases = ['设计', '制造', '运营'] as const
+  const standardConstraints = ['工程化', '经济性', '安全合规'] as const
+  const stageNames: Record<string, string> = {
+    landing_point: '技术落脚点',
+    vehicle_function: '车辆功能',
+    demand_point: '需求点',
+    theme: '技术主题',
+    signals: '原始信号',
+  }
+  const forwardSteps = Array.isArray(trace?.vehicle_function?.forward_trace?.steps)
+    ? trace.vehicle_function.forward_trace.steps
+    : []
+  const demandSteps = trace?.demand_point?.derivation_trace?.steps ?? []
+
+  return (
+    <div className="deduction-workspace">
+      <Card className="panel-card" title="选择技术落脚点">
+        {landingQuery.isError ? (
+          <QueryFailure message="技术落脚点加载失败，请检查服务连接后重试。" onRetry={() => { void landingQuery.refetch() }} />
+        ) : (
+          <Select
+            allowClear
+            showSearch={{ optionFilterProp: 'label' }}
+            loading={landingQuery.isLoading}
+            value={landingPointId}
+            onChange={(value) => {
+              setLandingPointId(value)
+              onNavigate(value ? `traceDetail/${value}` : 'traceDetail')
+            }}
+            placeholder="选择已保存的技术落脚点以查看来源链路"
+            options={landingQuery.rows.map((row) => ({ value: row.key, label: row.name }))}
+            style={{ width: '100%' }}
+          />
+        )}
+      </Card>
+      {traceQuery.isError ? (
+        traceQuery.error instanceof EeaApiError && [404, 422].includes(traceQuery.error.status) ? (
+          <Alert
+            type="warning"
+            showIcon
+            title="无法打开这条追溯链"
+            description={traceQuery.error.status === 404 ? '该技术落脚点已不存在，可能是链接过期或记录已删除。' : '追溯链接中的技术落脚点编号无效。'}
+            action={<Button size="small" onClick={() => onNavigate('traceDetail')}>返回追溯总览</Button>}
+          />
+        ) : (
+          <QueryFailure message="推导链加载失败，请检查服务连接后重试。" onRetry={() => { void traceQuery.refetch() }} />
+        )
+      ) : traceQuery.isLoading ? (
+        <Spin />
+      ) : trace ? (
+        <Space orientation="vertical" size={16} style={{ width: '100%' }}>
+          {!trace.completeness.complete ? (
+            <Alert
+              type="warning"
+              showIcon
+              title="推导链存在缺失或失效引用"
+              description={[
+                trace.completeness.missing_stages.length
+                  ? `缺少环节：${trace.completeness.missing_stages.map((stage) => stageNames[stage] ?? stage).join('、')}`
+                  : '',
+                trace.completeness.unresolved_evidence_signal_ids.length
+                  ? `无法解析的信号引用：${trace.completeness.unresolved_evidence_signal_ids.join('、')}`
+                  : '',
+                trace.completeness.unresolved_document_ids.length
+                  ? `无法解析的文档引用：${trace.completeness.unresolved_document_ids.join('、')}`
+                  : '',
+              ].filter(Boolean).join('；')}
+            />
+          ) : (
+            <Alert type="success" showIcon title="当前链路的结构化关联完整。来源文件与图片对象仍需按各自链接核验。" />
+          )}
+
+          <Card className="panel-card" title="当前推导关系">
+            <Space wrap>
+              <Tag color="blue">技术域：{trace.landing_point.domain_name ?? '未关联'}</Tag>
+              <Tag color={trace.function_published ? 'green' : 'orange'}>
+                功能：{trace.vehicle_function?.name ?? '未关联'} · {trace.function_published ? '已发布' : trace.vehicle_function ? '未发布' : '未关联'}
+              </Tag>
+              <Tag color={trace.demand_review_status === 'confirmed' ? 'green' : 'orange'}>
+                需求复核：{trace.demand_review_status ?? '无记录'}
+              </Tag>
+              <Tag>交叉验证：{trace.demand_cross_validation_conclusion ?? '无记录'}</Tag>
+              <Tag>战略版本：{trace.assessment_versions.length}</Tag>
+            </Space>
+            <Row gutter={[18, 18]} style={{ marginTop: 16 }}>
+              <Col xs={24} sm={12} lg={6}><Text strong>技术落脚点</Text><div>{trace.landing_point.name}</div></Col>
+              <Col xs={24} sm={12} lg={6}><Text strong>车辆功能</Text><div>{trace.vehicle_function?.name ?? '未关联'}</div></Col>
+              <Col xs={24} sm={12} lg={6}><Text strong>需求点</Text><div>{trace.demand_point?.name ?? '未关联'}</div></Col>
+              <Col xs={24} sm={12} lg={6}><Text strong>技术主题</Text><div>{trace.theme?.working_name ?? '未关联'}</div></Col>
+            </Row>
+          </Card>
+
+          <Card className="panel-card" title="需求推导与交叉验证">
+            {trace.demand_point ? (
+              <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+                {demandSteps.length ? demandSteps.map((step, index) => (
+                  <Card key={`${step.key}-${index}`} size="small" title={`${index + 1}. ${step.key}`}>
+                    <Paragraph style={{ whiteSpace: 'pre-wrap' }}>{step.content}</Paragraph>
+                    <Space wrap>
+                      {step.evidence_signal_ids.map((id) => (
+                        <Button key={id} type="link" onClick={() => onNavigate(`singal/${id}`)}>
+                          回到证据 {id.slice(0, 8)}
+                        </Button>
+                      ))}
+                    </Space>
+                  </Card>
+                )) : <Text type="secondary">没有保存需求五步推导记录。</Text>}
+                <Paragraph type="secondary">
+                  交叉验证结论：{trace.demand_cross_validation_conclusion ?? '未记录'}；
+                  需求状态：{trace.demand_review_status ?? '未复核'}。
+                </Paragraph>
+              </Space>
+            ) : <Text type="secondary">该功能未关联需求点。</Text>}
+          </Card>
+
+          <Card className="panel-card" title="车辆功能推导与反向验证">
+            {trace.vehicle_function ? (
+              <Row gutter={[18, 18]}>
+                <Col xs={24} lg={12}>
+                  <Text strong>正向五步</Text>
+                  {forwardSteps.length ? (
+                    <ol>{forwardSteps.map((step, index) => (
+                      <li key={index}><Paragraph style={{ whiteSpace: 'pre-wrap' }}>{typeof step === 'string' ? step : JSON.stringify(step)}</Paragraph></li>
+                    ))}</ol>
+                  ) : <Paragraph type="secondary">未保存正向步骤。</Paragraph>}
+                </Col>
+                <Col xs={24} lg={12}>
+                  <Text strong>反向验证记录</Text>
+                  <Paragraph style={{ whiteSpace: 'pre-wrap' }}>
+                    {trace.vehicle_function.reverse_trace
+                      ? JSON.stringify(trace.vehicle_function.reverse_trace, null, 2)
+                      : '未保存反向验证记录。'}
+                  </Paragraph>
+                </Col>
+              </Row>
+            ) : <Text type="secondary">该需求点尚未形成车辆功能。</Text>}
+          </Card>
+
+          <Card className="panel-card" title="部署标准九宫格">
+            <Row gutter={[12, 12]}>
+              {standardPhases.map((phase) => standardConstraints.map((constraint) => {
+                const cell = trace.standards.find((item) => item.phase === phase && item.constraint_type === constraint)
+                const text = cell
+                  ? cell.requirement_text?.trim() || '已明确留空'
+                  : '尚未填写'
+                return (
+                  <Col key={`${phase}-${constraint}`} xs={24} sm={12} lg={8}>
+                    <Card size="small" title={`${phase} · ${constraint}`}>
+                      <Text type={cell?.requirement_text?.trim() ? undefined : 'secondary'}>{text}</Text>
+                    </Card>
+                  </Col>
+                )
+              }))}
+            </Row>
+          </Card>
+
+          <Card className="panel-card" title="原始信号、文件与图片">
+            {trace.signals.length ? (
+              <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+                {trace.signals.map((signal) => (
+                  <Card key={signal.id} size="small" title={(
+                    <Space wrap>
+                      <Text strong>{signal.title}</Text>
+                      {signal.trace_relationships.includes('theme_member') ? <Tag color="blue">主题成员</Tag> : null}
+                      {signal.trace_relationships.includes('demand_evidence') ? <Tag color="purple">需求直接证据</Tag> : null}
+                      {signal.is_archived ? <Tag color="orange">已归档/停用</Tag> : <Tag color="green">{signal.evidence_status_code}</Tag>}
+                    </Space>
+                  )}>
+                    <Space wrap>
+                      <Text type="secondary">发布主体：{signal.publisher ?? '未记录'}</Text>
+                      <Text type="secondary">更新时间：{formatApiDate(signal.updated_at)}</Text>
+                      <Button type="link" onClick={() => onNavigate(`singal/${signal.id}`)}>打开证据</Button>
+                      {signal.archive_reference_present ? (
+                        <Button type="link" href={signalArchiveUrl(signal.id)} target="_blank" rel="noreferrer">查看网页存档</Button>
+                      ) : null}
+                    </Space>
+                    {signal.document ? (
+                      <Space wrap style={{ display: 'flex', marginTop: 8 }}>
+                        <Text>文档：{signal.document.filename ?? signal.document.id}</Text>
+                        <Tag>{signal.document.ingest_status}</Tag>
+                        <Tag>{signal.document.figure_count} 张图块</Tag>
+                        {signal.document.canonical_object_reference_present ? (
+                          <Button type="link" href={documentCanonicalUrl(signal.document.id)} target="_blank" rel="noreferrer">
+                            打开文档正文
+                          </Button>
+                        ) : <Text type="secondary">尚无可用的规范正文对象</Text>}
+                        {signal.document.figure_count > 0 ? (
+                          <Button type="link" onClick={() => onNavigate(`singal/${signal.id}`)}>在证据页查看图片</Button>
+                        ) : null}
+                      </Space>
+                    ) : null}
+                  </Card>
+                ))}
+              </Space>
+            ) : <PlatformEmptyState title="暂无关联信号" description="该落脚点的主题和证据链目前没有可回溯的信号记录。" />}
+          </Card>
+
+          <Card className="panel-card" title="部署边界与战略版本">
+            <Row gutter={[18, 18]}>
+              <Col xs={24} lg={12}>
+                <Text strong>当前部署边界证据</Text>
+                {trace.standards.filter((item) => item.requirement_text?.trim()).length ? (
+                  <ul>{trace.standards.filter((item) => item.requirement_text?.trim()).map((item) => (
+                    <li key={item.id}>{item.phase} · {item.constraint_type}：{item.requirement_text}</li>
+                  ))}</ul>
+                ) : <Paragraph type="secondary">没有非空部署标准；系统未补写内容。</Paragraph>}
+              </Col>
+              <Col xs={24} lg={12}>
+                {trace.assessment_versions.length ? (
+                  <Timeline items={trace.assessment_versions.map((assessment) => ({
+                    color: assessment.is_current ? 'green' : 'blue',
+                    children: (
+                      <Space orientation="vertical" size={4}>
+                        <Space wrap>
+                          <Text strong>v{assessment.version}</Text>
+                          <Tag color={assessment.is_current ? 'green' : 'default'}>{assessment.is_current ? '当前版本' : '历史版本'}</Tag>
+                          <Text>{assessment.classification}</Text>
+                          <Text>总分 {assessment.score_total}/25</Text>
+                        </Space>
+                        <Text type="secondary">操作者：{assessment.operator_subject ?? '—'} · {formatApiDate(assessment.assessed_at)}</Text>
+                        <Paragraph type="secondary">{assessment.strategy_note ?? '未填写策略备注'}</Paragraph>
+                      </Space>
+                    ),
+                  }))} />
+                ) : <Text type="secondary">尚无已定稿战略版本。</Text>}
+              </Col>
+            </Row>
+            <Divider />
+            <Alert
+              type="info"
+              showIcon
+              title="依据更新状态：无法确认"
+              description="当前数据模型没有需求复核时间基线，系统不会推断信号或标签更新后是否需要重新复核。"
+            />
+          </Card>
+        </Space>
+      ) : landingPointId ? (
+        <PlatformEmptyState title="暂无推导链" description="该落脚点尚无服务端返回的推导关系。" />
+      ) : (
+        <PlatformEmptyState title="请选择落脚点" description="当前展示真实已保存的落脚点链路，不生成示例节点或推导结论。" />
+      )}
+    </div>
+  )
 }
 
 type EvidenceStageView = 'archive' | 'markdown' | 'assistant' | 'mindmap' | 'report' | 'infographic'
@@ -751,9 +722,7 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
   const { signal: liveSignal, detail, isLoading, isError } = useSignalDetail(signalId)
   const { maps } = useRefCodeMaps()
   const apiId = detail?.id ?? (isUuid(signalId) ? signalId : null)
-  const signal =
-    liveSignal ??
-    (isUuid(signalId) ? null : signals.find((item) => item.key === signalId) ?? null)
+  const signal = liveSignal
   const statusTag = signal?.status === '已留存' ? 'green' : signal?.status === '待人工复核' ? 'warning' : 'default'
   const hasArchive = Boolean(detail?.snapshot_html_object_key)
   const isDocumentSource = Boolean(detail?.document_id)
@@ -1140,35 +1109,24 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
 }
 
 function PlaceholderView({ config }: { config: (typeof utilityPages)[string] }) {
-  return <ProCard className="page-placeholder" bordered={false} boxShadow><div className="placeholder-icon"><SettingOutlined /></div><Title level={3}>{config.title}</Title><Text type="secondary">{config.description}</Text><Tag color="blue">页面骨架已就绪</Tag><Text type="secondary">该模块将在研究流程完成后接入真实数据与交互。</Text></ProCard>
+  return <ProCard className="page-placeholder" bordered={false} boxShadow><div className="placeholder-icon"><SettingOutlined /></div><Title level={3}>{config.title}</Title><Text type="secondary">{config.description}</Text><Tag color="default">暂不可用</Tag><Text type="secondary">当前没有可用的服务端数据或操作接口。</Text></ProCard>
 }
 
 export function UtilityView({ page, onNavigate, signalId }: { page: keyof typeof utilityPages; onNavigate: NavigateFn; signalId: string }) {
-  const { message: messageApi } = AntApp.useApp()
   const config = utilityPages[page]
-  const isImport = page === 'newSignal'
   const isCreateTopic = page === 'createTopic'
   const isReport = page === 'report'
   const isKnowledge = page === 'knowledge'
-  const isDetail = page === 'singal' || page === 'traceDetail'
-  const submit = () => messageApi.success(isImport ? '已加入解析队列，MarkItDown 将生成 Markdown 证据' : `${config.action}成功`)
-  const uploadProps = { multiple: true, beforeUpload: () => false, onChange: ({ fileList }: { fileList: unknown[] }) => fileList.length && messageApi.info(`已选择 ${fileList.length} 个文件`) }
   if (page === 'traceDetail') {
-    const exportDeductionChain = () => messageApi.success('推导链导出任务已创建')
     return (
       <>
         <PageHeader
           eyebrow={config.eyebrow}
           title={config.title}
           description={config.description}
-          action={
-            <Space>
-              <Button onClick={() => onNavigate(`singal/${signalId}`)}>返回证据</Button>
-              <Button type="primary" icon={config.icon} onClick={exportDeductionChain}>{config.action}</Button>
-            </Space>
-          }
+          action={<Button onClick={() => onNavigate('trace')}>返回追溯总览</Button>}
         />
-        <DeductionChainWorkspace />
+        <DeductionChainWorkspace onNavigate={onNavigate} initialLandingPointId={signalId || undefined} />
       </>
     )
   }
@@ -1178,10 +1136,7 @@ export function UtilityView({ page, onNavigate, signalId }: { page: keyof typeof
   if (page === 'workflow') return <WorkflowStudio />
   if (page === 'profile') {
     return (
-      <ProfilePage
-        config={config}
-        onNavigate={(target) => onNavigate(typeof target === 'string' ? target : target.view)}
-      />
+      <ProfilePage config={config} />
     )
   }
   if (isCreateTopic) {
@@ -1204,21 +1159,14 @@ export function UtilityView({ page, onNavigate, signalId }: { page: keyof typeof
   if (isReport || page === 'notifications' || page === 'search') {
     return (
       <>
-        <PageHeader
-          eyebrow={config.eyebrow}
-          title={config.title}
-          description={config.description}
-          action={<Button type="primary" icon={config.icon} onClick={submit}>{config.action}</Button>}
-        />
+        <PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} />
         <PlaceholderView config={config} />
       </>
     )
   }
   return <>
-    <PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} action={<Button type="primary" icon={config.icon} onClick={submit}>{config.action}</Button>} />
-    {isImport ? (
-      <NewSignalImportPage onNavigate={onNavigate} />
-    ) : isReport ? <Card className="panel-card" title="PDF 报告模板"><Space orientation="vertical" size={16} style={{ width: '100%' }}><Select size="large" defaultValue="executive" options={[{ value: 'executive', label: '管理层摘要 · 6 页' }, { value: 'research', label: '完整研究报告 · 18 页' }, { value: 'evidence', label: '证据链附录 · 32 页' }]} /><Select mode="multiple" placeholder="选择章节" defaultValue={['signals','themes','strategy']} options={[{ value: 'signals', label: '信号与证据' }, { value: 'themes', label: '主题与需求点' }, { value: 'strategy', label: '战略研判' }, { value: 'trace', label: '链路追溯' }]} /><Button type="primary" icon={<FilePdfOutlined />} onClick={submit}>生成 PDF 预览</Button></Space></Card> : isDetail ? <Row gutter={[18, 18]}><Col xs={24} lg={16}><Card className="panel-card" title="原始证据与解析结果"><Space orientation="vertical" size={14} style={{ width: '100%' }}><div className="evidence-preview">原始 PDF / 图片预览区域</div><Input.TextArea rows={10} defaultValue="# Parsed evidence\n\nMarkItDown generated Markdown will appear here.\n\n- 来源：汽车电子观察\n- 标签：区域控制器、智能配电\n- 置信度：0.94" /><Button onClick={() => onNavigate('traceDetail')}>进入链路追溯</Button></Space></Card></Col><Col xs={24} lg={8}><Card className="panel-card" title="研究助手"><Input.TextArea rows={8} placeholder="询问这条证据，后续接入 PydanticAI" /><Button type="primary" block onClick={() => messageApi.info('已记录问题，等待研究助手接入')}>发送问题</Button></Card></Col></Row> : <><Row gutter={[18, 18]}><Col xs={24} lg={16}><Card className="panel-card" title="工作区操作"><Space orientation="vertical" size={16} style={{ width: '100%' }}><Input prefix={<SearchOutlined />} placeholder="输入关键词、主题或标签" size="large" /><Input.TextArea rows={5} placeholder="补充研究说明、摘要或筛选条件" /><Space><Button type="primary" icon={config.icon} onClick={submit}>{config.action}</Button><Button onClick={() => onNavigate('overview')}>返回总览</Button></Space></Space></Card></Col><Col xs={24} lg={8}><Card className="panel-card" title="模拟数据状态"><Statistic title="已加载记录" value={page === 'search' ? 28 : 12} /><Divider /><Text type="secondary">当前使用演示数据，后续可替换为 GraphQL 查询与会话接口。</Text></Card></Col></Row><Card className="panel-card view-card" title="最近记录"><Table pagination={false} dataSource={signals.slice(0, 3)} columns={[{ title: '名称', dataIndex: 'title' }, { title: '状态', dataIndex: 'status', render: (value: string) => <Tag color={statusColors[value]}>{value}</Tag> }, { title: '更新时间', dataIndex: 'date' }, { title: '操作', render: () => <Button type="link" onClick={() => onNavigate(`singal/${signalId}`)}>查看详情</Button> }]} /></Card></>}
+    <PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} />
+    <NewSignalImportPage onNavigate={onNavigate} />
   </>
 }
 
@@ -1234,37 +1182,29 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
   const [themeFilter, setThemeFilter] = useState<string | undefined>()
   const [stage, setStage] = useState('全部环节')
   const routeKeys = useMemo(() => new Set([...ALL_VIEW_KEYS, 'overview']), [])
-  const { data: overview, isSuccess: overviewReady } = useOverviewStats()
+  const overviewQuery = useOverviewStats()
+  const overview = overviewQuery.data
+  const refCodesQuery = useRefCodeMaps()
   const {
     rows: cachedSignals,
-    isLoading: signalsLoading,
-    usingMock,
-  } = useSignalsWithFallback({ query, stageChip: stage })
-  const { rows: themeRows } = useThemeRows()
+    isLoading: signalsQueryLoading,
+    isError: signalsQueryError,
+    refetch: refetchSignals,
+  } = useSignalsListFiltered({ query, stageChip: stage })
+  const themeQuery = useThemeRows()
+  const themeRows = themeQuery.rows
+  const signalsLoading = signalsQueryLoading || (!refCodesQuery.isSuccess && !refCodesQuery.isError)
+  const signalsError = signalsQueryError || refCodesQuery.isError
+  const themesLoading = themeQuery.isLoading || (!refCodesQuery.isSuccess && !refCodesQuery.isError)
+  const themesError = themeQuery.isError || refCodesQuery.isError
   const { rows: demandRows } = useDemandRows()
   const { rows: landingRows } = useLandingRows()
 
-  const funnelSteps = useMemo(
-    () => (overview ? overviewToFunnelSteps(overview) : overviewFunnelSteps),
-    [overview],
-  )
   const traceMetrics = useMemo(
-    () => (overview ? overviewToTraceMetrics(overview) : overviewTraceMetrics),
-    [overview],
+    () => (overviewQuery.isSuccess && overview ? overviewToTraceMetrics(overview) : []),
+    [overview, overviewQuery.isSuccess],
   )
-  const overviewThemes: OverviewThemeRow[] = themeRows.length
-    ? themeRows
-    : overviewReady
-      ? []
-      : themes.map((theme) => ({
-        id: theme.name,
-        name: theme.name,
-        note: theme.note,
-        count: theme.count,
-        sources: theme.sources,
-        progress: theme.progress,
-        color: theme.color,
-      }))
+  const overviewThemes = themeRows
 
   useEffect(() => {
     setLivePlatformSearchData({
@@ -1297,7 +1237,7 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
       const queryView = new URLSearchParams(window.location.search).get('view')
       const view = pathnameParts[0] ?? queryView ?? 'overview'
       setActiveMenu(routeKeys.has(view) ? view : 'overview')
-      if (pathnameParts[1]) setActiveSignalId(pathnameParts[1])
+      setActiveSignalId(pathnameParts[1] ?? '')
       const params = new URLSearchParams(window.location.search)
       setThemeFilter(params.get('theme_id') ?? undefined)
       const keyword = params.get('keyword')
@@ -1317,7 +1257,7 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
   const navigateTo = ({ view, id, query: routeQuery, hash }: AppRouteOptions) => {
     const nextView = routeKeys.has(view) ? view : 'overview'
     setActiveMenu(nextView)
-    if (id) setActiveSignalId(id)
+    setActiveSignalId(id ?? '')
     if (nextView === 'singal') setCollapsed(true)
     const path = buildAppPath({ view: nextView, id, query: routeQuery, hash })
     window.history.pushState({ view: nextView, id }, '', path)
@@ -1352,8 +1292,6 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
 
   const filteredSignals = cachedSignals
 
-  const showTrendDelta = Boolean(overviewReady && overview && overview.signals > 0)
-
   const signalTableColumns = buildSignalTableColumns({
     onNavigate: navigate,
     onTitleClick: (record) => navigate(`singal/${record.key}`),
@@ -1374,13 +1312,8 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
   const { signal: evidenceBarSignal, isLoading: evidenceBarLoading } = useSignalDetail(
     isEvidenceStudio ? activeSignalId : '',
   )
-  const evidenceMockSignal =
-    isEvidenceStudio && !isUuid(activeSignalId)
-      ? signals.find((item) => item.key === activeSignalId) ?? null
-      : null
   const evidencePageTitle = isEvidenceStudio
     ? evidenceBarSignal?.title ??
-      evidenceMockSignal?.title ??
       (evidenceBarLoading ? '加载中…' : utilityPages.singal.title)
     : undefined
 
@@ -1415,65 +1348,130 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
                 />
               )}
               {activeMenu === 'topics' && <TopicsView onNavigate={navigate} />}
-              {activeMenu === 'trace' && <TraceView />}
+              {activeMenu === 'trace' && <TraceView onNavigate={navigate} />}
               {activeMenu === 'technology' && <TechnologyView />}
               {activeMenu === 'strategy' && <StrategyView />}
               {utilityPages[activeMenu] && <UtilityView page={activeMenu as keyof typeof utilityPages} onNavigate={navigate} signalId={activeSignalId} />}
             </div>
             ) : (
             <div className="content-wrap">
-              {usingMock ? (
-                <Alert type="warning" showIcon title="演示数据" description="无法连接 API，部分总览指标可能为离线演示值。" style={{ marginBottom: 16 }} />
+              <div className="welcome-row"><div><Title level={2}>研究工作台</Title><Text type="secondary">查看平台中已保存的研究数据与推导进展。</Text></div><Space><Button icon={<CloudDownloadOutlined />} onClick={() => navigate('report')}>报告</Button><Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('newSignal')}>新增信号</Button></Space></div>
+              {overviewQuery.isError ? (
+                <QueryFailure
+                  message="总览数据加载失败，请检查服务连接后重试。"
+                  onRetry={() => { void overviewQuery.refetch() }}
+                />
               ) : null}
-              <div className="welcome-row"><div><Title level={2}>早上好，刘文 <span className="wave">✦</span></Title><Text type="secondary">这里是 EEA 前瞻技术扫描平台的最新研究进展。</Text></div><Space><Button icon={<CloudDownloadOutlined />} onClick={() => navigate('report')}>导出报告</Button><Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('newSignal')}>新增信号</Button></Space></div>
               <Row gutter={[16, 16]} className="overview-metrics">
                 <Col xs={24} sm={12} xl={6}>
                   <Card variant="borderless" className="panel-card metric-tile">
                     <Statistic
                       title={<span><RadarChartOutlined /> 信号总数</span>}
-                      value={overviewReady ? (overview?.signals ?? 0) : cachedSignals.length}
-                      suffix={showTrendDelta ? <span className="stat-delta">+18.4%</span> : undefined}
+                      value={overviewQuery.isSuccess ? overview?.signals ?? 0 : '—'}
                     />
-                    <div className="sparkline blue" role="group" aria-label="近九周信号入库趋势">
-                      {signalTrendBars.map((bar) => (
-                        <button
-                          key={bar.week}
-                          type="button"
-                          className={`sparkline-bar${bar.emphasis ? ' is-peak' : ''}`}
-                          style={{ height: `${bar.heightPercent}%` }}
-                          aria-label={`第 ${bar.week} 周信号趋势`}
-                          onClick={() => navigateTo({ view: 'signals', query: { trend: `w${bar.week}` }, hash: `week-${bar.week}` })}
-                        />
-                      ))}
-                    </div>
-                    <Text type="secondary">较上月新增 38 条 · 点击柱形查看对应周次</Text>
                   </Card>
                 </Col>
                 <Col xs={24} sm={12} xl={6}>
                   <Card variant="borderless" className="panel-card metric-tile">
-                    <Statistic title={<span><TagsOutlined /> 技术主题</span>} value={overview?.tech_themes ?? themeRows.length} suffix={<span className="stat-delta teal">+4</span>} />
-                    <Progress percent={68} showInfo={false} strokeColor="#0f766e" railColor="#e6f4f1" />
-                    <Text type="secondary">21 个主题已完成交叉验证</Text>
+                    <Statistic title={<span><TagsOutlined /> 技术主题</span>} value={overviewQuery.isSuccess ? overview?.tech_themes ?? 0 : '—'} />
                   </Card>
                 </Col>
                 <Col xs={24} sm={12} xl={6}>
                   <Card variant="borderless" className="panel-card metric-tile">
-                    <Statistic title={<span><FundProjectionScreenOutlined /> 需求点</span>} value={overview?.demand_points ?? demandRows.length} suffix={<span className="stat-delta amber">+3</span>} />
-                    <div className="mini-bars"><i style={{ height: '36%' }} /><i style={{ height: '58%' }} /><i style={{ height: '48%' }} /><i style={{ height: '75%' }} /><i style={{ height: '66%' }} /><i style={{ height: '92%' }} /></div>
-                    <Text type="secondary">6 个需求点待人工复核</Text>
+                    <Statistic title={<span><FundProjectionScreenOutlined /> 需求点</span>} value={overviewQuery.isSuccess ? overview?.demand_points ?? 0 : '—'} />
                   </Card>
                 </Col>
                 <Col xs={24} sm={12} xl={6}>
                   <Card variant="borderless" className="panel-card metric-tile">
-                    <Statistic title={<span><BulbOutlined /> 战略研判</span>} value={overview?.funnel_pool ?? landingRows.filter((r) => r.score > 0).length} suffix="项" />
-                    <div className="assessment-line"><span><i className="legend-dot blue-dot" />前瞻布局</span><span>5</span></div>
-                    <div className="assessment-line"><span><i className="legend-dot green-dot" />短期可落地</span><span>4</span></div>
-                    <div className="assessment-line"><span><i className="legend-dot orange-dot" />生态合作</span><span>3</span></div>
+                    <Statistic title={<span><BulbOutlined /> 战略研判</span>} value={overviewQuery.isSuccess ? overview?.funnel_pool ?? 0 : '—'} suffix="项" />
                   </Card>
                 </Col>
               </Row>
-              <Row gutter={[18, 18]} className="main-grid"><Col xs={24} lg={15}><Card variant="borderless" className="panel-card" title={<div><Title level={4}>技术主题动态</Title><Text type="secondary">跨来源信号聚合与需求点演进</Text></div>} extra={<Button type="link" onClick={() => navigate('topics')}>查看全部 <ArrowRightOutlined /></Button>}>{overviewThemes.length ? <div className="theme-list">{overviewThemes.map((theme) => <div className="theme-row clickable-row" key={theme.id} role="button" tabIndex={0} onClick={() => navigate('topics')} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') navigate('topics') }}><div className="theme-icon" style={{ background: `${theme.color}14`, color: theme.color }}><RadarChartOutlined /></div><div className="theme-info"><div className="theme-name"><Text strong>{theme.name}</Text><Tag color={theme.progress > 75 ? 'blue' : theme.progress > 60 ? 'cyan' : 'orange'}>{theme.progress > 75 ? '高热度' : '持续观察'}</Tag></div><Text type="secondary">{theme.note}</Text><Progress percent={theme.progress} showInfo={false} strokeColor={theme.color} railColor="#eef2f6" size="small" /></div><div className="theme-count"><Text strong>{theme.count}</Text><Text type="secondary">信号</Text><Text className="source-count">{theme.sources} 来源</Text></div><ArrowRightOutlined className="row-arrow" /></div>)}</div> : <PlatformEmptyState title="暂无技术主题" description="信号完成标签与归集后将在此展示主题动态。" action={<Button type="link" onClick={() => navigate('topics')}>打开主题工作台</Button>} />}</Card></Col><Col xs={24} lg={9}><Card variant="borderless" className="panel-card funnel-card" title={<div><Title level={4}>战略研判漏斗</Title><Text type="secondary">四步筛选与价值评估</Text></div>} extra={<Button type="text" icon={<MoreOutlined />} aria-label="打开战略研判" onClick={() => navigate('strategy')} />}><StrategyFunnelCard onNavigate={navigateTo} steps={funnelSteps} /></Card></Col></Row>
-              <Card className="panel-card view-card signals-panel" title="最新信号" extra={<Space wrap><Input allowClear prefix={<SearchOutlined />} placeholder="搜索标题、发布主体或标签" value={query} onChange={(e) => setQuery(e.target.value)} /><Select value={stage} onChange={setStage} options={['全部环节', '创造端', '传递端', '兑现端', '规制端'].map((item) => ({ label: item, value: item }))} suffixIcon={<FilterOutlined />} className="stage-select" /><Button type="link" onClick={() => navigate('signals')}>打开证据库 <ArrowRightOutlined /></Button></Space>}><Table rowKey="key" loading={signalsLoading} columns={signalTableColumns} dataSource={filteredSignals} pagination={{ pageSize: 6 }} scroll={{ x: 960 }} locale={signalsTableLocale(() => navigate('newSignal'))} /></Card>
+              {overviewQuery.isSuccess && overview?.weekly_new ? (
+                <Card
+                  className="panel-card"
+                  title="本周新增"
+                  extra={<Text type="secondary">UTC {formatApiDate(overview.weekly_window_start_utc)} 至 {formatApiDate(overview.as_of_utc)}</Text>}
+                  style={{ marginTop: 16 }}
+                >
+                  <Row gutter={[16, 16]}>
+                    {[
+                      ['信号', overview.weekly_new.signals],
+                      ['主题', overview.weekly_new.tech_themes],
+                      ['需求点', overview.weekly_new.demand_points],
+                      ['车辆功能', overview.weekly_new.vehicle_functions],
+                      ['技术落脚点', overview.weekly_new.landing_points],
+                      ['战略版本', overview.weekly_new.strategic_assessments],
+                      ['文档', overview.weekly_new.documents],
+                    ].map(([label, value]) => (
+                      <Col key={String(label)} xs={12} sm={8} xl={3}>
+                        <Statistic title={String(label)} value={Number(value)} />
+                      </Col>
+                    ))}
+                  </Row>
+                </Card>
+              ) : null}
+              {overviewQuery.isSuccess && overview ? (
+                <Card className="panel-card" title="待处理与失败任务" style={{ marginTop: 16 }}>
+                  <Space wrap>
+                    <Tag color="orange">待复核信号：{overview.signals_pending_review}</Tag>
+                    <Tag color="orange">待复核需求：{overview.demand_points_pending_review ?? 0}</Tag>
+                    <Tag>采集任务进行中：{overview.capture_jobs_open ?? 0}</Tag>
+                    <Tag color={(overview.capture_jobs_failed ?? 0) > 0 ? 'red' : 'default'}>采集失败：{overview.capture_jobs_failed ?? 0}</Tag>
+                    <Tag color={(overview.signals_fetch_failed ?? 0) > 0 ? 'red' : 'default'}>抓取失败信号：{overview.signals_fetch_failed ?? 0}</Tag>
+                    <Tag color={(overview.documents_failed_ingest ?? 0) > 0 ? 'red' : 'default'}>文档解析失败：{overview.documents_failed_ingest ?? 0}</Tag>
+                  </Space>
+                </Card>
+              ) : null}
+              <Row gutter={[18, 18]} className="main-grid">
+                <Col xs={24} lg={15}>
+                  <Card variant="borderless" className="panel-card" title={<div><Title level={4}>技术主题动态</Title><Text type="secondary">频次按未归档主题成员信号数；来源数按规范化 URL 去重，包含归档记录。</Text></div>} extra={<Button type="link" onClick={() => navigate('topics')}>查看全部 <ArrowRightOutlined /></Button>}>
+                    {themesError ? (
+                      <QueryFailure message="技术主题加载失败，请检查服务连接后重试。" onRetry={() => { void (refCodesQuery.isError ? refCodesQuery.refetch() : themeQuery.refetch()) }} />
+                    ) : themesLoading ? (
+                      <Spin />
+                    ) : overviewThemes.length ? (
+                      <div className="theme-list">
+                        {overviewThemes.map((theme) => (
+                          <div className="theme-row clickable-row" key={theme.id} role="button" tabIndex={0} onClick={() => navigate('topics')} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') navigate('topics') }}>
+                            <div className="theme-icon" style={{ background: `${theme.color}14`, color: theme.color }}><RadarChartOutlined /></div>
+                            <div className="theme-info"><div className="theme-name"><Text strong>{theme.name}</Text></div><Text type="secondary">{theme.count} 条信号 · {theme.sources} 个来源</Text></div>
+                            <ArrowRightOutlined className="row-arrow" />
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <PlatformEmptyState title="暂无技术主题" description="主题将在保存真实信号并完成人工归集后显示。" action={<Button type="link" onClick={() => navigate('topics')}>打开主题工作台</Button>} />
+                    )}
+                  </Card>
+                </Col>
+                <Col xs={24} lg={9}>
+                  <Card variant="borderless" className="panel-card funnel-card" title={<div><Title level={4}>战略研判</Title><Text type="secondary">按落脚点当前状态独占计数；第 4 步含待定稿与已定稿。</Text></div>} extra={<Button type="text" icon={<MoreOutlined />} aria-label="打开战略研判" onClick={() => navigate('strategy')} />}>
+                    {overviewQuery.isError ? <QueryFailure message="战略研判数据加载失败，请检查服务连接后重试。" onRetry={() => { void overviewQuery.refetch() }} /> : overviewQuery.isLoading ? <Spin /> : (
+                      <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+                        <Statistic title="当前战略版本数" value={overview?.funnel_pool ?? 0} suffix="项" />
+                        {overview?.strategy_funnel ? (
+                          <Space wrap>
+                            <Tag color="blue">扫描 {overview.strategy_funnel.industry_scan}</Tag>
+                            <Tag color="blue">适配 {overview.strategy_funnel.tier1_adaptation}</Tag>
+                            <Tag color="blue">评分 {overview.strategy_funnel.scoring}</Tag>
+                            <Tag color="blue">策略 {overview.strategy_funnel.classification}</Tag>
+                            <Tag color="orange">拒绝 {overview.strategy_funnel.rejected}</Tag>
+                            <Tag>未入池 {overview.strategy_funnel.pool_entry_blocked}</Tag>
+                          </Space>
+                        ) : <Text type="secondary">当前服务尚未提供漏斗阶段计数。</Text>}
+                      </Space>
+                    )}
+                  </Card>
+                </Col>
+              </Row>
+              <Card className="panel-card view-card signals-panel" title="最新信号" extra={<Space wrap><Input allowClear prefix={<SearchOutlined />} placeholder="搜索标题、发布主体或标签" value={query} onChange={(e) => setQuery(e.target.value)} /><Select value={stage} onChange={setStage} options={['全部环节', '创造端', '传递端', '兑现端', '规制端'].map((item) => ({ label: item, value: item }))} suffixIcon={<FilterOutlined />} className="stage-select" /><Button type="link" onClick={() => navigate('signals')}>打开证据库 <ArrowRightOutlined /></Button></Space>}>
+                {signalsError ? (
+                  <QueryFailure message="最新信号加载失败，请检查服务连接后重试。" onRetry={() => { void (refCodesQuery.isError ? refCodesQuery.refetch() : refetchSignals()) }} />
+                ) : (
+                  <Table rowKey="key" loading={signalsLoading} columns={signalTableColumns} dataSource={filteredSignals} pagination={{ pageSize: 6 }} scroll={{ x: 960 }} locale={signalsTableLocale(() => navigate('newSignal'))} />
+                )}
+              </Card>
               <Card
                 variant="borderless"
                 className="panel-card trace-strip-card"
@@ -1485,6 +1483,7 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
                 )}
                 extra={<Button type="primary" icon={<ArrowRightOutlined />} onClick={() => navigate('traceDetail')}>进入追溯视图</Button>}
               >
+                {overviewQuery.isError ? null : overviewQuery.isLoading ? <Spin /> : (
                 <Row gutter={[16, 16]} align="middle">
                   {traceMetrics.map((metric) => (
                     <Col key={metric.label} xs={12} sm={6}>
@@ -1492,6 +1491,7 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
                     </Col>
                   ))}
                 </Row>
+                )}
               </Card>
             </div>
             )}
