@@ -498,7 +498,7 @@ function DeductionChainWorkspace({ onNavigate, initialLandingPointId }: { onNavi
             showIcon
             title="无法打开这条追溯链"
             description={traceQuery.error.status === 404 ? '该技术落脚点已不存在，可能是链接过期或记录已删除。' : '追溯链接中的技术落脚点编号无效。'}
-            action={<Button size="small" onClick={() => onNavigate('traceDetail')}>返回追溯总览</Button>}
+            action={<Button size="small" onClick={() => onNavigate('traceDetail')}>重新选择落脚点</Button>}
           />
         ) : (
           <QueryFailure message="推导链加载失败，请检查服务连接后重试。" onRetry={() => { void traceQuery.refetch() }} />

@@ -102,22 +102,37 @@ func TestQueueCaptureAndUpload(t *testing.T) {
 	}
 }
 
+const queueTestOpenAPI = `{"paths":{"/api/v1/capture/jobs":{},"/api/v1/documents/raw":{},"/api/v1/signals/{signal_id}/archive":{}}}`
+
 func TestQueueUploadDocument(t *testing.T) {
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/documents/raw" {
+		switch r.URL.Path {
+		case "/openapi.json":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(queueTestOpenAPI))
+		case "/api/v1/capture/jobs":
+			if r.Method != http.MethodPost {
+				t.Errorf("method = %s", r.Method)
+			}
+			submissionID := r.FormValue("submission_id")
+			file, header, err := r.FormFile("file")
+			if err != nil {
+				t.Errorf("form file: %v", err)
+			} else {
+				defer file.Close()
+				if !strings.HasSuffix(header.Filename, ".pdf") {
+					t.Errorf("filename = %q", header.Filename)
+				}
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			w.Write([]byte(`{"id":"job-file-1","submission_id":"` + submissionID + `","status":"queued","attempt_count":0,"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}`))
+		case "/api/v1/capture/jobs/job-file-1":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"id":"job-file-1","submission_id":"sub-1","status":"succeeded","attempt_count":1,"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","signal_id":"sig-file-1","result":{"signal":{"id":"sig-file-1","title":"spec.pdf","evidence_status_code":"retained"}}}`))
+		default:
 			t.Errorf("path = %s", r.URL.Path)
 		}
-		file, header, err := r.FormFile("file")
-		if err != nil {
-			t.Errorf("form file: %v", err)
-		} else {
-			defer file.Close()
-			if !strings.HasSuffix(header.Filename, ".pdf") {
-				t.Errorf("filename = %q", header.Filename)
-			}
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"doc-1","sha256":"abc","mime":"application/pdf","size":4}`))
 	}))
 	defer api.Close()
 
@@ -134,7 +149,7 @@ func TestQueueUploadDocument(t *testing.T) {
 	q.Close()
 
 	job := q.Snapshot()[0]
-	if job.Status != StatusDone || job.SignalID != "doc-1" {
+	if job.Status != StatusDone || job.SignalID != "sig-file-1" {
 		t.Fatalf("job = %+v", job)
 	}
 }
@@ -142,13 +157,26 @@ func TestQueueUploadDocument(t *testing.T) {
 func TestQueueRetriesTransient(t *testing.T) {
 	attempts := 0
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		attempts++
-		if attempts < 3 {
-			w.WriteHeader(http.StatusBadGateway)
-			return
+		switch r.URL.Path {
+		case "/openapi.json":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(queueTestOpenAPI))
+		case "/api/v1/capture/jobs":
+			attempts++
+			if attempts < 3 {
+				w.WriteHeader(http.StatusBadGateway)
+				return
+			}
+			submissionID := r.FormValue("submission_id")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			w.Write([]byte(`{"id":"job-retry","submission_id":"` + submissionID + `","status":"queued","attempt_count":0,"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}`))
+		case "/api/v1/capture/jobs/job-retry":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"id":"job-retry","submission_id":"sub-retry","status":"succeeded","attempt_count":1,"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","signal_id":"sig-retry","result":{"signal":{"id":"sig-retry","title":"a.txt","evidence_status_code":"retained"}}}`))
+		default:
+			t.Errorf("path = %s", r.URL.Path)
 		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"sig-retry","sha256":"","mime":"","size":0}`))
 	}))
 	defer api.Close()
 
@@ -378,18 +406,32 @@ func TestRetryFailedCaptureUsesBackendRetryAction(t *testing.T) {
 func TestCancelQueuedOnlyCancelsBeforeWorkerClaim(t *testing.T) {
 	started := make(chan struct{}, 1)
 	release := make(chan struct{})
-	var requests atomic.Int32
+	var jobPosts atomic.Int32
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		requestNumber := requests.Add(1)
-		if r.URL.Path != "/api/v1/documents/raw" {
+		switch r.URL.Path {
+		case "/openapi.json":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(queueTestOpenAPI))
+		case "/api/v1/capture/jobs":
+			if r.Method != http.MethodPost {
+				t.Errorf("method = %s", r.Method)
+				return
+			}
+			postNumber := jobPosts.Add(1)
+			if postNumber == 1 {
+				started <- struct{}{}
+				<-release
+			}
+			submissionID := r.FormValue("submission_id")
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			w.Write([]byte(`{"id":"job-one","submission_id":"` + submissionID + `","status":"queued","attempt_count":0,"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z"}`))
+		case "/api/v1/capture/jobs/job-one":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"id":"job-one","submission_id":"sub-one","status":"succeeded","attempt_count":1,"created_at":"2026-01-01T00:00:00Z","updated_at":"2026-01-01T00:00:00Z","signal_id":"sig-one","result":{"signal":{"id":"sig-one","title":"one.txt","evidence_status_code":"retained"}}}`))
+		default:
 			t.Errorf("path = %q", r.URL.Path)
 		}
-		if requestNumber == 1 {
-			started <- struct{}{}
-			<-release
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"doc-one","sha256":"x","mime":"text/plain","size":4}`))
 	}))
 	defer api.Close()
 
@@ -423,38 +465,9 @@ func TestCancelQueuedOnlyCancelsBeforeWorkerClaim(t *testing.T) {
 	if len(jobs) != 2 || jobs[0].Status != StatusDone || jobs[1].Status != StatusCanceled {
 		t.Fatalf("jobs = %+v", jobs)
 	}
-	if requests.Load() != 1 {
-		t.Fatalf("cancelled queued item reached API; requests = %d", requests.Load())
+	if jobPosts.Load() != 1 {
+		t.Fatalf("cancelled queued item reached API; job posts = %d", jobPosts.Load())
 	}
-}
-
-func TestCancelQueuedRefusesRecoveredInFlightJob(t *testing.T) {
-	dir := t.TempDir()
-	seed := New(nil, nil, Options{StateDir: dir})
-	seed.mu.Lock()
-	seed.jobs = []*Job{{
-		ID: 1, Kind: KindURL, URL: "https://mp.weixin.qq.com/s/possibly-submitted",
-		SubmissionID: "stable-submission", Status: StatusRunning, Attempts: 1,
-		QueuedAt: time.Now(), StartedAt: time.Now(),
-	}}
-	seed.nextID = 1
-	if err := seed.persistLocked(); err != nil {
-		seed.mu.Unlock()
-		t.Fatal(err)
-	}
-	seed.mu.Unlock()
-
-	q := New(nil, nil, Options{StateDir: dir})
-	if err := q.Restore(); err != nil {
-		t.Fatal(err)
-	}
-	if job := q.Snapshot()[0]; job.Status != StatusQueued {
-		t.Fatalf("restored status = %s", job.Status)
-	}
-	if q.CancelQueued(1) {
-		t.Fatal("restored in-flight job may already have been accepted by the server")
-	}
-	q.Close()
 }
 
 func TestCancelQueuedRefusesRecoveredInFlightJob(t *testing.T) {

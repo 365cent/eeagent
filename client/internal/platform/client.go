@@ -551,6 +551,98 @@ func (e *SubmissionOutcomeUnknownError) Error() string {
 
 func (e *SubmissionOutcomeUnknownError) Unwrap() error { return e.Err }
 
+// FileJobInput submits a raw document through the durable capture job API when
+// available. CaptureJobID resumes polling or backend retry without re-uploading.
+type FileJobInput struct {
+	Path          string
+	SubmissionID  string
+	CaptureJobID  string
+	RetryJob      bool
+	OnJobAccepted func(string)
+}
+
+func (c *Client) SubmitFileJob(ctx context.Context, in FileJobInput) (*Signal, error) {
+	if in.CaptureJobID != "" {
+		if in.RetryJob {
+			return c.retryCaptureJobAndWait(ctx, in.CaptureJobID, in.OnJobAccepted)
+		}
+		return c.waitForCaptureJobID(ctx, in.CaptureJobID)
+	}
+	if strings.TrimSpace(in.Path) == "" {
+		return nil, errors.New("file path is required")
+	}
+	route, _, err := c.captureRoute(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if route != "/api/v1/capture/jobs" {
+		doc, uploadErr := c.UploadDocument(ctx, in.Path)
+		if uploadErr != nil {
+			return nil, uploadErr
+		}
+		return nil, fmt.Errorf(
+			"server does not expose durable capture jobs; document %s was stored without a derived signal",
+			doc.ID,
+		)
+	}
+	if strings.TrimSpace(in.SubmissionID) == "" {
+		return nil, errors.New("submission_id is required for durable file jobs")
+	}
+
+	f, err := os.Open(in.Path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return nil, err
+	}
+	if info.Size() > c.maxBytes {
+		return nil, fmt.Errorf("%s is %d bytes, over max_upload_mb", filepath.Base(in.Path), info.Size())
+	}
+	head := make([]byte, 512)
+	n, _ := io.ReadFull(f, head)
+	if _, err := f.Seek(0, io.SeekStart); err != nil {
+		return nil, err
+	}
+	ctype := mimeFor(in.Path, head[:n])
+
+	var body bytes.Buffer
+	mw := multipart.NewWriter(&body)
+	if err := mw.WriteField("submission_id", in.SubmissionID); err != nil {
+		return nil, err
+	}
+	part, err := createFilePart(mw, "file", filepath.Base(in.Path), ctype)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := io.Copy(part, f); err != nil {
+		return nil, err
+	}
+	if err := mw.Close(); err != nil {
+		return nil, err
+	}
+
+	var job CaptureJob
+	if err := c.doJSON(ctx, http.MethodPost, route, mw.FormDataContentType(), body.Bytes(), &job); err != nil {
+		return nil, captureSubmissionError(err, true)
+	}
+	if job.ID == "" {
+		return nil, &SubmissionOutcomeUnknownError{
+			Err:        errors.New("capture job response did not include an id"),
+			Idempotent: true,
+		}
+	}
+	if job.SubmissionID != in.SubmissionID {
+		return nil, fmt.Errorf("capture job %s returned submission_id %q; expected %q", job.ID, job.SubmissionID, in.SubmissionID)
+	}
+	if in.OnJobAccepted != nil {
+		in.OnJobAccepted(job.ID)
+	}
+	return c.waitForCaptureJob(ctx, job)
+}
+
 func captureSubmissionError(err error, idempotent bool) error {
 	var status *StatusError
 	if errors.As(err, &status) {

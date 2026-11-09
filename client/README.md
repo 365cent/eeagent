@@ -150,7 +150,7 @@ go test ./...
 
 ## 已知限制
 
-- 后端 `POST /api/v1/capture/jobs` 为持久网页采集任务入口；客户端把队列元数据写入 `queue_dir/queue-state.json`，待上传快照单独保存，启动 GUI 会恢复未完成任务，CLI 可用 `capture.exe upload --resume` 恢复。目录包含可能的敏感页面内容，请按本机数据处理；客户端不保存浏览器凭据。跨 Windows 重启恢复尚待真机验收；GUI 的失败重试/排队取消、队列历史清理功能尚未接入，文档上传还未迁移至统一异步任务。队列状态无限期保留；确认没有待恢复任务后，可退出程序并手动清理 `queue_dir`。历史同步 `/capture`、`/signals/capture`、`GET /signals/{id}/archive` 和 `POST /documents/raw` 仍保留。`capture doctor` 与 `upload` 使用 API 根（勿加 `/api/v1`）。
+- 后端 `POST /api/v1/capture/jobs` 为持久网页采集任务入口；客户端把队列元数据写入 `queue_dir/queue-state.json`，待上传快照单独保存，启动 GUI 会恢复未完成任务，CLI 可用 `capture.exe upload --resume` 恢复。目录包含可能的敏感页面内容，请按本机数据处理；客户端不保存浏览器凭据。跨 Windows 重启恢复尚待真机验收；GUI 已接入可安全重试的失败项和未开始的排队项取消，队列历史清理仍待实现，文档上传还未迁移至统一异步任务。队列状态无限期保留；确认没有待恢复任务后，可退出程序并手动清理 `queue_dir`。历史同步 `/capture`、`/signals/capture`、`GET /signals/{id}/archive` 和 `POST /documents/raw` 仍保留。`capture doctor` 与 `upload` 使用 API 根（勿加 `/api/v1`）。
 - 归档体积受 `max_upload_mb` 限制（默认 120 MiB）；图片极多的页面可能仍超限，可在 `config.json` 再调高。
 - SingleFile core 为 **AGPL-3.0-or-later**，内部分发前需法务确认；版本与构建命令固定在 [`scripts/vendor-singlefile.sh`](scripts/vendor-singlefile.sh)。
 - 动态登录墙、验证码仍需人工在那个可见浏览器窗口里处理。

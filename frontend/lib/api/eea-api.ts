@@ -5,6 +5,7 @@ import {
   documentCanonicalUrl,
   signalArchiveUrl,
   toQueryString,
+  EeaApiError,
   type UploadProgressHandler,
 } from '@/lib/api/client'
 import type {
@@ -51,6 +52,8 @@ import type {
   VehicleFunctionUpdatePayload,
   StrategyFunnelOut,
   StrategyFunnelPatchPayload,
+  CaptureJobOut,
+  CaptureResult,
 } from '@/lib/api/types'
 
 export function fetchRefCodes(domain?: string) {
@@ -238,6 +241,126 @@ export function createSignal(payload: SignalCreatePayload) {
   })
 }
 
+export type CreateCaptureJobInput = {
+  file: File | Blob
+  filename: string
+  submissionId: string
+  url?: string
+  channelCode?: string
+  publisher?: string
+  sourceLabel?: string
+}
+
+const CAPTURE_JOB_POLL_MS = 2000
+
+export async function createCaptureJob(
+  input: CreateCaptureJobInput,
+  options?: { onUploadProgress?: UploadProgressHandler },
+): Promise<CaptureJobOut> {
+  const form = new FormData()
+  form.set('submission_id', input.submissionId)
+  if (input.url) {
+    form.set('url', input.url)
+  }
+  if (input.channelCode) {
+    form.set('channel_code', input.channelCode)
+  }
+  if (input.publisher) {
+    form.set('publisher', input.publisher)
+  }
+  if (input.sourceLabel) {
+    form.set('source_label', input.sourceLabel)
+  }
+  form.set('file', input.file, input.filename)
+  return eeaPostFormData<CaptureJobOut>('/capture/jobs', form, options)
+}
+
+export function getCaptureJob(jobId: string) {
+  return eeaFetch<CaptureJobOut>(`/capture/jobs/${encodeURIComponent(jobId)}`)
+}
+
+export function retryCaptureJob(jobId: string) {
+  return eeaFetch<CaptureJobOut>(`/capture/jobs/${encodeURIComponent(jobId)}/retry`, {
+    method: 'POST',
+  })
+}
+
+export function cancelCaptureJob(jobId: string) {
+  return eeaFetch<CaptureJobOut>(`/capture/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: 'POST',
+  })
+}
+
+export function captureJobStageLabel(stage: CaptureJobOut['stage'], status: CaptureJobOut['status']): string {
+  if (status === 'failed') return '处理失败'
+  if (status === 'cancelled') return '已取消'
+  if (status === 'succeeded') return '已完成'
+  switch (stage) {
+    case 'fetching':
+      return '抓取页面…'
+    case 'processing':
+      return '解析入库…'
+    case 'queued':
+    default:
+      return '排队等待…'
+  }
+}
+
+export async function pollCaptureJob(
+  jobId: string,
+  options?: {
+    signal?: AbortSignal
+    onUpdate?: (job: CaptureJobOut) => void
+    pollIntervalMs?: number
+  },
+): Promise<CaptureJobOut> {
+  const interval = options?.pollIntervalMs ?? CAPTURE_JOB_POLL_MS
+  while (true) {
+    if (options?.signal?.aborted) {
+      throw new EeaApiError(0, '轮询已中止')
+    }
+    const job = await getCaptureJob(jobId)
+    options?.onUpdate?.(job)
+    if (job.status === 'succeeded' || job.status === 'failed' || job.status === 'cancelled') {
+      return job
+    }
+    await new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(resolve, interval)
+      const onAbort = () => {
+        clearTimeout(timer)
+        reject(new EeaApiError(0, '轮询已中止'))
+      }
+      options?.signal?.addEventListener('abort', onAbort, { once: true })
+    })
+  }
+}
+
+export async function runCaptureJobUntilResult(
+  input: CreateCaptureJobInput,
+  options?: {
+    onUploadProgress?: UploadProgressHandler
+    onJobUpdate?: (job: CaptureJobOut) => void
+    signal?: AbortSignal
+  },
+): Promise<CaptureResult> {
+  const accepted = await createCaptureJob(input, { onUploadProgress: options?.onUploadProgress })
+  const terminal = await pollCaptureJob(accepted.id, {
+    signal: options?.signal,
+    onUpdate: options?.onJobUpdate,
+  })
+  if (terminal.status === 'cancelled') {
+    throw new EeaApiError(409, '采集任务已取消')
+  }
+  if (terminal.status === 'failed') {
+    throw new EeaApiError(422, terminal.error?.trim() || '采集任务失败')
+  }
+  if (!terminal.result?.signal?.id) {
+    throw new EeaApiError(500, '任务已完成但未返回信号结果')
+  }
+  return terminal.result
+}
+
+/** @deprecated Prefer runCaptureJobUntilResult for durable ingest. */
 export async function captureSignal(
   input: {
     url: string
@@ -247,17 +370,18 @@ export async function captureSignal(
   },
   options?: { onUploadProgress?: UploadProgressHandler },
 ) {
-  const form = new FormData()
-  form.set('url', input.url)
-  if (input.channelCode) {
-    form.set('channel_code', input.channelCode)
-  }
-  form.set(
-    'archive_html',
-    input.archiveHtml,
-    input.filename ?? 'archive.html',
+  const submissionId = crypto.randomUUID()
+  const result = await runCaptureJobUntilResult(
+    {
+      file: input.archiveHtml,
+      filename: input.filename ?? 'archive.html',
+      submissionId,
+      url: input.url,
+      channelCode: input.channelCode,
+    },
+    options,
   )
-  return eeaPostFormData<SignalDetail>('/signals/capture', form, options)
+  return result.signal
 }
 
 export async function uploadRawDocument(

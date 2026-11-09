@@ -73,6 +73,39 @@ export type DocumentDetail = DocumentRawOut & {
   ingest_error?: string | null
 }
 
+export type CaptureJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+
+export type CaptureJobStage =
+  | 'queued'
+  | 'fetching'
+  | 'processing'
+  | 'completed'
+  | 'failed'
+  | 'cancelled'
+
+export type CaptureResult = {
+  source: string
+  via: string
+  signal: SignalDetail
+  document: DocumentRawOut | null
+}
+
+export type CaptureJobOut = {
+  id: string
+  submission_id: string
+  status: CaptureJobStatus
+  stage: CaptureJobStage
+  attempt_count: number
+  created_at: string
+  updated_at: string
+  started_at?: string | null
+  heartbeat_at?: string | null
+  finished_at?: string | null
+  signal_id?: string | null
+  error?: string | null
+  result?: CaptureResult | null
+}
+
 export type SignalCreatePayload = {
   title?: string | null
   url?: string | null

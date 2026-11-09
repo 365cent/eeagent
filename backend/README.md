@@ -3,7 +3,7 @@
 FastAPI + PostgreSQL 后端，实现《平台实施计划》第 3–8 节的推导链路：
 原始信号 → 技术主题 → 需求点 → 车辆功能 → 技术落脚点 → 部署标准 → 战略研判。
 
-- Schema：`docs/platform-implementation-plan.md` §4.1 基线 + 演进迁移（现行 **15 基表 + 2 视图**，Alembic 管理；0003 文档表、0005 访问留痕、0006 信号↔文档关联、0008 持久采集任务、0009 审计前后值、0010 功能卡与五个技术域词项、0011 需求五步证据链为计划外新增；当前 head 为 0011）
+- Schema：`docs/platform-implementation-plan.md` §4.1 基线 + 演进迁移（迁移由 Alembic 管理；0003 文档表、0005 访问留痕、0006 信号↔文档关联、0008 持久采集任务、0009 审计前后值、0010 功能卡与五个技术域词项、0011 需求五步证据链、0012 战略漏斗草稿；当前 head 为 0012_strategy_funnel）
 - API 文档（服务启动后）：http://127.0.0.1:8000/docs（交互式 Swagger UI）、http://127.0.0.1:8000/llms.txt（LLM 友好全量文档）、http://127.0.0.1:8000/（极简 HTML 索引）
 - 无需安装任何系统级服务：PostgreSQL 便携版自动下载到 `backend/.pg/`（git 忽略）
 

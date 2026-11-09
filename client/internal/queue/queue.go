@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -212,7 +213,7 @@ func (q *Queue) submit(job *Job) int {
 	}
 	q.nextID++
 	job.ID = q.nextID
-	if job.Kind == KindURL || job.Kind == KindArchive {
+	if job.Kind == KindURL || job.Kind == KindArchive || job.Kind == KindFile {
 		job.SubmissionID = platform.NewSubmissionID()
 	}
 	job.Status = StatusQueued
@@ -242,7 +243,7 @@ func (q *Queue) submit(job *Job) int {
 		}
 	}
 	q.jobs = append(q.jobs, job)
-	if (job.Kind == KindURL || job.Kind == KindArchive) && job.SubmissionID == "" {
+	if (job.Kind == KindURL || job.Kind == KindArchive || job.Kind == KindFile) && job.SubmissionID == "" {
 		job.Status = StatusFailed
 		job.Err = "could not generate a stable capture submission id"
 		job.FinishedAt = time.Now()
@@ -546,15 +547,33 @@ func (q *Queue) attempt(ctx context.Context, job *Job) error {
 		return nil
 	case KindFile:
 		q.setStage(job, "uploading")
-		doc, err := q.api.UploadDocument(ctx, job.Path)
+		info, err := os.Stat(job.Path)
 		if err != nil {
 			return err
 		}
+		sig, err := q.api.SubmitFileJob(ctx, platform.FileJobInput{
+			Path:          job.Path,
+			SubmissionID:  job.SubmissionID,
+			CaptureJobID:  job.CaptureJobID,
+			RetryJob:      job.RetryCapture,
+			OnJobAccepted: q.onCaptureJobAccepted(job),
+		})
+		if err != nil {
+			return err
+		}
+		if job.RetryCapture {
+			q.mu.Lock()
+			job.RetryCapture = false
+			if persistErr := q.persistLocked(); persistErr != nil {
+				q.setPersistenceErrorLocked(persistErr)
+			}
+			q.mu.Unlock()
+		}
 		q.mu.Lock()
-		job.SignalID = doc.ID
-		job.Bytes = int(doc.Size)
+		job.Bytes = int(info.Size())
 		q.persistChangedLocked()
 		q.mu.Unlock()
+		q.recordCaptureSignal(job, sig)
 		return nil
 	case KindArchive:
 		q.setStage(job, "uploading")

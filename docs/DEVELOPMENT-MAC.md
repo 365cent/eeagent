@@ -82,7 +82,7 @@ curl --fail http://127.0.0.1:8000/healthz
 
 若 `eea` 已存在，跳过 `createdb`。`app.seed` 只写入封闭参考词表和五个已确认技术域，不创建合成信号、需求或功能决策；自动化验收样例只进入专用 `eea_test`。该启动方式是本机开发检查，不是 Linux 服务验证。
 
-持久采集任务使用独立 worker。升级到当前 Alembic head（现为 0011）后，可在另一个 `backend/` 终端用相同数据库/对象目录环境前台观察开发任务：
+持久采集任务使用独立 worker。前端「导入证据」的文件拖入与 Windows 客户端文件队列也依赖该 worker 处理 `POST /api/v1/capture/jobs`。升级到当前 Alembic head（现为 0012_strategy_funnel）后，可在另一个 `backend/` 终端用相同数据库/对象目录环境前台观察开发任务：
 
 ```bash
 uv run python -m app.worker

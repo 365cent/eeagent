@@ -4,7 +4,7 @@
 
 ## 现状和边界
 
-已有 Edge/Chrome + 自写 CDP + SingleFile、GUI/CLI、URL/HTML/文档上传、网卡选择和本地持久队列。网页采集现优先提交至 `POST /api/v1/capture/jobs`，使用稳定 `submission_id` 并轮询服务端终态；旧服务端按 OpenAPI 回退到同步接口。文档上传仍调用 `/documents/raw`。本次未运行 Windows 真浏览器测试，旧“完成”记录不等同新发布验收。
+已有 Edge/Chrome + 自写 CDP + SingleFile、GUI/CLI、URL/HTML/文档上传、网卡选择和本地持久队列。网页采集现优先提交至 `POST /api/v1/capture/jobs`，使用稳定 `submission_id` 并轮询服务端终态；旧服务端按 OpenAPI 回退到同步接口。文件队列已改走 `POST /api/v1/capture/jobs`（与网页采集相同的 submission_id / 恢复语义）；`POST /documents/raw` 仅作无 jobs 能力时的服务端回退。本次未运行 Windows 真浏览器测试，旧“完成”记录不等同新发布验收。
 
 保持瘦客户端：上传 URL+自包含 HTML 或原始文件，不做 Markdown 转换、LLM 分类或业务推导，不分发 Chromium。Edge/Chrome 是实际实现，旧 WebView2/Rod 选择表不再指导开发。
 
@@ -25,8 +25,8 @@
 - 来源：REQ-SIG-01/07/10/11、会议统一采集入口；WBS 1.3.2、1.6.1。
 - 入口：[client.go](internal/platform/client.go)、[queue.go](internal/queue/queue.go)、[cli.go](internal/cli/cli.go)。
 - 网页异步上传、幂等重试、本地持久队列和 Retry-After 切片已交付；具体实现与检查证据见[交付记录](../docs/DELIVERY-RECORD.md#cc-02--asynchronous-capture-and-durable-client-queue-slice)。CC-02 验收仍未完成。
-- 服务端幂等和原子对象写入见 BE-01；部署必须升级到当前 Alembic head（现为 0011）。旧端点没有幂等键时不自动重试不确定结果。
-- 仍需将文档上传迁至统一任务；把 retry/cancel 操作接入 GUI；设计终态历史保留与清理；并在 Windows 真机验证客户端队列重启恢复。服务端 worker 已可轮询处理，但只有收到 succeeded 终态后才显示采集完成。
+- 服务端幂等和原子对象写入见 BE-01；部署必须升级到当前 Alembic head（现为 0012_strategy_funnel）。旧端点没有幂等键时不自动重试不确定结果。
+- 文档文件队列已迁至统一任务（见[交付记录](../docs/DELIVERY-RECORD.md#be-01--fe-02--cc-02--durable-document-and-html-ingest-slice)）；在 Windows 验证已接入的安全重试和本地未开始任务取消；设计终态历史保留与清理；并在 Windows 真机验证客户端队列重启恢复。服务端 worker 已可轮询处理，但只有收到 succeeded 终态后才显示采集完成。
 - 分开抓取超时、上传超时和服务器处理超时；上传完成后继续轮询，不能提前显示“入库成功”。
 - 明确的 4xx 验证错误不进入自动重试；429/5xx 有限重试并优先采用 `Retry-After`（最多等待 10 分钟）。401/403身份提示仍待身份接入。
 - 旧服务端兼容模式通过能力探测显式选择并提示，不因任意错误重复上传两条路径。
@@ -48,8 +48,8 @@
 - [ ] P0 · 部分实现 · 依赖 CC-01/02/03、FE-02。
 - 来源：Word §2.1；REQ-SIG-10/11；WBS 1.3.2。
 - 入口：[ui/](internal/ui/)、[queue.go](internal/queue/queue.go)。
-- 保持粘贴/拖放主操作面，显示每项的抓取、上传、解析、待复核、成功、失败，成功带信号打开入口。
-- 多文件任务逐项反馈、取消、重试；一项失败不掩盖其他项。复制诊断默认去除敏感信息。
+- 已有逐项状态、打开信号、安全重试、本地排队取消与微信原 URL 手工补录。剩余工作为核对 Windows GUI 的状态与真实 API 终态，覆盖多个文件与重启恢复。
+- Windows 验证一项失败后其他项可继续处理，已被服务器接受的任务保持可追踪。补齐复制脱敏诊断的操作和验收。
 - 微信失败提示在平台保留原 URL 粘贴正文；明确这是补救而非已成功抓取。
 - 验收：真实 API 下 GUI/CLI 同等可追溯，操作结果重启后可见；无虚假成功消息。
 
