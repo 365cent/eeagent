@@ -20,6 +20,11 @@ def _png(color=(30, 120, 200)) -> bytes:
     return buffer.getvalue()
 
 
+def _png_for_name(name: str) -> bytes:
+    h = hash(name) % 0xFFFFFF
+    return _png(((h >> 16) & 255, (h >> 8) & 255, h & 255))
+
+
 def _xlsx_workbook() -> bytes:
     from openpyxl import Workbook
     from openpyxl.drawing.image import Image as XLImage
@@ -173,7 +178,7 @@ def test_apply_captions_replaces_placeholders_and_appends_leftovers():
 
 
 async def test_upload_ingests_and_serves_canonical_markdown(client, monkeypatch):
-    async def fake_ingest(data, filename, mime):
+    async def fake_ingest(data, filename, mime, **kwargs):
         assert data == b"pptx-bytes"
         return doc_ingest.IngestResult(
             canonical_md="# 测试文档\n\n> 图 1：蓝色示意图\n",
@@ -213,7 +218,7 @@ async def test_upload_ingests_and_serves_canonical_markdown(client, monkeypatch)
 
 
 async def test_failed_ingest_keeps_blob_and_can_retry(client, monkeypatch):
-    async def boom(data, filename, mime):
+    async def boom(data, filename, mime, **kwargs):
         raise RuntimeError("markitdown exploded")
 
     monkeypatch.setattr("app.api.v1.documents.ingest_document", boom)
@@ -229,7 +234,7 @@ async def test_failed_ingest_keeps_blob_and_can_retry(client, monkeypatch):
     assert failed["ingest_status"] == "failed"
     assert "markitdown exploded" in (failed["ingest_error"] or "")
 
-    async def ok(data, filename, mime):
+    async def ok(data, filename, mime, **kwargs):
         assert data == b"raw-bytes"
         return doc_ingest.IngestResult(
             canonical_md="# 重试成功\n", markitdown_version="0.1.9", figures=[]
@@ -280,9 +285,9 @@ def _pptx_zip(slide_media: dict[str, list[str]], extra_media: list[tuple[str, by
         )
         for media_list in slide_media.values():
             for name in media_list:
-                zf.writestr(f"ppt/media/{name}", _png())
+                zf.writestr(f"ppt/media/{name}", _png_for_name(name))
         for name, blob in extra_media:
-            zf.writestr(f"ppt/media/{name}", blob)
+            zf.writestr(f"ppt/media/{name}", blob if blob != _png() else _png_for_name(name))
     return buffer.getvalue()
 
 
@@ -302,6 +307,22 @@ def test_extract_figures_follows_slide_relationship_order():
     # numeric slide order: slide10's picture after slide2's, not between 1 and 2
     assert figures[0].index == 1
     assert figures[2].source == "teamC.png"
+    assert figures[0].page == 1
+    assert figures[2].page == 10
+
+
+def test_pptx_figure_dedupes_identical_bytes():
+    blob = _png_for_name("shared")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as zf:
+        zf.writestr("ppt/slides/slide1.xml", "<p:sld/>")
+        zf.writestr("ppt/slides/_rels/slide1.xml.rels", _slide_rels(["dupA.png"]))
+        zf.writestr("ppt/slides/slide2.xml", "<p:sld/>")
+        zf.writestr("ppt/slides/_rels/slide2.xml.rels", _slide_rels(["dupB.png"]))
+        zf.writestr("ppt/media/dupA.png", blob)
+        zf.writestr("ppt/media/dupB.png", blob)
+    figures = doc_ingest.extract_figures(buffer.getvalue(), ".pptx")
+    assert [f.source for f in figures] == ["dupA.png"]
 
 
 def test_max_figures_cap_comes_from_settings(monkeypatch):

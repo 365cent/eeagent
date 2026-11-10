@@ -23,7 +23,7 @@ async def _upload_document(client, monkeypatch, canonical_md: str) -> dict:
     """Store a raw document with a canned canonical Markdown (no vision calls)."""
     from app.services import doc_ingest
 
-    async def fake_ingest(data, filename, mime):
+    async def fake_ingest(data, filename, mime, **kwargs):
         return doc_ingest.IngestResult(
             canonical_md=canonical_md,
             markitdown_version="0.1.9",

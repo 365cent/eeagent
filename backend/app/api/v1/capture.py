@@ -47,8 +47,10 @@ from app.api.v1.signals import (
     _create_signal_record,
     _document_title,
     _infer_channel_code,
+    _linked_demand_points,
+    _load_signal,
     _signal_from_html,
-    get_signal,
+    _to_detail,
 )
 
 router = APIRouter(prefix="/capture", tags=["capture"])
@@ -87,6 +89,13 @@ def _submission_fingerprint(
     return sha256_bytes(canonical.encode("utf-8"))
 
 
+async def _signal_detail(db: AsyncSession, signal_id: uuid.UUID):
+    signal = await _load_signal(db, signal_id)
+    detail = _to_detail(signal)
+    detail.linked_demand_points = await _linked_demand_points(db, signal.tech_theme_id)
+    return detail
+
+
 async def _capture_result(db: AsyncSession, signal: Signal, *, via: str) -> CaptureResult:
     document_out = None
     if signal.document_id is not None:
@@ -96,7 +105,7 @@ async def _capture_result(db: AsyncSession, signal: Signal, *, via: str) -> Capt
     return CaptureResult(
         source="document" if signal.document_id is not None else "html-snapshot",
         via=via,
-        signal=await get_signal(signal.id, db),
+        signal=await _signal_detail(db, signal.id),
         document=document_out,
     )
 
@@ -106,7 +115,16 @@ async def _capture_job_out(db: AsyncSession, job: CaptureJob) -> CaptureJobOut:
     if job.status == "succeeded" and job.signal_id is not None:
         signal = await db.get(Signal, job.signal_id)
         if signal is not None:
-            result = await _capture_result(db, signal, via=job.via)
+            try:
+                result = await _capture_result(db, signal, via=job.via)
+            except Exception as exc:  # noqa: BLE001 — job succeeded; omit result instead of 500
+                import logging
+
+                logging.getLogger(__name__).exception(
+                    "capture job %s result assembly failed: %s",
+                    job.id,
+                    exc.__class__.__name__,
+                )
     return CaptureJobOut(
         id=job.id,
         submission_id=job.submission_id,
@@ -139,6 +157,7 @@ async def _document_path(
     channel_code: str | None = None,
     capture_submission_id: uuid.UUID | None = None,
     capture_submission_sha256: str | None = None,
+    vision_captions: bool = False,
 ) -> tuple[Signal, DocumentRawOut]:
     """Document bytes → raw blob + ingest + derived signal (mirrors
     POST /documents/raw dedupe + POST /signals document_id path)."""
@@ -174,7 +193,7 @@ async def _document_path(
             await db.refresh(inserted)
             doc = inserted
     if doc.ingest_status != "parsed":
-        await _ingest_document(db, doc, data)
+        await _ingest_document(db, doc, data, vision_captions=vision_captions)
     # derived signal (S1-3): summary body, server-default title/url
     canonical = ""
     if doc.canonical_md_object_key:
@@ -322,6 +341,7 @@ async def capture(
         channel_code=channel_code,
         capture_submission_id=submission_id,
         capture_submission_sha256=fingerprint if submission_id is not None else None,
+        vision_captions=True,
     )
     return await _capture_result(db, sig, via=via)
 

@@ -159,7 +159,7 @@
 - 入口：[doc_ingest.py](app/services/doc_ingest.py)、[doc_summary.py](app/services/doc_summary.py)、[documents.py](app/api/v1/documents.py)。
 - 保留原始哈希、解析器/模型版本、页数/图数/错误；图块保存原件索引、出现位置、caption/OCR、识别置信度及 review 状态。
 - OOXML 按实际文档引用顺序映射图，区别 7 张不同图片和 8 次插入；PPT 正文/notes 与 master 装饰区分；PDF 缺 OCR 时明确失败/待复核。
-- PPTX **预览**参考 [`deckpeek`](../../reference-will-deleted/deckpeek-src/src/deckpeek.py)（[`docs/research/2026-11-10-deckpeek-pptx-preview-reference.md`](../../docs/research/2026-11-10-deckpeek-pptx-preview-reference.md)）：Linux 结构 HTML；Windows 侧 COM 底图可选。
+- PPTX **预览** vendored [`deckpeek`](vendor/deckpeek/deckpeek.py)（[`docs/research/2026-11-10-deckpeek-pptx-preview-reference.md`](../../docs/research/2026-11-10-deckpeek-pptx-preview-reference.md)）：Linux 结构 HTML + 可选 LibreOffice→PDF→PNG 胶片条；Windows 侧 COM 底图仍可选。
 - 文字可独立留存，图识别失败不让整份文档丢失；canonical 不保留未解释的 base64 占位，不虚构失败图描述。
 - 按标题路径分块，图块并入所属章节；关键词层级、分数与引用可读取/重算。新增 /documents/{id}/keywords、/extract-keywords 与图块读取契约。
 - 文档派生信号继续使用摘要及 document_id，不把全文塞回 body；通过分类服务生成建议，主题写入仍需已确认流程。

@@ -7,6 +7,10 @@ import signal
 
 os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
 
+from app.core.bootstrap_env import bootstrap_environment
+
+bootstrap_environment()
+
 from app.services.capture_jobs import worker_loop
 
 

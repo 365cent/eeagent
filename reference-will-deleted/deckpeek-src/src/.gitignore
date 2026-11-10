@@ -1,9 +1,0 @@
-# 构建产物 / 运行产物（不纳入交付源码）
-build/
-dist/
-__pycache__/
-*.pyc
-preview/
-decks/
-deckpeek.log
-.venv/

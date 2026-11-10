@@ -82,9 +82,11 @@ import { setLivePlatformSearchData } from '@/lib/live-platform-data'
 import { resetPlatformSearchIndex } from '@/lib/platform-search-index'
 import { isUuid } from '@/lib/api/api-errors'
 import { EeaApiError, signalArchiveUrl, documentCanonicalUrl } from '@/lib/api/client'
-import { DocumentDeckPreview } from '@/components/evidence/document-deck-preview'
-import { DocumentPdfViewer } from '@/components/evidence/document-pdf-viewer'
-import { documentPdfPreviewSupported, documentPptxDeckPreviewSupported } from '@/lib/document-preview'
+import {
+  DocumentDeckPreviewLazy,
+  DocumentPdfViewerLazy,
+} from '@/components/evidence/document-stage-preview'
+import { documentStagePreviewMode } from '@/lib/document-preview'
 import { fetchDocument, fetchLandingPoints, patchSignal } from '@/lib/api/eea-api'
 import { buildAppPath } from '@/lib/navigation'
 import { excerptLooksLikeChrome, sourceExcerptSnippet } from '@/lib/evidence/audio-overview-segments'
@@ -771,8 +773,7 @@ function DeductionChainWorkspace({ onNavigate, initialLandingPointId }: { onNavi
 
 type EvidenceStageView =
   | 'archive'
-  | 'deckPreview'
-  | 'documentPdf'
+  | 'preview'
   | 'markdown'
   | 'assistant'
   | 'mindmap'
@@ -800,27 +801,20 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
     staleTime: 60_000,
   })
   const documentMeta = documentQuery.data
-  const showDeckTab = Boolean(
-    documentId &&
-      documentMeta &&
-      documentPptxDeckPreviewSupported(documentMeta.filename, documentMeta.mime),
-  )
-  const showPdfTab = Boolean(
-    documentId &&
-      documentMeta &&
-      documentPdfPreviewSupported(documentMeta.filename, documentMeta.mime),
-  )
+  const documentPreviewMode = documentMeta
+    ? documentStagePreviewMode(documentMeta.filename, documentMeta.mime)
+    : null
+  const showPreviewTab = Boolean(documentId && documentMeta && documentPreviewMode)
   const documentPreviewPending = Boolean(documentId && (documentQuery.isLoading || documentQuery.isFetching))
   const signal = liveSignal
   const statusTag = signal?.status === '已留存' ? 'green' : signal?.status === '待人工复核' ? 'warning' : 'default'
   const hasArchive = Boolean(detail?.snapshot_html_object_key)
   const isDocumentSource = Boolean(documentId)
   const coreStageViews = useMemo((): EvidenceStageView[] => {
-    if (showDeckTab) return ['deckPreview', 'markdown', 'assistant']
-    if (showPdfTab) return ['documentPdf', 'markdown', 'assistant']
+    if (showPreviewTab) return ['preview', 'markdown', 'assistant']
     if (hasArchive) return ['archive', 'markdown', 'assistant']
     return ['markdown', 'assistant']
-  }, [showDeckTab, showPdfTab, hasArchive])
+  }, [showPreviewTab, hasArchive])
   const linkedDemands = detail?.linked_demand_points ?? []
   const hasBody = Boolean(
     detail?.body_object_key || bodyText || detail?.excerpt || (isDocumentSource && canonicalMd),
@@ -887,8 +881,8 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
     () =>
       [
         signalId,
-        showDeckTab ? '1' : '0',
-        showPdfTab ? '1' : '0',
+        showPreviewTab ? '1' : '0',
+        documentPreviewMode ?? '',
         hasArchive ? '1' : '0',
         hasBody ? '1' : '0',
         documentPreviewPending ? '1' : '0',
@@ -897,8 +891,8 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
       ].join('\0'),
     [
       signalId,
-      showDeckTab,
-      showPdfTab,
+      showPreviewTab,
+      documentPreviewMode,
       hasArchive,
       hasBody,
       documentPreviewPending,
@@ -912,12 +906,19 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
       if (hasBody) setStageView('markdown')
       return
     }
-    if (showDeckTab) setStageView('deckPreview')
-    else if (showPdfTab) setStageView('documentPdf')
+    if (showPreviewTab) setStageView('preview')
     else if (hasArchive) setStageView('archive')
     else if (detail?.body_object_key || detail?.excerpt) setStageView('markdown')
     else setStageView('assistant')
-  }, [evidenceStageAutoKey])
+  }, [
+    evidenceStageAutoKey,
+    documentPreviewPending,
+    hasBody,
+    showPreviewTab,
+    hasArchive,
+    detail?.body_object_key,
+    detail?.excerpt,
+  ])
 
   useEffect(() => {
     if (!detail?.document_id) {
@@ -985,13 +986,12 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
 
   const stageTabOptions: { label: string; value: EvidenceStageView; disabled?: boolean }[] = useMemo(
     () => [
-      ...(showDeckTab ? [{ label: '幻灯片', value: 'deckPreview' as const }] : []),
-      ...(showPdfTab ? [{ label: 'PDF 预览', value: 'documentPdf' as const }] : []),
-      ...(!showDeckTab && !showPdfTab ? [{ label: '来源留存', value: 'archive' as const, disabled: !hasArchive }] : []),
+      ...(showPreviewTab ? [{ label: '预览', value: 'preview' as const }] : []),
+      ...(!showPreviewTab ? [{ label: '来源留存', value: 'archive' as const, disabled: !hasArchive }] : []),
       { label: '解析快照', value: 'markdown', disabled: !hasBody },
       { label: '研究助手', value: 'assistant' },
     ],
-    [showDeckTab, showPdfTab, hasArchive, hasBody],
+    [showPreviewTab, hasArchive, hasBody],
   )
 
   if (isLoading && !signal) {
@@ -1190,18 +1190,16 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
           <EvidenceAudioTransport markdown={markdownSource} articleRef={markdownArticleRef} />
         ) : null}
         <div className="evidence-stage-panel">
-          <div className={`evidence-stage-tab-pane${stageView === 'deckPreview' ? ' is-active' : ''}`}>
-            {documentId && showDeckTab ? (
-              <DocumentDeckPreview documentId={documentId} />
+          <div className={`evidence-stage-tab-pane${stageView === 'preview' ? ' is-active' : ''}`}>
+            {documentId && documentPreviewMode === 'deck' ? (
+              <DocumentDeckPreviewLazy documentId={documentId} />
+            ) : documentId && documentPreviewMode === 'pdf' ? (
+              <DocumentPdfViewerLazy documentId={documentId} filename={documentQuery.data?.filename} />
             ) : (
-              <PlatformEmptyState title="无法预览幻灯片" description="该信号未关联 PPTX 文档。" />
-            )}
-          </div>
-          <div className={`evidence-stage-tab-pane${stageView === 'documentPdf' ? ' is-active' : ''}`}>
-            {documentId && showPdfTab ? (
-              <DocumentPdfViewer documentId={documentId} filename={documentQuery.data?.filename} />
-            ) : (
-              <PlatformEmptyState title="无法预览 PDF" description="该信号未关联可预览的 Office/PDF 文档。" />
+              <PlatformEmptyState
+                title="无法预览文档"
+                description="该信号未关联可预览的 PDF、Office 或 PPTX 文档。"
+              />
             )}
           </div>
           <div className={`evidence-stage-tab-pane${stageView === 'archive' ? ' is-active' : ''}`}>
@@ -1403,7 +1401,7 @@ export function UtilityView({ page, onNavigate, signalId }: { page: keyof typeof
 
 export function DashboardWorkspace({ initialView, signalId }: { initialView: string; signalId: string }) {
   const { message: messageApi } = AntApp.useApp()
-  const [collapsed, setCollapsed] = useState(() => initialView === 'singal')
+  const [collapsed, setCollapsed] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const [layoutReady, setLayoutReady] = useState(true)
   const [activeMenu, setActiveMenu] = useState(initialView)

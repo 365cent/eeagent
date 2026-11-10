@@ -63,7 +63,8 @@ export function documentPreviewPdfUrl(documentId: string): string {
 }
 
 export function documentDeckPreviewUrl(documentId: string): string {
-  return `${getEeaApiBase()}/documents/${encodeURIComponent(documentId)}/deck-preview`
+  const base = `${getEeaApiBase()}/documents/${encodeURIComponent(documentId)}/deck-preview`
+  return `${base}?eea_embed=5`
 }
 
 export function toQueryString(params: Record<string, string | number | boolean | undefined | null>): string {

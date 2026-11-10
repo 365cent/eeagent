@@ -12,6 +12,8 @@ const nextConfig = {
   },
   experimental: {
     optimizePackageImports: ['antd', '@ant-design/icons', 'lucide-react'],
+    // Match backend `doc_raw_upload_max_bytes` (120MB) so /api/v1 rewrites proxy full multipart bodies.
+    proxyClientMaxBodySize: '128mb',
   },
   async rewrites() {
     return [{ source: '/api/v1/:path*', destination: `${apiOrigin}/api/v1/:path*` }]

@@ -1,8 +1,13 @@
+import asyncio
+import os
 import sys
+from contextlib import asynccontextmanager
+
+from app.core.bootstrap_env import bootstrap_environment
+
+bootstrap_environment()
 
 if sys.platform == "win32":
-    import asyncio
-
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from fastapi import FastAPI, Request, Response
@@ -34,7 +39,30 @@ from app.core.config import get_settings
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title=settings.app_name, version="0.1.0")
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        worker_stop = asyncio.Event()
+        worker_task: asyncio.Task | None = None
+        embed = settings.app_env != "production" and os.environ.get("EEA_CAPTURE_EMBEDDED", "1").lower() not in (
+            "0",
+            "false",
+            "no",
+        )
+        if embed and os.environ.get("EEA_DEV_API_ONLY", "").lower() not in ("1", "true", "yes"):
+            from app.services.capture_jobs import worker_loop
+
+            worker_task = asyncio.create_task(worker_loop(worker_stop), name="eea-capture-worker")
+        yield
+        if worker_task is not None:
+            worker_stop.set()
+            worker_task.cancel()
+            try:
+                await worker_task
+            except asyncio.CancelledError:
+                pass
+
+    app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.origins,

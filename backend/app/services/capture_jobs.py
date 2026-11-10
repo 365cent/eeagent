@@ -318,6 +318,7 @@ async def _execute_capture(job_id: uuid.UUID, worker_id: str) -> None:
                 channel_code=channel_code,
                 capture_submission_id=submission_id,
                 capture_submission_sha256=fingerprint,
+                vision_captions=False,
             )
         signal_id = signal.id
         await _mark_succeeded(job_id, worker_id, signal_id)

@@ -31,3 +31,13 @@ export function documentPptxDeckPreviewSupported(
   const suffix = suffixFromFilename(filename, mime)
   return suffix === '.ppt' || suffix === '.pptx'
 }
+
+/** Evidence studio「预览」: PPTX → deckpeek; PDF/Word/other office → preview.pdf. */
+export function documentStagePreviewMode(
+  filename: string | null | undefined,
+  mime: string | null | undefined,
+): 'deck' | 'pdf' | null {
+  if (documentPptxDeckPreviewSupported(filename, mime)) return 'deck'
+  if (documentPdfPreviewSupported(filename, mime)) return 'pdf'
+  return null
+}

@@ -12,12 +12,34 @@ type DocumentPdfViewerProps = {
   filename?: string | null
 }
 
+const PDF_LOAD_FALLBACK_MS = 2500
+
 export function DocumentPdfViewer({ documentId, filename }: DocumentPdfViewerProps) {
   const fileUrl = useMemo(() => documentPreviewPdfUrl(documentId), [documentId])
   const [frameReady, setFrameReady] = useState(false)
+  const [frameError, setFrameError] = useState<string | null>(null)
 
   useEffect(() => {
     setFrameReady(false)
+    setFrameError(null)
+    let cancelled = false
+    const fallback = window.setTimeout(() => {
+      if (!cancelled) setFrameReady(true)
+    }, PDF_LOAD_FALLBACK_MS)
+    fetch(fileUrl, { method: 'HEAD', credentials: 'same-origin' })
+      .then((response) => {
+        if (cancelled) return
+        if (!response.ok) {
+          setFrameError(`PDF 预览不可用（HTTP ${response.status}）`)
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setFrameError('无法连接预览服务')
+      })
+    return () => {
+      cancelled = true
+      window.clearTimeout(fallback)
+    }
   }, [fileUrl])
 
   return (
@@ -32,6 +54,9 @@ export function DocumentPdfViewer({ documentId, filename }: DocumentPdfViewerPro
           新窗口打开
         </Button>
       </Space>
+      {frameError ? (
+        <Text type="danger">{frameError}</Text>
+      ) : null}
       <div className="document-pdf-viewer-frame-wrap">
         {!frameReady ? (
           <div className="document-pdf-viewer-frame-loading" aria-hidden>
@@ -42,7 +67,6 @@ export function DocumentPdfViewer({ documentId, filename }: DocumentPdfViewerPro
           title={filename ? `PDF 预览：${filename}` : 'PDF 预览'}
           className="document-pdf-viewer-frame"
           src={fileUrl}
-          sandbox="allow-same-origin allow-scripts"
           referrerPolicy="no-referrer"
           onLoad={() => setFrameReady(true)}
         />

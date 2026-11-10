@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import hashlib
 import io
 import os
 import re
@@ -185,23 +186,32 @@ def _numeric_part_key(name: str) -> list[tuple[int, str | int]]:
     ]
 
 
-def _document_part_order(zf: zipfile.ZipFile, suffix: str) -> dict[str, int]:
+def _slide_no_from_rels_path(rel_name: str) -> int | None:
+    m = re.search(r"/slides/_rels/slide(\d+)\.xml\.rels$", rel_name.replace("\\", "/"))
+    return int(m.group(1)) if m else None
+
+
+def _document_part_order(zf: zipfile.ZipFile, suffix: str) -> tuple[dict[str, int], dict[str, int]]:
     """Media file name → first position in document order.
 
     Walks the .rels of document-body parts (slides, notes, worksheets, …) in
     their numeric order and records each relationship target's first use.
     Media never referenced by a body part (slide-layout/master chrome, unused
     assets) gets no entry and sorts after every referenced figure.
+
+    For PPTX, the second map is media file name → first slide index that references it.
     """
     pattern = _PART_ORDER.get(suffix)
     if pattern is None:
-        return {}
+        return {}, {}
     order: dict[str, int] = {}
+    slide_of: dict[str, int] = {}
     rel_parts = sorted(
         (n for n in zf.namelist() if pattern.search(n)), key=_numeric_part_key
     )
     position = 0
     for rel_name in rel_parts:
+        slide_no = _slide_no_from_rels_path(rel_name) if suffix == ".pptx" else None
         try:
             root = ET.fromstring(zf.read(rel_name))
         except ET.ParseError:
@@ -212,8 +222,10 @@ def _document_part_order(zf: zipfile.ZipFile, suffix: str) -> dict[str, int]:
             file_name = target.rsplit("/", 1)[-1]
             if file_name not in order:
                 order[file_name] = position
+                if slide_no is not None:
+                    slide_of[file_name] = slide_no
                 position += 1
-    return order
+    return order, slide_of
 
 
 def _zip_figures(data: bytes, suffix: str, prefix: str) -> list[Figure]:
@@ -223,9 +235,11 @@ def _zip_figures(data: bytes, suffix: str, prefix: str) -> list[Figure]:
     after all referenced figures, so captions land where the reader sees them.
     """
     figures: list[Figure] = []
+    dedupe = suffix == ".pptx"
+    seen_sha256: set[str] = set()
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
-            order = _document_part_order(zf, suffix)
+            order, slide_of = _document_part_order(zf, suffix)
             names = sorted(
                 (n for n in zf.namelist() if n.startswith(prefix) and not n.endswith("/")),
                 key=lambda n: (order.get(Path(n).name, len(order)), _numeric_part_key(n)),
@@ -237,10 +251,17 @@ def _zip_figures(data: bytes, suffix: str, prefix: str) -> list[Figure]:
                 blob = zf.read(name)
                 if not blob or len(blob) > MAX_FIGURE_BYTES:
                     continue
+                if dedupe:
+                    digest = hashlib.sha256(blob).hexdigest()
+                    if digest in seen_sha256:
+                        continue
+                    seen_sha256.add(digest)
+                base = Path(name).name
                 figures.append(
                     Figure(
                         index=len(figures) + 1,
-                        source=Path(name).name,
+                        source=base,
+                        page=slide_of.get(base),
                         mime=_EXT_MIME.get(ext, "image/png"),
                         data=blob,
                     )
@@ -375,7 +396,13 @@ def apply_captions(markdown: str, figures: list[Figure]) -> str:
     return output.strip() + "\n"
 
 
-async def ingest_document(data: bytes, filename: str | None, mime: str | None) -> IngestResult:
+async def ingest_document(
+    data: bytes,
+    filename: str | None,
+    mime: str | None,
+    *,
+    vision_captions: bool = True,
+) -> IngestResult:
     settings = get_settings()
     suffix = suffix_for(filename, mime)
     markdown, md_version = await run_in_threadpool(_convert_sync, data, suffix)
@@ -383,33 +410,41 @@ async def ingest_document(data: bytes, filename: str | None, mime: str | None) -
     figures = figures[: settings.max_figures]
 
     vision_model: str | None = None
-    if figures:
+    if figures and vision_captions:
         try:
             vision_model = await resolve_vision_model()
         except Exception:  # noqa: BLE001 - captions are best-effort
             vision_model = None
         if vision_model:
-            semaphore = asyncio.Semaphore(3)
 
-            async def caption(figure: Figure) -> None:
-                async with semaphore:
-                    figure.caption = await caption_figure(
-                        figure,
-                        model=vision_model,
-                        retries=settings.vision_caption_retry,
-                    )
+            async def caption_figures() -> None:
+                semaphore = asyncio.Semaphore(3)
 
-            await asyncio.gather(*(caption(figure) for figure in figures))
-            # The concurrent pass drops captions when the gateway rate-limits
-            # long batches; top up the stragglers one at a time, with pacing.
-            for figure in figures:
-                if not figure.caption:
-                    figure.caption = await caption_figure(
-                        figure,
-                        model=vision_model,
-                        retries=settings.vision_caption_retry,
-                    )
-                    await asyncio.sleep(0.5)
+                async def caption(figure: Figure) -> None:
+                    async with semaphore:
+                        figure.caption = await caption_figure(
+                            figure,
+                            model=vision_model,
+                            retries=settings.vision_caption_retry,
+                        )
+
+                await asyncio.gather(*(caption(figure) for figure in figures))
+                for figure in figures:
+                    if not figure.caption:
+                        figure.caption = await caption_figure(
+                            figure,
+                            model=vision_model,
+                            retries=settings.vision_caption_retry,
+                        )
+                        await asyncio.sleep(0.5)
+
+            try:
+                await asyncio.wait_for(
+                    caption_figures(),
+                    timeout=settings.doc_ingest_vision_timeout_seconds,
+                )
+            except asyncio.TimeoutError:
+                pass
 
     if not markdown.strip():
         markdown = f"# {filename or 'document'}\n\n（MarkItDown 未抽取到文本）"

@@ -34,7 +34,7 @@ async def _create_job(client, *, submission_id: uuid.UUID, files, data=None):
 
 @pytest.fixture
 def fake_ingest(monkeypatch):
-    async def _ingest(data, filename, mime):
+    async def _ingest(data, filename, mime, **kwargs):
         from app.services.doc_ingest import IngestResult
 
         return IngestResult(

@@ -58,7 +58,6 @@ export function DocumentDeckPreview({ documentId }: DocumentDeckPreviewProps) {
       <iframe
         title="PPTX 幻灯片预览"
         className="document-deck-preview-frame"
-        sandbox="allow-same-origin allow-scripts"
         referrerPolicy="no-referrer"
         src={ready ? src : undefined}
       />

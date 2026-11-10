@@ -16,6 +16,7 @@ import {
   captureJobStageLabel,
   createCaptureJob,
   createSignal,
+  fetchSignal,
   fetchPanoramaImportBatch,
   getCaptureJob,
   importCaptureUrlList,
@@ -93,10 +94,17 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
     }
   }
 
-  const finishJobSuccess = (job: CaptureJobOut) => {
-    const signal = job.result?.signal
+  const finishJobSuccess = async (job: CaptureJobOut) => {
+    const signal =
+      job.result?.signal ??
+      (job.signal_id
+        ? await fetchSignal(job.signal_id).catch(() => null)
+        : null)
     if (!signal?.id) {
-      throw new Error('任务已完成但未返回信号')
+      throw new Error(
+        job.error?.trim() ||
+          '任务已完成但未返回信号详情；可在信号列表中查找或重试采集。',
+      )
     }
     clearPendingCaptureJob()
     clearUploadProgress()
@@ -134,7 +142,7 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
         },
       })
       if (terminal.status === 'succeeded') {
-        finishJobSuccess(terminal)
+        await finishJobSuccess(terminal)
       } else if (terminal.status === 'failed') {
         setJobError(terminal.error?.trim() || '采集任务失败')
         setActiveJobId(jobId)
@@ -354,7 +362,7 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
         },
       })
       if (terminal.status === 'succeeded') {
-        finishJobSuccess(terminal)
+        await finishJobSuccess(terminal)
       } else if (terminal.status === 'failed') {
         setJobError(terminal.error?.trim() || '采集任务失败')
       } else {
@@ -387,7 +395,7 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
         },
       })
       if (terminal.status === 'succeeded') {
-        finishJobSuccess(terminal)
+        await finishJobSuccess(terminal)
       } else {
         setJobError(terminal.error?.trim() || '采集任务失败')
       }

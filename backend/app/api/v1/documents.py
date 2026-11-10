@@ -35,6 +35,7 @@ from app.services.pptx_deck_preview import (
     PptxDeckPreviewError,
     PptxDeckPreviewUnavailableError,
     build_pptx_deck_preview,
+    deck_preview_html_is_legacy,
     deck_preview_index_key,
     deck_preview_prefix,
     inject_deck_preview_base_href,
@@ -91,7 +92,13 @@ def _detail(doc: Document) -> DocumentDetail:
     )
 
 
-async def _ingest(db: AsyncSession, doc: Document, data: bytes) -> None:
+async def _ingest(
+    db: AsyncSession,
+    doc: Document,
+    data: bytes,
+    *,
+    vision_captions: bool = True,
+) -> None:
     _, max_parse = _doc_limits()
     if len(data) > max_parse:
         doc.ingest_status = "skipped"
@@ -103,7 +110,12 @@ async def _ingest(db: AsyncSession, doc: Document, data: bytes) -> None:
         await db.refresh(doc)
         return
     try:
-        result = await ingest_document(data, doc.filename, doc.mime)
+        result = await ingest_document(
+            data,
+            doc.filename,
+            doc.mime,
+            vision_captions=vision_captions,
+        )
         md_bytes = result.canonical_md.encode("utf-8")
         doc.canonical_md_object_key = save_bytes(md_bytes, folder="documents", ext="md")
         doc.canonical_md_sha256 = sha256_bytes(md_bytes)
@@ -252,11 +264,23 @@ async def get_document_deck_preview_html(document_id: uuid.UUID, db: AsyncSessio
         raise HTTPException(500, str(exc)) from exc
 
     html = load_bytes(deck_preview_index_key(doc.sha256))
+    if html and deck_preview_html_is_legacy(html):
+        try:
+            await run_in_threadpool(
+                lambda: build_pptx_deck_preview(data, doc.filename, doc.sha256, force=True)
+            )
+        except (PptxDeckPreviewUnavailableError, PptxDeckPreviewError):
+            pass
+        html = load_bytes(deck_preview_index_key(doc.sha256))
     if html is None:
         raise HTTPException(500, "幻灯片预览生成失败（index.html 缺失）")
     base_href = f"/api/v1/documents/{document_id}/deck-preview/"
     body = inject_deck_preview_base_href(html, base_href)
-    return Response(content=body, media_type="text/html; charset=utf-8")
+    return Response(
+        content=body,
+        media_type="text/html; charset=utf-8",
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @router.get("/{document_id}/deck-preview/{asset_path:path}")

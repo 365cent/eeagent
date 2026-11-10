@@ -502,7 +502,7 @@ async def test_overview_counts_each_strategy_landing_point_at_its_current_step(c
 async def test_overview_failed_document_todo_tracks_retryable_ingest_state(client, monkeypatch):
     from app.services import doc_ingest
 
-    async def fail_ingest(data, filename, mime):
+    async def fail_ingest(data, filename, mime, **kwargs):
         raise RuntimeError("expected parser failure")
 
     monkeypatch.setattr("app.api.v1.documents.ingest_document", fail_ingest)
@@ -516,7 +516,7 @@ async def test_overview_failed_document_todo_tracks_retryable_ingest_state(clien
     overview = (await client.get("/api/v1/overview")).json()
     assert overview["documents_failed_ingest"] == 1
 
-    async def succeed_ingest(data, filename, mime):
+    async def succeed_ingest(data, filename, mime, **kwargs):
         return doc_ingest.IngestResult(
             canonical_md="# Parsed after retry\n", markitdown_version="test", figures=[]
         )
