@@ -7,8 +7,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.base import get_db
 from app.core.identity import OperatorIdentity, get_operator_identity
 from app.models.models import DemandPoint, TechTheme, VehicleFunction
-from app.schemas.schemas import DemandCreate, DemandOut, DemandUpdate
+from app.schemas.schemas import (
+    DemandAssistantMessageIn,
+    DemandAssistantMessageOut,
+    DemandCreate,
+    DemandDraftProposalOut,
+    DemandDraftProposeIn,
+    DemandOut,
+    DemandUpdate,
+)
 from app.services.audit import record_correction
+from app.services.demand_draft import demand_assistant_reply, propose_demand_draft
 from app.services.demand_validation import (
     validate_demand_cross_validation,
     validate_demand_trace,
@@ -65,6 +74,55 @@ async def create_demand(payload: DemandCreate, db: AsyncSession = Depends(get_db
     db.add(d)
     await db.commit()
     return await _enrich(db, d)
+
+
+def _draft_out(raw: dict) -> DemandDraftProposalOut:
+    return DemandDraftProposalOut(
+        name=str(raw.get("name") or "").strip(),
+        value_chain_stage_code=str(raw.get("value_chain_stage_code") or ""),
+        source_tech_theme_id=uuid.UUID(str(raw["source_tech_theme_id"])),
+        derivation_trace=raw.get("derivation_trace"),
+        cross_validation=raw.get("cross_validation"),
+        time_series=raw.get("time_series") or [],
+        source=raw.get("source"),
+        llm_note=raw.get("llm_note"),
+    )
+
+
+@router.post("/assistant/draft", response_model=DemandDraftProposalOut)
+async def propose_demand_draft_endpoint(
+    payload: DemandDraftProposeIn,
+    db: AsyncSession = Depends(get_db),
+):
+    """From a tech theme's retained signals, propose a demand-point draft (环节三)."""
+    raw = await propose_demand_draft(
+        db,
+        payload.source_tech_theme_id,
+        user_hint=payload.user_hint,
+        use_llm=payload.use_llm,
+        selected_signal_ids=payload.selected_signal_ids or None,
+    )
+    return _draft_out(raw)
+
+
+@router.post("/assistant/messages", response_model=DemandAssistantMessageOut)
+async def demand_assistant_message(
+    payload: DemandAssistantMessageIn,
+    db: AsyncSession = Depends(get_db),
+):
+    history = [{"role": t.role, "content": t.content} for t in payload.history]
+    reply, model, draft = await demand_assistant_reply(
+        db,
+        payload.source_tech_theme_id,
+        payload.message,
+        history,
+        selected_signal_ids=payload.selected_signal_ids or None,
+    )
+    return DemandAssistantMessageOut(
+        reply=reply,
+        model=model,
+        draft=_draft_out(draft) if draft else None,
+    )
 
 
 @router.get("/{demand_id}", response_model=DemandOut)

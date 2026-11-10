@@ -1,60 +1,60 @@
-"""Pydantic AI is wired to the enterprise OpenAI-compatible gateway."""
+"""BE-14 agent construction and serialization checks."""
 
-import types
+from __future__ import annotations
+
+import uuid
 
 import pytest
+from pydantic_ai import Agent, DeferredToolRequests
+from pydantic_ai.models.test import TestModel
 
-import app.services.pydantic_agent as pa
-from app.services.llm_gateway import LLMNotConfiguredError
+from app.services.agent_contract import (
+    ALLOWED_AGENT_TOOLS,
+    AgentDeps,
+    AgentTurn,
+    CitationLedger,
+)
+from app.services.agent_workflow import (
+    build_eea_agent,
+    dumps_message_history,
+    loads_message_history,
+    registered_tool_names,
+)
 
 pytestmark = pytest.mark.anyio
 
 
-def _settings(**overrides):
-    base = dict(
-        llm_base_url_normalized="http://gateway.invalid/v1",
-        llm_api_key="test-key",
-        llm_model="",
-        vision_model="",
+@pytest.fixture
+def ledger() -> CitationLedger:
+    return CitationLedger()
+
+
+async def test_agent_allowlist_and_output_types():
+    agent = await build_eea_agent(model=TestModel())
+    names = registered_tool_names(agent)
+    assert names == ALLOWED_AGENT_TOOLS
+    assert agent._output_toolset is not None  # noqa: SLF001
+
+
+async def test_message_history_round_trip():
+    agent = Agent(TestModel(), output_type=str)
+    result = await agent.run("hello")
+    blob = dumps_message_history(result.all_messages())
+    restored = loads_message_history(blob)
+    assert len(restored) >= 2
+
+
+async def test_ledger_rejects_unknown_and_needs_review_citations():
+    from app.services.agent_citations import make_figure_citation
+
+    ledger = CitationLedger()
+    fig = make_figure_citation(
+        document_id=uuid.uuid4(),
+        figure_index=1,
+        title="doc",
+        summary="fig",
+        review_status="needs_review",
     )
-    base.update(overrides)
-    return types.SimpleNamespace(**base)
-
-
-async def test_build_agent_uses_explicit_model_without_resolving(monkeypatch):
-    monkeypatch.setattr(pa, "get_settings", lambda: _settings())
-
-    async def explode():
-        raise AssertionError("resolve_chat_model must not run for an explicit model")
-
-    monkeypatch.setattr(pa, "resolve_chat_model", explode)
-    agent = await pa.build_agent("针对这段证据给出结论", model_name="deepseek-v4-flash-hw")
-    assert agent.model.model_name == "deepseek-v4-flash-hw"
-
-
-async def test_build_agent_auto_resolves_gateway_model(monkeypatch):
-    monkeypatch.setattr(pa, "get_settings", lambda: _settings())
-
-    async def fake_resolve():
-        return "Qwen3.8-27B"
-
-    monkeypatch.setattr(pa, "resolve_chat_model", fake_resolve)
-    agent = await pa.build_agent()
-    assert agent.model.model_name == "Qwen3.8-27B"
-
-
-async def test_build_agent_requires_base_url(monkeypatch):
-    monkeypatch.setattr(pa, "get_settings", lambda: _settings(llm_base_url_normalized=""))
-    with pytest.raises(LLMNotConfiguredError):
-        await pa.build_agent(model_name="anything")
-
-
-@pytest.mark.skipif(
-    __import__("os").environ.get("EEA_LLM_INTEGRATION") != "1",
-    reason="live gateway smoke; set EEA_LLM_INTEGRATION=1 to run",
-)
-async def test_live_agent_call():
-    agent = await pa.build_agent()
-    result = await agent.run("回答一个字：好")
-    assert result.output.strip()
-    assert result.usage.requests == 1
+    ledger.register(fig)
+    assert ledger.validate_refs(["missing-ref"]) == ["missing-ref"]
+    assert ledger.validate_refs([fig.ref_id]) == [fig.ref_id]

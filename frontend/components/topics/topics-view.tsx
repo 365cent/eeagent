@@ -2,11 +2,12 @@
 
 import { useState } from 'react'
 import { Button, Card, Col, Row, Space, Table, Tag, Typography } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
+import { ClusterOutlined, PlusOutlined } from '@ant-design/icons'
 import { PageHeader } from '@/components/shared/page-header'
 import { PlatformEmptyState } from '@/components/shared/empty-state'
 import { MetricHint } from '@/components/shared/metric-hint'
-import { DemandPointWorkbench } from '@/components/topics/demand-point-workbench'
+import { DemandPointWorkbenchDrawer } from '@/components/topics/demand-point-workbench-drawer'
+import { TopicClusteringPanel } from '@/components/topics/topic-clustering-panel'
 import { useRefCodeMaps, useSignalsList, useThemeRows, useVocabUsage } from '@/hooks/use-eea-queries'
 import { labelFor, shortStageLabel } from '@/lib/eea-mappers'
 import { metricsFootnote, signalFrequencyHint, sourceCountHint } from '@/lib/metrics-copy'
@@ -46,20 +47,27 @@ export function TopicsView({ onNavigate }: { onNavigate: NavigateFn }) {
   const { data: themes, rows: themeRows, isSuccess: themesReady } = useThemeRows()
   const vocab = useVocabUsage()
   const [openThemeId, setOpenThemeId] = useState<string | null>(null)
+  const [demandDrawerOpen, setDemandDrawerOpen] = useState(false)
 
   return (
     <>
       <PageHeader
         eyebrow="02 · 需求点提取"
         title="主题与需求点"
-        description="将多源信号归集为可追溯主题。频次与来源数按服务端同一口径统计。"
+        description="技术方向标签向上归总为候选主题，确认工作名后写入主题库；频次与来源数与服务端口径一致。"
         action={
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => onNavigate('createTopic')}>
-            新建主题
-          </Button>
+          <Space wrap>
+            <Button icon={<ClusterOutlined />} onClick={() => setDemandDrawerOpen(true)}>
+              需求点工作台
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => onNavigate('createTopic')}>
+              新建主题
+            </Button>
+          </Space>
         }
       />
-      <Row gutter={[18, 18]} className="summary-row">
+      <TopicClusteringPanel themes={themes} onNavigate={onNavigate} />
+      <Row gutter={[18, 18]} className="summary-row" style={{ marginTop: 18 }}>
         <Col xs={24} lg={8}>
           <Card
             className="panel-card tag-summary-card"
@@ -169,7 +177,7 @@ export function TopicsView({ onNavigate }: { onNavigate: NavigateFn }) {
           ]}
         />
       </Card>
-      <DemandPointWorkbench />
+      <DemandPointWorkbenchDrawer open={demandDrawerOpen} onOpenChange={setDemandDrawerOpen} />
     </>
   )
 }

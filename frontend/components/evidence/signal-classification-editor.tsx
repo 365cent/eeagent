@@ -6,6 +6,8 @@ import { EeaApiError } from '@/lib/api/client'
 import { useRefCodeMaps, useSignalTagSuggestions } from '@/hooks/use-eea-queries'
 import { useSignalMutations } from '@/hooks/use-signal-mutations'
 import type { RefCodeMaps } from '@/lib/eea-mappers'
+import { labelFor } from '@/lib/eea-mappers'
+import { protectedFieldLabels, suggestionSourceLabel } from '@/lib/suggestion-source'
 
 const { Text } = Typography
 
@@ -13,6 +15,7 @@ type SignalClassificationEditorProps = {
   signalId: string
   stageCode: string | null
   typeCode: string | null
+  updatedAt?: string | null
 }
 
 function domainOptions(maps: RefCodeMaps, domain: string) {
@@ -23,10 +26,11 @@ export function SignalClassificationEditor({
   signalId,
   stageCode,
   typeCode,
+  updatedAt,
 }: SignalClassificationEditorProps) {
   const { message: messageApi } = AntApp.useApp()
   const { maps, isSuccess } = useRefCodeMaps()
-  const { patchClassification } = useSignalMutations(signalId)
+  const { patchClassification, invalidate } = useSignalMutations(signalId, updatedAt)
   const suggestionsQuery = useSignalTagSuggestions(signalId)
   const [editing, setEditing] = useState(false)
   const [draftStage, setDraftStage] = useState<string | null>(stageCode)
@@ -41,19 +45,32 @@ export function SignalClassificationEditor({
 
   const stageOptions = useMemo(() => domainOptions(maps, 'value_chain_stage'), [maps])
   const typeOptions = useMemo(() => domainOptions(maps, 'signal_type'), [maps])
-  const suggestedStage = suggestionsQuery.data?.value_chain_stage_code ?? null
-  const suggestedType = suggestionsQuery.data?.signal_type_code ?? null
-  const suggestedStageLabel = stageOptions.find((option) => option.value === suggestedStage)?.label
-  const suggestedTypeLabel = typeOptions.find((option) => option.value === suggestedType)?.label
+  const protectedLabels = protectedFieldLabels(suggestionsQuery.data?.protected_fields)
+  const stageProtected = suggestionsQuery.data?.protected_fields?.includes('value_chain_stage_code')
+  const typeProtected = suggestionsQuery.data?.protected_fields?.includes('signal_type_code')
+  const suggestedStage = stageProtected ? null : suggestionsQuery.data?.value_chain_stage_code ?? null
+  const suggestedType = typeProtected ? null : suggestionsQuery.data?.signal_type_code ?? null
+  const labelForCode = (domain: 'value_chain_stage' | 'signal_type', code: string | null) => {
+    if (!code) return null
+    const fromOptions =
+      domain === 'value_chain_stage'
+        ? stageOptions.find((option) => option.value === code)?.label
+        : typeOptions.find((option) => option.value === code)?.label
+    if (fromOptions) return fromOptions
+    const mapped = labelFor(maps, domain, code)
+    return mapped !== code ? mapped : code
+  }
+  const suggestedStageLabel = labelForCode('value_chain_stage', suggestedStage)
+  const suggestedTypeLabel = labelForCode('signal_type', suggestedType)
 
   const adoptStageSuggestion = () => {
-    if (!suggestedStage || !suggestedStageLabel) return
+    if (!suggestedStage) return
     setDraftStage(suggestedStage)
     setEditing(true)
   }
 
   const adoptTypeSuggestion = () => {
-    if (!suggestedType || !suggestedTypeLabel) return
+    if (!suggestedType) return
     setDraftType(suggestedType)
     setEditing(true)
   }
@@ -74,12 +91,15 @@ export function SignalClassificationEditor({
       setEditing(false)
     } catch (err) {
       const detail = err instanceof EeaApiError ? err.message : String(err)
+      if (err instanceof EeaApiError && err.status === 409) {
+        void invalidate()
+      }
       messageApi.error(detail || '保存失败')
     }
   }
 
-  const stageLabel = stageOptions.find((o) => o.value === (editing ? draftStage : stageCode))?.label ?? '未判定'
-  const typeLabel = typeOptions.find((o) => o.value === (editing ? draftType : typeCode))?.label ?? '未判定'
+  const stageLabel = labelForCode('value_chain_stage', editing ? draftStage : stageCode) ?? '未判定'
+  const typeLabel = labelForCode('signal_type', editing ? draftType : typeCode) ?? '未判定'
 
   return (
     <div className="signal-classification-editor">
@@ -101,7 +121,20 @@ export function SignalClassificationEditor({
         )}
       </div>
       <div style={{ marginBottom: 10 }}>
-        <Text type="secondary">模型建议（需人工明确采用）</Text>
+        <Text type="secondary">
+          模型建议（需人工明确采用）
+          {suggestionsQuery.data?.source ? ` · ${suggestionSourceLabel(suggestionsQuery.data.source)}` : ''}
+        </Text>
+        {suggestionsQuery.data?.degraded_reason ? (
+          <Text type="secondary" style={{ display: 'block' }}>
+            {suggestionsQuery.data.degraded_reason}
+          </Text>
+        ) : null}
+        {protectedLabels.length ? (
+          <Text type="secondary" style={{ display: 'block' }}>
+            已人工确认，不再提供建议：{protectedLabels.join('、')}
+          </Text>
+        ) : null}
         {suggestionsQuery.isLoading ? (
           <Text type="secondary" style={{ display: 'block' }}>正在加载建议…</Text>
         ) : suggestionsQuery.isError ? (
@@ -111,12 +144,12 @@ export function SignalClassificationEditor({
           </Space>
         ) : (
           <Space wrap size={[6, 4]} style={{ display: 'flex', marginTop: 4 }}>
-            <Text>环节：{suggestedStageLabel ?? (suggestedStage ? `未知词表代码（${suggestedStage}）` : '无建议')}</Text>
-            <Button size="small" type="link" disabled={!suggestedStageLabel || suggestedStage === (editing ? draftStage : stageCode)} onClick={adoptStageSuggestion}>
+            <Text>环节：{suggestedStage ? suggestedStageLabel : '无建议'}</Text>
+            <Button size="small" type="link" disabled={!suggestedStage || suggestedStage === (editing ? draftStage : stageCode)} onClick={adoptStageSuggestion}>
               采用环节建议
             </Button>
-            <Text>类型：{suggestedTypeLabel ?? (suggestedType ? `未知词表代码（${suggestedType}）` : '无建议')}</Text>
-            <Button size="small" type="link" disabled={!suggestedTypeLabel || suggestedType === (editing ? draftType : typeCode)} onClick={adoptTypeSuggestion}>
+            <Text>类型：{suggestedType ? suggestedTypeLabel : '无建议'}</Text>
+            <Button size="small" type="link" disabled={!suggestedType || suggestedType === (editing ? draftType : typeCode)} onClick={adoptTypeSuggestion}>
               采用类型建议
             </Button>
           </Space>

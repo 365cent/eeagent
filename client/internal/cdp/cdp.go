@@ -136,7 +136,7 @@ func (c *Client) shutdown(err error) {
 		for _, w := range waiters {
 			close(w.ch)
 		}
-		_ = c.ws.conn.Close()
+		_ = c.ws.close()
 	})
 }
 
@@ -301,6 +301,24 @@ func (b *Browser) NewTarget(ctx context.Context, url string) (*Session, error) {
 		return nil, err
 	}
 	return &Session{c: b.Client, ID: attached.SessionID, TargetID: created.TargetID}, nil
+}
+
+// AttachTarget returns a flattened session for an existing target id.
+func (b *Browser) AttachTarget(ctx context.Context, targetID string) (*Session, error) {
+	var attached struct {
+		SessionID string `json:"sessionId"`
+	}
+	raw, err := b.Call(ctx, "Target.attachToTarget", map[string]any{
+		"targetId": targetID,
+		"flatten":  true,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err := decodeInto(raw, &attached); err != nil {
+		return nil, err
+	}
+	return &Session{c: b.Client, ID: attached.SessionID, TargetID: targetID}, nil
 }
 
 func decodeInto(raw json.RawMessage, out any) error {

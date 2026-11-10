@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import { Spin, Typography } from 'antd'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { Alert, Button, Spin, Typography } from 'antd'
+import { ReloadOutlined } from '@ant-design/icons'
 import { fetchSignalStudio } from '@/lib/api/eea-api'
 import { EeaApiError } from '@/lib/api/client'
 import type {
@@ -19,8 +20,11 @@ type StudioPaneKind = 'mindmap' | 'report' | 'infographic'
 type EvidenceStudioPaneProps = {
   signalId: string | null
   kind: StudioPaneKind
+  /** When false, do not auto-fetch (evidence studio mounts all panes; only the active tab should hit the LLM). */
+  fetchEnabled?: boolean
   cached: string | StudioMindmapPayload | StudioInfographicPayload | undefined
   onLoaded: (payload: string | StudioMindmapPayload | StudioInfographicPayload) => void
+  onInvalidate?: () => void
 }
 
 function isNotFound(status: number) {
@@ -82,49 +86,53 @@ function InfographicView({ data }: { data: StudioInfographicPayload }) {
   )
 }
 
-export function EvidenceStudioPane({ signalId, kind, cached, onLoaded }: EvidenceStudioPaneProps) {
+export function EvidenceStudioPane({
+  signalId,
+  kind,
+  fetchEnabled = true,
+  cached,
+  onLoaded,
+  onInvalidate,
+}: EvidenceStudioPaneProps) {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [fetchGeneration, setFetchGeneration] = useState(0)
   const onLoadedRef = useRef(onLoaded)
   onLoadedRef.current = onLoaded
-  const fetchFinishedRef = useRef(false)
+
+  const runFetch = useCallback(async () => {
+    if (!signalId) return
+    setLoading(true)
+    setError(null)
+    try {
+      const payload = await fetchSignalStudio(signalId, kind)
+      onLoadedRef.current(payload as string | StudioMindmapPayload | StudioInfographicPayload)
+    } catch (err) {
+      if (err instanceof EeaApiError && isNotFound(err.status)) {
+        setError('not_wired')
+        return
+      }
+      setError(err instanceof EeaApiError ? err.message : String(err))
+    } finally {
+      setLoading(false)
+    }
+  }, [signalId, kind, cached])
 
   useEffect(() => {
-    fetchFinishedRef.current = false
     setError(null)
     setLoading(false)
   }, [signalId, kind])
 
   useEffect(() => {
-    if (!signalId || cached !== undefined) {
-      if (cached !== undefined) fetchFinishedRef.current = true
-      return
-    }
-    if (fetchFinishedRef.current) return
-    let cancelled = false
-    setLoading(true)
-    void fetchSignalStudio(signalId, kind)
-      .then((payload) => {
-        if (cancelled) return
-        fetchFinishedRef.current = true
-        onLoadedRef.current(payload as string | StudioMindmapPayload | StudioInfographicPayload)
-      })
-      .catch((err) => {
-        if (cancelled) return
-        fetchFinishedRef.current = true
-        if (err instanceof EeaApiError && isNotFound(err.status)) {
-          setError('not_wired')
-          return
-        }
-        setError(err instanceof EeaApiError ? err.message : String(err))
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [signalId, kind, cached])
+    if (!signalId || !fetchEnabled) return
+    if (cached !== undefined && fetchGeneration === 0) return
+    void runFetch()
+  }, [signalId, kind, fetchEnabled, cached, fetchGeneration, runFetch])
+
+  const handleRegenerate = () => {
+    onInvalidate?.()
+    setFetchGeneration((g) => g + 1)
+  }
 
   if (!signalId) {
     return (
@@ -135,7 +143,7 @@ export function EvidenceStudioPane({ signalId, kind, cached, onLoaded }: Evidenc
     )
   }
 
-  if (loading && cached === undefined) {
+  if (loading && cached === undefined && !error) {
     return (
       <div className="evidence-studio-loading">
         <Spin />
@@ -153,8 +161,53 @@ export function EvidenceStudioPane({ signalId, kind, cached, onLoaded }: Evidenc
     )
   }
 
-  if (error) {
-    return <PlatformEmptyState title="生成失败" description={error} />
+  const renderCached = () => {
+    if (cached === undefined) return null
+    if (kind === 'report' && typeof cached === 'string') {
+      return <SignalBodyMarkdown markdown={cached} className="evidence-markdown-article evidence-studio-report" />
+    }
+    if (kind === 'mindmap' && typeof cached === 'object' && 'children' in cached) {
+      return <MindmapView data={cached} />
+    }
+    if (kind === 'infographic' && typeof cached === 'object' && 'headline' in cached) {
+      return <InfographicView data={cached} />
+    }
+    return null
+  }
+
+  if (error && error !== 'not_wired') {
+    if (cached !== undefined) {
+      const body = renderCached()
+      if (body) {
+        return (
+          <div className="evidence-studio-with-stale">
+            <Alert
+              type="warning"
+              showIcon
+              message="本次生成失败"
+              description={error}
+              action={
+                <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={handleRegenerate}>
+                  重新生成
+                </Button>
+              }
+            />
+            {body}
+          </div>
+        )
+      }
+    }
+    return (
+      <PlatformEmptyState
+        title="生成失败"
+        description={error}
+        action={
+          <Button type="primary" icon={<ReloadOutlined />} loading={loading} onClick={handleRegenerate}>
+            重新生成
+          </Button>
+        }
+      />
+    )
   }
 
   if (cached === undefined) {
@@ -165,17 +218,20 @@ export function EvidenceStudioPane({ signalId, kind, cached, onLoaded }: Evidenc
     )
   }
 
-  if (kind === 'report' && typeof cached === 'string') {
-    return <SignalBodyMarkdown markdown={cached} className="evidence-markdown-article evidence-studio-report" />
+  const successBody = renderCached()
+  if (successBody) {
+    return successBody
   }
 
-  if (kind === 'mindmap' && typeof cached === 'object' && 'children' in cached) {
-    return <MindmapView data={cached} />
-  }
-
-  if (kind === 'infographic' && typeof cached === 'object' && 'headline' in cached) {
-    return <InfographicView data={cached} />
-  }
-
-  return <PlatformEmptyState title="无法解析生成结果" description="请在后端接入 studio 接口后重试。" />
+  return (
+    <PlatformEmptyState
+      title="无法解析生成结果"
+      description="请在后端接入 studio 接口后重试。"
+      action={
+        <Button type="primary" icon={<ReloadOutlined />} loading={loading} onClick={handleRegenerate}>
+          重新生成
+        </Button>
+      }
+    />
+  )
 }

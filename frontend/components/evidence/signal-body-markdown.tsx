@@ -39,6 +39,11 @@ export const SignalBodyMarkdown = forwardRef<HTMLElement, SignalBodyMarkdownProp
   const components = useMemo<Components>(() => {
     const figures = figureByIndex ?? {}
     return {
+      img({ src, alt, ...props }) {
+        const safeSrc = typeof src === 'string' && src.trim() ? src.trim() : undefined
+        if (!safeSrc) return null
+        return <img {...props} src={safeSrc} alt={alt ?? ''} loading="lazy" decoding="async" />
+      },
       blockquote({ children, node: _node, ...props }) {
         const caption = textFromMarkdownChildren(children).trim()
         const match = FIGURE_CAPTION_LINE.exec(caption)

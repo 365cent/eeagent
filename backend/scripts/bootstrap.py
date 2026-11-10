@@ -2,10 +2,17 @@
 
 Usage: uv run python scripts/bootstrap.py   (or: .venv\\Scripts\\python scripts\\bootstrap.py)
 
-1. Downloads portable PostgreSQL binaries into backend/.pg/ (no Windows service, no admin).
-2. initdb a data dir, start postgres on 127.0.0.1:54329.
-3. Create role/db `eea`.
-4. Run Alembic migrations + seed (closed vocabularies and five confirmed technical domains only).
+Windows:
+  1. Downloads portable PostgreSQL into backend/.pg/
+  2. initdb, start on 127.0.0.1:54329, create `eea` database
+  3. Alembic migrate + seed
+
+macOS / Linux (Homebrew or system PostgreSQL):
+  1. Reads backend/.env (or defaults: 127.0.0.1:5432, user/db `eea`)
+  2. Creates the app database when missing (role must already exist)
+  3. Alembic migrate + seed; records backend/.pg/use-external-db for dev.py
+
+Daily start after bootstrap:  uv run python scripts/dev.py
 """
 import os
 import subprocess
@@ -20,25 +27,38 @@ from pathlib import Path
 # and drop those lines so bootstrap stays readable.
 _NOISE = ("log4cxx:", "Please initialize the log4cxx system")
 
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+from scripts._dev_env import ensure_object_dir, load_dotenv_file  # noqa: E402
+
+EXTERNAL_DB_MARKER = ROOT / ".pg" / "use-external-db"
+
 
 def run(cmd: list[str], **kw) -> None:
     cmd = [str(c) for c in cmd]
     print(">", " ".join(cmd))
+    if sys.platform == "win32" and kw.get("capture_output") is not True:
+        kw.pop("capture_output", None)
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            errors="replace",
+            **kw,
+        )
+        assert proc.stdout is not None
+        for line in proc.stdout:
+            if any(marker in line for marker in _NOISE):
+                continue
+            print(line, end="")
+        proc.stdout.close()
+        if proc.wait() != 0:
+            raise SystemExit(f"command failed (exit {proc.returncode}): {' '.join(cmd)}")
+        return
     kw.pop("capture_output", None)
-    proc = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, errors="replace", **kw
-    )
-    assert proc.stdout is not None
-    for line in proc.stdout:
-        if any(marker in line for marker in _NOISE):
-            continue
-        print(line, end="")
-    proc.stdout.close()
-    if proc.wait() != 0:
-        raise SystemExit(f"command failed (exit {proc.returncode}): {' '.join(cmd)}")
-
-ROOT = Path(__file__).resolve().parent.parent
+    subprocess.run(cmd, check=True, **kw)
 PG_DIR = ROOT / ".pg"
 BIN = PG_DIR / "pgsql" / "bin"
 DATA = PG_DIR / "data"
@@ -53,11 +73,6 @@ PG_PORT = int(os.environ.get("DB_PORT", "54329"))
 PG_USER = os.environ.get("DB_USER", "eea")
 PG_PASSWORD = os.environ.get("DB_PASSWORD", "eea")
 PG_DB = os.environ.get("DB_NAME", "eea")
-
-
-def run(cmd: list[str], **kw) -> None:
-    print(">", " ".join(str(c) for c in cmd))
-    subprocess.run([str(c) for c in cmd], check=True, **kw)
 
 
 def download() -> None:
@@ -142,6 +157,64 @@ def create_db() -> None:
         )
 
 
+def bootstrap_external_postgres() -> None:
+    """macOS/Linux: use running system Postgres (see docs/DEVELOPMENT-MAC.md)."""
+    load_dotenv_file()
+    ensure_object_dir()
+    host = os.environ.get("DB_HOST", "127.0.0.1")
+    port = str(os.environ.get("DB_PORT", "5432"))
+    user = os.environ.get("DB_USER", "eea")
+    password = os.environ.get("DB_PASSWORD", "eea")
+    db = os.environ.get("DB_NAME", "eea")
+    env = {**os.environ, "PGPASSWORD": password}
+    PG_DIR.mkdir(exist_ok=True)
+    run(
+        [
+            "psql",
+            "-h",
+            host,
+            "-p",
+            port,
+            "-U",
+            user,
+            "-d",
+            "postgres",
+            "-v",
+            "ON_ERROR_STOP=1",
+            "-c",
+            "SELECT 1",
+        ],
+        env=env,
+    )
+    exists = subprocess.run(
+        [
+            "psql",
+            "-h",
+            host,
+            "-p",
+            port,
+            "-U",
+            user,
+            "-d",
+            "postgres",
+            "-tAc",
+            f"SELECT 1 FROM pg_database WHERE datname='{db}'",
+        ],
+        env=env,
+        capture_output=True,
+        text=True,
+    )
+    if exists.returncode != 0:
+        raise SystemExit(f"psql failed: {exists.stderr or exists.stdout}")
+    if "1" not in (exists.stdout or ""):
+        run(
+            ["createdb", "-h", host, "-p", port, "-U", user, db],
+            env=env,
+        )
+    EXTERNAL_DB_MARKER.write_text(f"host={host} port={port} db={db}\n", encoding="utf-8")
+    print(f"external PostgreSQL ready at {host}:{port}/{db}")
+
+
 def migrate_and_seed() -> None:
     # sys.executable, not "uv run": the venv may be pip-created and the server
     # may not have uv (env convention: scripts run under whatever interpreter
@@ -152,9 +225,12 @@ def migrate_and_seed() -> None:
 
 
 if __name__ == "__main__":
-    download()
-    initdb()
-    start()
-    create_db()
+    if sys.platform == "win32":
+        download()
+        initdb()
+        start()
+        create_db()
+    else:
+        bootstrap_external_postgres()
     migrate_and_seed()
     print("\nbootstrap complete. start the API with:  uv run python scripts/dev.py")

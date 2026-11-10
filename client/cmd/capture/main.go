@@ -18,9 +18,9 @@ func main() {
 		os.Exit(cli.Run(os.Args[1:], os.Stdout, version))
 	}
 
-	dir, err := os.Getwd()
+	dir, err := resolveConfigDir()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "cwd: %v\n", err)
+		fmt.Fprintf(os.Stderr, "config dir: %v\n", err)
 		os.Exit(1)
 	}
 	cfg, err := config.Load(dir)
@@ -28,5 +28,6 @@ func main() {
 		fmt.Fprintf(os.Stderr, "config: %v\n", err)
 		os.Exit(1)
 	}
+	_ = config.EnsureSingleFileExtension(dir, &cfg)
 	os.Exit(ui.Run(cfg, dir))
 }

@@ -10,7 +10,7 @@ import {
 import type { SignalUpdatePayload, TagAssignmentPayload, ThemeAssignmentPayload } from '@/lib/api/types'
 import { eeaQueryKeys } from '@/hooks/use-eea-queries'
 
-export function useSignalMutations(signalId: string | undefined) {
+export function useSignalMutations(signalId: string | undefined, expectedUpdatedAt?: string | null) {
   const queryClient = useQueryClient()
 
   const invalidate = async () => {
@@ -28,7 +28,10 @@ export function useSignalMutations(signalId: string | undefined) {
   const patchClassification = useMutation({
     mutationFn: (input: Pick<SignalUpdatePayload, 'value_chain_stage_code' | 'signal_type_code'>) => {
       if (!signalId) throw new Error('missing signal id')
-      return patchSignal(signalId, input)
+      return patchSignal(signalId, {
+        ...input,
+        expected_updated_at: expectedUpdatedAt ?? undefined,
+      })
     },
     onSuccess: () => void invalidate(),
   })
@@ -36,7 +39,10 @@ export function useSignalMutations(signalId: string | undefined) {
   const setTags = useMutation({
     mutationFn: (tagNames: string[]) => {
       if (!signalId) throw new Error('missing signal id')
-      const payload: TagAssignmentPayload = { tag_names: tagNames }
+      const payload: TagAssignmentPayload = {
+        tag_names: tagNames,
+        expected_updated_at: expectedUpdatedAt ?? undefined,
+      }
       return putSignalTags(signalId, payload)
     },
     onSuccess: () => void invalidate(),
@@ -45,7 +51,10 @@ export function useSignalMutations(signalId: string | undefined) {
   const setTheme = useMutation({
     mutationFn: (techThemeId: string | null) => {
       if (!signalId) throw new Error('missing signal id')
-      const payload: ThemeAssignmentPayload = { tech_theme_id: techThemeId }
+      const payload: ThemeAssignmentPayload = {
+        tech_theme_id: techThemeId,
+        expected_updated_at: expectedUpdatedAt ?? undefined,
+      }
       return putSignalTheme(signalId, payload)
     },
     onSuccess: () => void invalidate(),

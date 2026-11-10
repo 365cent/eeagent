@@ -1,11 +1,11 @@
 """Pydantic AI wiring for agent tooling (W3+/REQ-AGT).
 
 The OpenAI-compatible gateway already serves chat completions for the research
-assistant; Pydantic AI talks to the same endpoint so future tool-using agents
-share one model resolver, one key, and one place to observe traffic.
+assistant; Pydantic AI talks to the same endpoint so agents share one model
+resolver, one key, and one place to observe traffic.
 
-Nothing here is on a request path yet: the assistant still uses
-`llm_gateway.chat_completion` (plain HTTP). W3 tools import `build_agent`.
+The legacy signal assistant still uses `llm_gateway.chat_completion`.
+BE-14 uses `app.services.agent_workflow.build_eea_agent`.
 """
 from __future__ import annotations
 
@@ -16,10 +16,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from app.core.config import get_settings
 from app.services.llm_gateway import LLMNotConfiguredError, resolve_chat_model
 
-DEFAULT_SYSTEM_PROMPT = (
-    "你是 EEA 前瞻技术扫描平台的证据研究助手。仅根据给定上下文回答；"
-    "信息不足时明确说明，不要伪造引用或数据。回答使用简体中文，简洁专业。"
-)
+from app.services.llm_prompts import LEGACY_CHAT_SYSTEM as DEFAULT_SYSTEM_PROMPT
 
 
 def build_model(

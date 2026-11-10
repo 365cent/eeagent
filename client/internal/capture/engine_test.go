@@ -4,6 +4,8 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -34,6 +36,48 @@ const testPage = `<!DOCTYPE html>
 <script>document.getElementById("headline").dataset.stamp = "rendered";</script>
 </body>
 </html>`
+
+func TestCaptureExtensionModeLocalPage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("launches a real browser")
+	}
+	engine := "edge"
+	if _, err := ResolveBrowserForExtension(engine, ""); err != nil {
+		t.Skipf("edge not available: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(testPage))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer cancel()
+	extRoot := filepath.Join("..", "..", "data", "extensions", "singlefile")
+	if _, err := os.Stat(filepath.Join(extRoot, "manifest.json")); err != nil {
+		t.Skip("staged SingleFile extension not present; run doctor or vendor script")
+	}
+	browser, err := Launch(ctx, Options{
+		Engine:                  engine,
+		ArchiveMode:             ArchiveModeExtension,
+		UserDataDir:             t.TempDir(),
+		Headless:                true,
+		SingleFileExtensionPath: extRoot,
+	})
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	defer browser.Close()
+
+	archive, err := browser.Capture(ctx, srv.URL+"/page.html")
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	if !strings.Contains(string(archive.HTML), "前瞻技术扫描") {
+		t.Fatal("extension capture missing article text")
+	}
+}
 
 func TestCaptureLocalPage(t *testing.T) {
 	if testing.Short() {
@@ -170,5 +214,67 @@ func TestCaptureRejectsChallengePage(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "verification challenge") {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestCaptureArticleBodyLazyImages(t *testing.T) {
+	if testing.Short() {
+		t.Skip("launches a real browser")
+	}
+	if _, err := ResolveBrowser("edge", ""); err != nil {
+		t.Skipf("edge not available: %v", err)
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/article", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(`<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8"><title>懒加载正文图</title></head>
+<body>
+<div class="art-con article_body article_text"><div class="article_text">
+<p>正文起段落，用于满足可读性阈值与图像抓取。</p>
+<img id="one" width="400" height="300" data-src="/a.png" alt="one">
+<img id="two" width="400" height="300" data-src="/b.png" alt="two">
+</div></div>
+<script>
+const imgs = document.querySelectorAll("img[data-src]");
+const io = new IntersectionObserver((entries) => {
+  entries.forEach((e) => {
+    if (!e.isIntersecting) return;
+    const img = e.target;
+    img.src = img.getAttribute("data-src");
+    io.unobserve(img);
+  });
+}, { rootMargin: "0px", threshold: 0.1 });
+imgs.forEach((img) => io.observe(img));
+</script>
+</body></html>`))
+	})
+	png := func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/png")
+		w.Write(pngPixel)
+	}
+	mux.HandleFunc("/a.png", png)
+	mux.HandleFunc("/b.png", png)
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
+	defer cancel()
+	browser, err := Launch(ctx, Options{
+		Engine: "edge", UserDataDir: t.TempDir(), Headless: true,
+	})
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	defer browser.Close()
+
+	archive, err := browser.Capture(ctx, srv.URL+"/article")
+	if err != nil {
+		t.Fatalf("capture: %v", err)
+	}
+	html := string(archive.HTML)
+	if n := strings.Count(html, `data:image/png;base64,`); n < 2 {
+		t.Fatalf("expected >=2 inlined PNGs, got %d", n)
 	}
 }

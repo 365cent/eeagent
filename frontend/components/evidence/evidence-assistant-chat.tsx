@@ -5,6 +5,7 @@ import { App as AntApp, Button, Input, Space, Spin, Tag, Typography } from 'antd
 import { postSignalAssistantMessage, type AssistantChatTurn } from '@/lib/api/eea-api'
 import { isUuid } from '@/lib/api/api-errors'
 import { EeaApiError } from '@/lib/api/client'
+import { ChatMarkdown } from '@/components/shared/chat-markdown'
 
 const { Text } = Typography
 
@@ -66,7 +67,7 @@ export function EvidenceAssistantChat({ signalId }: EvidenceAssistantChatProps) 
         ) : null}
         {turns.map((turn, index) => (
           <div key={`${turn.role}-${index}`} className={`chat-message ${turn.role}`}>
-            {turn.content}
+            {turn.role === 'assistant' ? <ChatMarkdown content={turn.content} /> : turn.content}
           </div>
         ))}
         {busy ? (

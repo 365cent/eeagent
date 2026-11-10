@@ -1,7 +1,7 @@
 'use client'
 
 import { useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { keepPreviousData, useQuery } from '@tanstack/react-query'
 import {
   fetchAssessments,
   fetchCorrectionAudit,
@@ -35,6 +35,7 @@ import { buildListSignalsParams } from '@/lib/signal-list-filters'
 
 export const eeaQueryKeys = {
   refCodes: ['eea', 'ref-codes'] as const,
+  syncStamp: ['eea', 'sync-stamp'] as const,
   overview: ['eea', 'overview'] as const,
   signals: (params?: Record<string, unknown>) => ['eea', 'signals', params ?? {}] as const,
   signal: (id: string) => ['eea', 'signal', id] as const,
@@ -77,6 +78,7 @@ export function useSignalsList(params: ListSignalsParams = { limit: 200 }) {
     queryKey: eeaQueryKeys.signals(params as Record<string, unknown>),
     queryFn: () => fetchSignals(params),
     enabled: codesReady,
+    placeholderData: keepPreviousData,
   })
 
   const rows = useMemo<Signal[]>(() => {
@@ -196,6 +198,7 @@ export function useLandingRows() {
 
   return {
     isLoading: landingQuery.isLoading || assessments.isLoading,
+    isFetching: landingQuery.isFetching || assessments.isFetching,
     isError: landingQuery.isError || assessments.isError,
     error: landingQuery.error ?? assessments.error,
     refetch: async () => {

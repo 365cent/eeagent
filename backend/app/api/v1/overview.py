@@ -5,11 +5,13 @@ from sqlalchemy import and_, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import get_db
+from app.api.v1.imports import _batch_out
 from app.models.models import (
     CaptureJob,
     DemandPoint,
     DeploymentStandard,
     Document,
+    PanoramaImportBatch,
     Signal,
     StrategicAssessment,
     StrategicFunnel,
@@ -18,6 +20,7 @@ from app.models.models import (
     VehicleFunction,
 )
 from app.schemas.schemas import (
+    DataSyncStamp,
     OverviewStats,
     OverviewStrategyFunnelCounts,
     OverviewWeeklyNew,
@@ -25,6 +28,81 @@ from app.schemas.schemas import (
 from app.services.strategy_funnel import _current_step
 
 router = APIRouter(tags=["overview"])
+
+_EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
+
+
+async def _table_count(db: AsyncSession, model) -> int:
+    return int((await db.execute(select(func.count()).select_from(model))).scalar_one() or 0)
+
+
+@router.get(
+    "/sync-stamp",
+    response_model=DataSyncStamp,
+    description=(
+        "Lightweight change detector for the SPA: one aggregated fingerprint over core entity "
+        "timestamps and row counts. Clients poll or refetch on navigation; when fingerprint "
+        "changes, invalidate list/overview queries and refetch in the background."
+    ),
+)
+async def sync_stamp(db: AsyncSession = Depends(get_db)):
+    signal_updated = (
+        await db.execute(select(func.max(Signal.updated_at)))
+    ).scalar_one()
+    signal_created = (
+        await db.execute(select(func.max(Signal.created_at)))
+    ).scalar_one()
+    capture_updated = (
+        await db.execute(select(func.max(CaptureJob.updated_at)))
+    ).scalar_one()
+    theme_created = (
+        await db.execute(select(func.max(TechTheme.created_at)))
+    ).scalar_one()
+    demand_created = (
+        await db.execute(select(func.max(DemandPoint.created_at)))
+    ).scalar_one()
+    landing_created = (
+        await db.execute(select(func.max(TechLandingPoint.created_at)))
+    ).scalar_one()
+    funnel_updated = (
+        await db.execute(select(func.max(StrategicFunnel.updated_at)))
+    ).scalar_one()
+    assessment_at = (
+        await db.execute(select(func.max(StrategicAssessment.assessed_at)))
+    ).scalar_one()
+
+    signal_count = await _table_count(db, Signal)
+    capture_count = await _table_count(db, CaptureJob)
+    theme_count = await _table_count(db, TechTheme)
+    demand_count = await _table_count(db, DemandPoint)
+    landing_count = await _table_count(db, TechLandingPoint)
+    funnel_count = await _table_count(db, StrategicFunnel)
+    assessment_count = await _table_count(db, StrategicAssessment)
+
+    candidates = [
+        signal_updated,
+        signal_created,
+        capture_updated,
+        theme_created,
+        demand_created,
+        landing_created,
+        funnel_updated,
+        assessment_at,
+    ]
+    changed_at = max((t for t in candidates if t is not None), default=_EPOCH)
+    fingerprint = ":".join(
+        [
+            str(int(changed_at.timestamp())),
+            str(signal_count),
+            str(capture_count),
+            str(theme_count),
+            str(demand_count),
+            str(landing_count),
+            str(funnel_count),
+            str(assessment_count),
+        ]
+    )
+    return DataSyncStamp(changed_at=changed_at, fingerprint=fingerprint)
 
 
 @router.get(
@@ -81,7 +159,7 @@ async def overview(db: AsyncSession = Depends(get_db)):
                 .scalar_subquery()
                 .label("demand_points_pending_review"),
                 select(func.count(CaptureJob.id))
-                .where(CaptureJob.status.in_(("queued", "running")))
+                .where(CaptureJob.status.in_(("queued", "running", "awaiting_client")))
                 .scalar_subquery()
                 .label("capture_jobs_open"),
                 select(func.count(CaptureJob.id))
@@ -166,6 +244,13 @@ async def overview(db: AsyncSession = Depends(get_db)):
         elif step in {"ready_to_finalize", "complete"}:
             stage_counts["classification"] += 1
 
+    latest_import = (
+        await db.execute(
+            select(PanoramaImportBatch).order_by(PanoramaImportBatch.created_at.desc()).limit(1)
+        )
+    ).scalar_one_or_none()
+    panorama_import = await _batch_out(db, latest_import) if latest_import is not None else None
+
     return OverviewStats(
         signals=counters.signals,
         signal_sources=counters.signal_sources,
@@ -196,4 +281,5 @@ async def overview(db: AsyncSession = Depends(get_db)):
             documents=counters.weekly_documents,
         ),
         strategy_funnel=OverviewStrategyFunnelCounts(**stage_counts),
+        panorama_import=panorama_import,
     )

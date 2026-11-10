@@ -134,6 +134,7 @@
 - 待确认变更显示字段前后值/理由；确认/拒绝/过期/已应用分别展示，重复确认不重复写。
 - 记忆按用户/项目分别查看删除；真实技能版本与基线模式可识别。
 - 文档显示 canonical、图块识别状态、章节关键词树、局部失败重试；无图注不能显示成功。
+- PPTX 幻灯片预览 UI 对齐 [`deckpeek`](../../reference-will-deleted/deckpeek-src/src/deckpeek.py) 胶片条/结构模式（见 [`docs/research/2026-11-10-deckpeek-pptx-preview-reference.md`](../../docs/research/2026-11-10-deckpeek-pptx-preview-reference.md)）；底图模式依赖可选 Windows 导出，非 macOS 开发机验收项。
 - 验收：会话刷新、用户隔离、伪造引用缺失提示、确认写入审计、失败图待复核和重跑。
 
 ## FE-12 前端验收与 Linux 接入

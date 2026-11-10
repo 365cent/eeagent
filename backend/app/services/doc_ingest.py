@@ -11,6 +11,10 @@ same bytes into canonical Markdown:
    quotes; figures without a placeholder are appended as a table.
 
 Everything is local: the only network call is the enterprise LLM gateway.
+
+PPTX slide preview (structure DOM + optional slide PNGs) follows the deckpeek
+reference — see docs/research/2026-11-10-deckpeek-pptx-preview-reference.md.
+Figure order for evidence/captions remains this module's rel walk, not preview z-index alone.
 """
 from __future__ import annotations
 
@@ -30,6 +34,7 @@ from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
 from app.services.llm_gateway import resolve_vision_model
+from app.services.llm_prompts import VISION_CAPTION_PROMPT as _CAPTION_PROMPT
 
 MAX_FIGURES = 8  # default only; runtime cap comes from settings.max_figures
 MAX_FIGURE_BYTES = 4 * 1024 * 1024
@@ -54,6 +59,23 @@ _MIME_EXT = {
     "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
     "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
+    "application/vnd.ms-excel": ".xls",
+}
+
+_FILENAME_MIME = {
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    ".xls": "application/vnd.ms-excel",
+    ".pdf": "application/pdf",
+    ".doc": "application/msword",
+    ".ppt": "application/vnd.ms-powerpoint",
+}
+_AMBIGUOUS_MIMES = {
+    "application/zip",
+    "application/x-zip-compressed",
+    "application/octet-stream",
+    "binary/octet-stream",
 }
 
 _ZIP_MEDIA_PREFIX = {
@@ -74,10 +96,6 @@ _PART_ORDER = {
 }
 
 _IMAGE_TAG = re.compile(r"!\[[^\]]*\]\(\s*(?:data:image/[^)]*|[^)\s]+)\s*\)")
-_CAPTION_PROMPT = (
-    "用一句简体中文描述这张图的要点（不超过 60 字）。只描述可见内容，"
-    "不要推测背景，不要输出 Markdown。"
-)
 
 
 @dataclass(slots=True)
@@ -108,6 +126,22 @@ def suffix_for(filename: str | None, mime: str | None) -> str:
         if suffix:
             return suffix
     return _MIME_EXT.get((mime or "").lower(), ".bin")
+
+
+def normalize_document_mime(filename: str | None, mime: str | None) -> str | None:
+    """Prefer filename extension over ambiguous zip/octet-stream content types."""
+    if filename:
+        suffix = Path(filename).suffix.lower()
+        if suffix in _FILENAME_MIME:
+            return _FILENAME_MIME[suffix]
+    lowered = (mime or "").strip().lower()
+    if lowered and lowered not in _AMBIGUOUS_MIMES:
+        return lowered
+    if filename:
+        suffix = Path(filename).suffix.lower()
+        if suffix in _FILENAME_MIME:
+            return _FILENAME_MIME[suffix]
+    return lowered or None
 
 
 def _convert_sync(data: bytes, suffix: str) -> tuple[str, str | None]:
@@ -282,7 +316,7 @@ async def _caption_once(figure: Figure, *, model: str, settings, base: str) -> s
     encoded = base64.b64encode(figure.data).decode("ascii")
     payload = {
         "model": model,
-        "max_tokens": 160,
+        "max_tokens": 128,
         "temperature": 0,
         "messages": [
             {

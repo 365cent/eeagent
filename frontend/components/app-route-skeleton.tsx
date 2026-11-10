@@ -3,7 +3,12 @@
  */
 export function AppRouteSkeleton() {
   return (
-    <div className="app-shell light-mode app-route-skeleton" aria-busy="true" aria-label="正在加载工作台">
+    <div
+      className="app-shell light-mode app-route-skeleton"
+      data-color-scheme="light"
+      aria-busy="true"
+      aria-label="正在加载工作台"
+    >
       <aside className="app-route-skeleton-sider" />
       <div className="app-route-skeleton-main">
         <header className="app-route-skeleton-topbar" />

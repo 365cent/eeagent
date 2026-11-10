@@ -34,6 +34,8 @@ EXPECTED_TABLES = {
     "eea_signal_tag",
     "eea_correction_audit",
     "eea_document",
+    "eea_document_chunk",
+    "eea_document_figure",
     "eea_access_log",
     "eea_capture_job",
     "eea_vehicle_function",
@@ -41,6 +43,14 @@ EXPECTED_TABLES = {
     "eea_deployment_standard",
     "eea_strategic_assessment",
     "eea_strategic_funnel",
+    "eea_agent_session",
+    "eea_agent_run",
+    "eea_agent_message",
+    "eea_agent_event",
+    "eea_agent_patch",
+    "eea_agent_memory",
+    "eea_panorama_import_batch",
+    "eea_panorama_import_url",
 }
 
 EXPECTED_VIEWS = {"eea_v_tech_theme_metrics", "eea_v_tech_theme_display_tags"}

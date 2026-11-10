@@ -85,18 +85,27 @@ type ProfileViewProps = {
   onSaved: () => void
 }
 
+function loadProfileForm(): ProfileForm {
+  try {
+    const raw = window.localStorage.getItem(PROFILE_STORAGE_KEY)
+    if (raw) return { ...defaultProfile, ...JSON.parse(raw) }
+  } catch {
+    /* use defaults */
+  }
+  return defaultProfile
+}
+
 export function ProfileView({ onNavigate, onSaved }: ProfileViewProps) {
   const [form] = Form.useForm<ProfileForm>()
   const [loading, setLoading] = useState(false)
+  const [initialValues, setInitialValues] = useState<ProfileForm>(() => loadProfileForm())
+  const [displayName, setDisplayName] = useState(() => loadProfileForm().displayName ?? '')
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(PROFILE_STORAGE_KEY)
-      if (raw) form.setFieldsValue({ ...defaultProfile, ...JSON.parse(raw) })
-      else form.setFieldsValue(defaultProfile)
-    } catch {
-      form.setFieldsValue(defaultProfile)
-    }
+    const loaded = loadProfileForm()
+    setInitialValues(loaded)
+    setDisplayName(loaded.displayName ?? '')
+    form.setFieldsValue(loaded)
   }, [form])
 
   const save = async () => {
@@ -111,13 +120,20 @@ export function ProfileView({ onNavigate, onSaved }: ProfileViewProps) {
   }
 
   return (
+    <Form
+      form={form}
+      layout="vertical"
+      initialValues={initialValues}
+      onFinish={save}
+      onValuesChange={(_, allValues) => setDisplayName(allValues.displayName ?? '')}
+    >
     <Row gutter={[18, 18]}>
       <Col xs={24} lg={8}>
         <Card className="panel-card" title="账户概览">
           <Space orientation="vertical" size={16} style={{ width: '100%' }} align="center">
-            <Avatar size={72} className="user-profile-avatar">{form.getFieldValue('displayName')?.trim()?.[0] ?? '?'}</Avatar>
+            <Avatar size={72} className="user-profile-avatar">{displayName.trim()?.[0] ?? '?'}</Avatar>
             <div style={{ textAlign: 'center' }}>
-              <Text strong style={{ fontSize: 18 }}>{form.getFieldValue('displayName') || '未设置显示名称'}</Text>
+              <Text strong style={{ fontSize: 18 }}>{displayName || '未设置显示名称'}</Text>
               <br />
               <Text type="secondary">个人资料仅保存在当前浏览器</Text>
             </div>
@@ -152,7 +168,6 @@ export function ProfileView({ onNavigate, onSaved }: ProfileViewProps) {
           <Paragraph type="secondary">
             用户级短记忆与偏好单独存储，可与平台主数据分离、可删除（§7.2 记忆增强 RAG）。
           </Paragraph>
-          <Form form={form} layout="vertical" onFinish={save}>
             <Row gutter={16}>
               <Col xs={24} md={12}>
                 <Form.Item name="displayName" label="显示名称" rules={[{ required: true }]}>
@@ -203,10 +218,10 @@ export function ProfileView({ onNavigate, onSaved }: ProfileViewProps) {
               </Button>
               <Button onClick={() => onNavigate('settings')}>平台设置</Button>
             </Space>
-          </Form>
         </Card>
       </Col>
     </Row>
+    </Form>
   )
 }
 
@@ -214,18 +229,25 @@ type PlatformSettingsViewProps = {
   onSaved: () => void
 }
 
+function loadPlatformSettingsForm(): PlatformSettingsForm {
+  try {
+    const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
+    if (raw) return { ...defaultSettings, ...JSON.parse(raw) }
+  } catch {
+    /* use defaults */
+  }
+  return defaultSettings
+}
+
 export function PlatformSettingsView({ onSaved }: PlatformSettingsViewProps) {
   const [form] = Form.useForm<PlatformSettingsForm>()
   const [loading, setLoading] = useState(false)
+  const [initialValues, setInitialValues] = useState<PlatformSettingsForm>(() => loadPlatformSettingsForm())
 
   useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(SETTINGS_STORAGE_KEY)
-      if (raw) form.setFieldsValue({ ...defaultSettings, ...JSON.parse(raw) })
-      else form.setFieldsValue(defaultSettings)
-    } catch {
-      form.setFieldsValue(defaultSettings)
-    }
+    const loaded = loadPlatformSettingsForm()
+    setInitialValues(loaded)
+    form.setFieldsValue(loaded)
   }, [form])
 
   const save = async () => {
@@ -243,7 +265,7 @@ export function PlatformSettingsView({ onSaved }: PlatformSettingsViewProps) {
     <Row gutter={[18, 18]}>
       <Col xs={24} lg={14}>
         <Card className="panel-card" title="工作空间">
-          <Form form={form} layout="vertical" onFinish={save}>
+          <Form form={form} layout="vertical" initialValues={initialValues} onFinish={save}>
             <Form.Item name="workspaceName" label="工作空间名称" rules={[{ required: true }]}>
               <Input prefix={<TeamOutlined />} size="large" />
             </Form.Item>

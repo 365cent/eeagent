@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>deckpeek</title>
+  <desc>A Kimi-style ball character pointing a stick at a presentation board.</desc>
+  <defs>
+    <linearGradient id="ball" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#4FA8FF"/>
+      <stop offset="1" stop-color="#0066D6"/>
+    </linearGradient>
+  </defs>
+  <rect x="232" y="96" width="248" height="156" rx="20" fill="#002F5B"/>  <!-- 演示板 -->
+  <rect x="268" y="140" width="148" height="24" rx="12" fill="#FFFFFF"/>
+  <rect x="268" y="186" width="100" height="16" rx="8" fill="#4FA8FF"/>
+  <circle cx="176" cy="312" r="132" fill="url(#ball)"/>
+  <line x1="252" y1="412" x2="312" y2="244" stroke="#002F5B" stroke-width="28" stroke-linecap="round"/>
+  <line x1="252" y1="412" x2="312" y2="244" stroke="#FFFFFF" stroke-width="20" stroke-linecap="round"/>
+  <circle cx="128" cy="296" r="24" fill="#FFFFFF"/>
+  <circle cx="224" cy="296" r="24" fill="#FFFFFF"/>
+</svg>

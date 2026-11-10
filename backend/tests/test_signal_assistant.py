@@ -28,8 +28,9 @@ async def test_assistant_requires_llm_config(client, monkeypatch):
 async def test_assistant_returns_model_reply(client, monkeypatch):
     sig = await create_signal(client, body_text="智能配电与区域控制协同。")
 
-    async def _fake(messages):
+    async def _fake(messages, **_kwargs):
         assert messages[0]["role"] == "system"
+        assert "<signal_context>" in messages[0]["content"]
         assert messages[-1]["content"] == "简要总结"
         return "这是基于上下文的测试回复。", "test-model"
 

@@ -1,15 +1,11 @@
-'use client'
+import { ViewRouteClient } from '@/components/view-route-client'
+import { resolveInitialView } from '@/lib/resolve-initial-view'
 
-import { useParams } from 'next/navigation'
-import DashboardClient from '@/components/dashboard-client-loader'
+type ViewDetailPageProps = {
+  params: Promise<{ view: string; id: string }>
+}
 
-const viewPattern = /^[a-zA-Z][a-zA-Z0-9_-]*$/
-
-export default function ViewDetailPage() {
-  const params = useParams<{ view: string; id: string }>()
-  const view = params.view ?? ''
-  const id = params.id ?? '1'
-  const initialView = viewPattern.test(view) ? view : 'overview'
-
-  return <DashboardClient initialView={initialView} signalId={id} />
+export default async function ViewDetailPage({ params }: ViewDetailPageProps) {
+  const { view, id } = await params
+  return <ViewRouteClient initialView={resolveInitialView(view)} signalId={id || '1'} />
 }

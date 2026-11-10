@@ -116,6 +116,12 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence: [overview API](../backend/app/api/v1/overview.py), [trace API](../backend/app/api/v1/trace.py), [trace tests](../backend/tests/test_trace_audit_overview.py), [trace view](../frontend/views/dashboard/workspace.tsx), and [remaining acceptance criteria](../backend/TODO.md#be-11-追溯与真实总览), [FE-01](../frontend/TODO.md#fe-01-页面职责与真实数据), and [FE-10](../frontend/TODO.md#fe-10-全链追溯与导出).
 - Checks: macOS isolated `eea_test` trace/overview tests **20 passed**; frontend `next build`, `tsc --noEmit`, and scoped Ant Design lint for the workspace passed. The integrated backend run on the dedicated Mac database passed **300 tests, 1 skipped**. With the local API, the Mac browser displayed the UTC week, pending/failed task totals, all strategy stage counts, the empty trace list and a warning for a missing landing point after reload. The warning action is now labelled “重新选择落脚点”. The previous browser session was unavailable on resuming the action check. A populated trace, valid-ID refresh, source navigation, storage reads and target-platform acceptance remain open.
 
+### BE-03 / BE-05 / FE-03 / FE-04 — batch 2 signal edit guards slice
+
+- Tag suggestions respect `eea_correction_audit` (`protected_fields`, `degraded_reason`). Mutations accept `expected_updated_at` → **409** when stale. Theme overlap preview + stricter auto-aggregate guards. MaaS embedding/rerank client + config placeholders. Frontend editors send `updated_at` and refetch on conflict.
+- Evidence: [tagging_guard.py](../backend/app/services/tagging_guard.py), [signals.py](../backend/app/api/v1/signals.py), [semantic_api.py](../backend/app/services/semantic_api.py), evidence UI under `frontend/components/evidence/`.
+- Checks: macOS `eea_test` full backend suite **314 passed, 1 skipped**; frontend `next build` passed. BE-04 pipeline integration, OPS-03 gates, and DOC-04 business evidence remain open.
+
 ### BE-01 / FE-02 / CC-02 — durable document and HTML ingest slice
 
 - Backend worker already handled non-HTML `capture/jobs` payloads; added [`test_capture_jobs.py`](../backend/tests/test_capture_jobs.py) for async document/HTML jobs, submission idempotency, cancel, manual retry, and no duplicate signals.

@@ -1,27 +1,21 @@
 'use client'
 
 import { useState, type ReactNode } from 'react'
-import { App as AntApp } from 'antd'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { eeaQueryDefaultOptions } from '@/lib/query/eea-query-options'
 
 type AppProvidersProps = {
   children: ReactNode
 }
 
-/** Query + message context; theme/locale ConfigProvider lives in PlatformLayout. */
+/** Query client only; theme locale, ConfigProvider and AntApp live in PlatformLayout. */
 export function AppProviders({ children }: AppProvidersProps) {
   const [queryClient] = useState(
     () =>
       new QueryClient({
-        defaultOptions: {
-          queries: { staleTime: 60_000, gcTime: 5 * 60_000, refetchOnWindowFocus: false },
-        },
+        defaultOptions: eeaQueryDefaultOptions,
       }),
   )
 
-  return (
-    <QueryClientProvider client={queryClient}>
-      <AntApp>{children}</AntApp>
-    </QueryClientProvider>
-  )
+  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
 }

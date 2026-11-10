@@ -20,6 +20,55 @@ def _png(color=(30, 120, 200)) -> bytes:
     return buffer.getvalue()
 
 
+def _xlsx_workbook() -> bytes:
+    from openpyxl import Workbook
+    from openpyxl.drawing.image import Image as XLImage
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "EEA 技术全景图"
+    ws["A1"] = "中央计算架构"
+    ws["A2"] = "区域控制器"
+    buffer = io.BytesIO()
+    img = Image.new("RGB", (80, 60), (20, 100, 180))
+    img_buf = io.BytesIO()
+    img.save(img_buf, format="PNG")
+    img_buf.seek(0)
+    xl_img = XLImage(img_buf)
+    ws.add_image(xl_img, "C3")
+    wb.save(buffer)
+    return buffer.getvalue()
+
+
+async def test_ingest_xlsx_extracts_sheet_text_and_figure(monkeypatch):
+    async def fake_caption(figure, *, model, retries=0):
+        return "全景示意图"
+
+    async def fake_vision():
+        return "qwen-test"
+
+    monkeypatch.setattr(doc_ingest, "resolve_vision_model", fake_vision)
+    monkeypatch.setattr(doc_ingest, "caption_figure", fake_caption)
+
+    result = await doc_ingest.ingest_document(
+        _xlsx_workbook(),
+        "全景图.xlsx",
+        "application/zip",
+    )
+
+    assert "中央计算架构" in result.canonical_md
+    assert result.figure_count == 1
+    assert "全景示意图" in result.canonical_md
+
+
+def test_normalize_document_mime_prefers_xlsx_extension():
+    mime = doc_ingest.normalize_document_mime(
+        "report.xlsx",
+        "application/zip",
+    )
+    assert mime == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+
 def _pptx_with_picture() -> bytes:
     prs = Presentation()
     slide = prs.slides.add_slide(prs.slide_layouts[5])

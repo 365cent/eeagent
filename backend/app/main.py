@@ -11,7 +11,9 @@ from fastapi.responses import HTMLResponse
 
 from app.api.llms_docs import render_index_html, render_llms_txt
 from app.api.v1 import (
+    agent,
     capture,
+    imports,
     demands,
     documents,
     functions,
@@ -47,6 +49,7 @@ def create_app() -> FastAPI:
     app.include_router(overview.router, prefix="/api/v1")
     app.include_router(vocab.router, prefix="/api/v1")
     app.include_router(capture.router, prefix="/api/v1")
+    app.include_router(imports.router, prefix="/api/v1")
     app.include_router(signals.router, prefix="/api/v1")
     app.include_router(documents.router, prefix="/api/v1")
     app.include_router(themes.router, prefix="/api/v1")
@@ -59,6 +62,7 @@ def create_app() -> FastAPI:
     app.include_router(trace.router, prefix="/api/v1")
     app.include_router(llm.router, prefix="/api/v1")
     app.include_router(session.router, prefix="/api/v1")
+    app.include_router(agent.router, prefix="/api/v1")
 
     @app.get("/healthz")
     async def healthz():

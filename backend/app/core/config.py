@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     llm_base_url: str = ""
     llm_api_key: str = ""
     llm_model: str = ""
+    # iFlytek MaaS embedding/rerank (independent of llm_base_url chat proxy).
+    maas_api_base_url: str = ""
+    maas_api_key: str = ""
     embedding_model: str = "Qwen3-Embedding-8B"
     rerank_model: str = "Qwen3-Reranker-8B"
     vision_model: str = ""
@@ -50,6 +53,11 @@ class Settings(BaseSettings):
     max_figures: int = 16
     # Retries (beyond the first attempt) for a vision call that returns empty.
     vision_caption_retry: int = 2
+    # Hard cap on vision model resolve + caption batch so xlsx/pptx ingest
+    # cannot wedgie the capture worker when the gateway is slow or unreachable.
+    doc_ingest_vision_timeout_seconds: float = Field(default=120.0, gt=0)
+    agent_patch_ttl_hours: int = Field(default=24, ge=1, le=168)
+    agent_rag_chunk_size: int = Field(default=900, ge=200, le=4000)
 
     @property
     def database_url(self) -> str:
@@ -69,6 +77,24 @@ class Settings(BaseSettings):
     @property
     def llm_base_url_normalized(self) -> str:
         return self.llm_base_url.rstrip("/")
+
+    @property
+    def maas_api_base_normalized(self) -> str:
+        return self.maas_api_base_url.strip().rstrip("/")
+
+    @property
+    def semantic_api_key(self) -> str:
+        return self.maas_api_key.strip()
+
+    @property
+    def embedding_url(self) -> str:
+        base = self.maas_api_base_normalized
+        return f"{base}/embeddings" if base else ""
+
+    @property
+    def rerank_url(self) -> str:
+        base = self.maas_api_base_normalized
+        return f"{base}/rerank" if base else ""
 
 
 @lru_cache

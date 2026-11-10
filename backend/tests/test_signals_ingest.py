@@ -13,6 +13,27 @@ async def _count_signals(client) -> int:
     return len((await client.get("/api/v1/signals")).json())
 
 
+async def test_duplicate_url_gets_suffix_title(client):
+    """Same canonical URL may be retained twice; second row gets a numbered suffix."""
+    body = {
+        "title": "第一次采集",
+        "url": "https://example.com/same-source",
+        "channel_code": "web",
+        "body_text": SUPPLY_CHAIN_BODY,
+        "value_chain_stage_code": "creation_supply",
+        "evidence_status_code": "retained",
+    }
+    first = await client.post("/api/v1/signals", json=body)
+    assert first.status_code == 201, first.text
+    assert first.json()["url_duplicate_renamed"] is False
+    second = await client.post("/api/v1/signals", json={**body, "title": "第二次采集"})
+    assert second.status_code == 201, second.text
+    payload = second.json()
+    assert payload["url_duplicate_renamed"] is True
+    assert payload["title"].endswith(" (重复采集 #2)")
+    assert "第二次采集" in payload["title"]
+
+
 async def test_create_signal_records_channel_and_metadata(client):
     """REQ-SIG-02 / sig-local-collect-submit: the submitted channel is
     recorded — 网页 and 微信公众号 are the two named channels."""

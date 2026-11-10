@@ -14,10 +14,12 @@ dependencies = [
     "httpx>=0.28.1",
     "jieba>=0.42.1",
     "markitdown[all]>=0.1.9",
+    "openpyxl>=3.1.5",
     "psycopg[binary]>=3.3.6",
     "pydantic-ai-slim[openai]>=2.63",
     "pydantic-settings>=2.16.1",
     "python-multipart>=0.0.20",
+    "python-pptx>=1.0.2",
     "sqlalchemy[asyncio]>=2.1.6",
     "uvicorn[standard]>=0.54.0",
 ]
@@ -38,3 +40,4 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = ["live_maas: hits real MaaS when MAAS_API_* is set in .env"]

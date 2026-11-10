@@ -64,6 +64,13 @@ def load_bytes(key: str) -> bytes | None:
     return path.read_bytes()
 
 
+def put_object(key: str, data: bytes) -> str:
+    """Write bytes at a stable logical key (deck preview assets, manifests)."""
+    path = _object_path(key)
+    _atomic_write(path, data)
+    return key
+
+
 def save_body(text: str) -> str:
     """Persist a snapshot body and return its content-addressed object key."""
     return save_bytes(text.encode("utf-8"), folder="signals", ext="txt")

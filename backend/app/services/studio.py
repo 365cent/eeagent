@@ -25,6 +25,7 @@ from app.schemas.schemas import (
     StudioMindmapNode,
     StudioMindmapPayload,
 )
+from app.services.llm_prompts import studio_messages
 
 #: The quote of an audio segment must appear verbatim in the snapshot body;
 #: compare on whitespace-collapsed text so line wraps don't cause false misses.
@@ -33,56 +34,9 @@ _WS = re.compile(r"\s+")
 MIN_AUDIO_SEGMENTS = 4
 MAX_AUDIO_SEGMENTS = 12
 
-_BASE_SYSTEM = (
-    "你是 EEA 前瞻技术扫描平台的证据工作室生成器。只依据提供的信号上下文生成内容，"
-    "不引入上下文之外的事实、数字或引用。输出简体中文。"
-)
-
-_KIND_INSTRUCTIONS: dict[str, str] = {
-    "audio": (
-        "生成一段 6–10 句的口播稿，供研究者快速了解这条证据。"
-        "只输出 JSON 对象："
-        '{"segments":[{"text":"口播句（12–60 字，自然口语，可连读）",'
-        '"quote":"正文中的原文短句，逐字摘录 8–40 字，不得改写"}]}。'
-        "quote 必须能在信号正文中找到原样文字；找不到原文就换一句正文里有的。"
-    ),
-    "mindmap": (
-        "把这条证据梳理成思维导图。只输出 JSON 对象："
-        '{"title":"根节点（不超过 20 字）","children":[{"label":"一级分支","children":'
-        '[{"label":"二级分支"}]}]}。'
-        "深度最多 3 层（根 → 一级 → 二级），一级分支 2–4 个，标签简洁，不加解释文字。"
-    ),
-    "report": (
-        "写一份 Markdown 简报，直接用 Markdown 输出、不要代码块包裹。结构："
-        "## 一句话结论；## 关键要点（3–5 条）；## 对前瞻扫描的含义；## 局限。"
-        "事实只来自信号上下文，信息不足处明确写「上下文未提供」。"
-    ),
-    "infographic": (
-        "把这条证据组织成信息图数据。只输出 JSON 对象："
-        '{"headline":"一句话标题（不超过 24 字）",'
-        '"stats":[{"label":"指标名","value":"指标值"}],'
-        '"points":[{"title":"要点标题","body":"一两句说明"}]}。'
-        "stats 2–4 条，points 2–4 条。value 里的数字只能来自信号上下文，"
-        "上下文没有的数字不要编造（宁可少给一条 stat）。"
-    ),
-}
-
-_RETRY_SUFFIX = (
-    "\n\n上一次输出无法按约定解析。请只输出符合约定的 JSON 对象本身："
-    "不要 Markdown 代码块，不要解释文字，不要多余前后缀。"
-)
-
-
 def build_messages(kind: SignalStudioKind, context: str, *, retry: bool = False) -> list[dict[str, str]]:
-    """System + user messages for one studio generation attempt."""
-    system = f"{_BASE_SYSTEM}\n\n--- 信号上下文 ---\n{context}"
-    user = _KIND_INSTRUCTIONS[kind]
-    if retry and kind != "report":
-        user += _RETRY_SUFFIX
-    return [
-        {"role": "system", "content": system},
-        {"role": "user", "content": user},
-    ]
+    """System rules + user task with delimited signal context."""
+    return studio_messages(kind, context, retry=retry)
 
 
 class StudioParseError(ValueError):

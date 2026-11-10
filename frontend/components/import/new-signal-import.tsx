@@ -16,16 +16,20 @@ import {
   captureJobStageLabel,
   createCaptureJob,
   createSignal,
+  fetchPanoramaImportBatch,
   getCaptureJob,
+  importCaptureUrlList,
   inferChannelCode,
   pollCaptureJob,
   retryCaptureJob,
 } from '@/lib/api/eea-api'
 import { EeaApiError } from '@/lib/api/client'
 import { sourceUrlFromSavedHtml } from '@/lib/ingest-source-url'
+import { duplicateUrlCaptureMessage } from '@/lib/signal-duplicate-notice'
 import { documentSummaryLine } from '@/lib/document-ingest'
 import { DocumentIngestResult } from '@/components/import/document-ingest-result'
-import type { CaptureJobOut, DocumentRawOut } from '@/lib/api/types'
+import type { CaptureJobOut, DocumentRawOut, PanoramaImportBatchOut } from '@/lib/api/types'
+import { PanoramaImportBanner } from '@/components/import/panorama-import-banner'
 import { eeaQueryKeys } from '@/hooks/use-eea-queries'
 import {
   clearPendingCaptureJob,
@@ -66,6 +70,8 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
   const [lastDocument, setLastDocument] = useState<DocumentRawOut | null>(null)
   const [lastDocumentName, setLastDocumentName] = useState<string | null>(null)
   const [jobError, setJobError] = useState<string | null>(null)
+  const [bulkUrlText, setBulkUrlText] = useState('')
+  const [panoramaBatch, setPanoramaBatch] = useState<PanoramaImportBatchOut | null>(null)
 
   const refreshSignals = () => {
     void queryClient.invalidateQueries({ queryKey: ['eea', 'signals'] })
@@ -99,11 +105,13 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
       setLastDocument(job.result.document)
       setLastDocumentName(job.result.document.filename ?? uploadFileName)
     }
-    messageApi.success(
-      job.result?.document
-        ? `${uploadFileName ?? '文档'}：${documentSummaryLine(job.result.document)}`
-        : `网页证据已入库：${signal.title}`,
-    )
+    if (job.result?.document) {
+      messageApi.success(`${uploadFileName ?? '文档'}：${documentSummaryLine(job.result.document)}`)
+    } else if (signal.url_duplicate_renamed) {
+      messageApi.warning(duplicateUrlCaptureMessage(signal.title))
+    } else {
+      messageApi.success(`网页证据已入库：${signal.title}`)
+    }
     refreshSignals()
     onNavigate(`singal/${signal.id}`)
   }
@@ -156,6 +164,36 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
       resumeAbort.current?.abort()
     }
   }, [])
+
+  useEffect(() => {
+    if (!panoramaBatch?.id || panoramaBatch.status === 'completed' || panoramaBatch.status === 'failed') {
+      return
+    }
+    let cancelled = false
+    const tick = async () => {
+      try {
+        const next = await fetchPanoramaImportBatch(panoramaBatch.id)
+        if (!cancelled) {
+          setPanoramaBatch(next)
+          if (next.status === 'completed') {
+            refreshSignals()
+            messageApi.success(
+              `批量采集完成：已留存 ${next.signals_retained} 条信号。若链接与既有证据同源，将自动加「重复采集」后缀并保留两条记录。`,
+              8,
+            )
+          }
+        }
+      } catch {
+        /* polling best effort */
+      }
+    }
+    const timer = setInterval(() => void tick(), 4000)
+    void tick()
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [panoramaBatch?.id, panoramaBatch?.status, messageApi])
 
   const primaryActionLabel = (idle: string, busyIdle: string) => {
     if (!busy) return idle
@@ -233,6 +271,30 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
   const pasteFallback = () => submitSignal({ requireUrl: true })
   const saveSignal = () => submitSignal({ requireUrl: false })
 
+  const submitBulkUrls = async () => {
+    const text = bulkUrlText.trim()
+    if (!text) {
+      messageApi.warning('请粘贴链接列表（每行一条 http(s) 链接）')
+      return
+    }
+    setBusy(true)
+    try {
+      const batch = await importCaptureUrlList(text)
+      setPanoramaBatch(batch)
+      setBulkUrlText('')
+      messageApi.success(
+        `已排队 ${batch.capture_jobs_total || '若干'} 条采集任务；请保持 EEA Capture 客户端运行。与既有证据同源的链接仍会采集，标题将自动加后缀区分。`,
+        8,
+      )
+      refreshSignals()
+    } catch (err) {
+      const detail = err instanceof EeaApiError ? err.message : String(err)
+      messageApi.error(detail || '批量排队失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const handleBeforeUpload = async (file: File) => {
     setBusy(true)
     setUploadFileName(file.name)
@@ -247,6 +309,15 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
     resumeAbort.current = controller
     try {
       const name = file.name.toLowerCase()
+      if (name.endsWith('.xlsx') || name.endsWith('.xlsm')) {
+        messageApi.info(
+          '请在工作簿「数据来源」中复制链接列，粘贴到下方「批量链接采集」文本框（每行一条），由 EEA Capture 自动采集。',
+          10,
+        )
+        setBusy(false)
+        clearUploadProgress()
+        return false
+      }
       let sourceUrl = url.trim()
       let fileBlob: Blob = file
       if (name.endsWith('.html') || name.endsWith('.htm')) {
@@ -348,6 +419,28 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
 
   return (
     <div className="new-signal-import-form">
+      {panoramaBatch &&
+      (panoramaBatch.status === 'capturing' || panoramaBatch.status === 'structuring') ? (
+        <PanoramaImportBanner batch={panoramaBatch} />
+      ) : null}
+      <Input.TextArea
+        rows={5}
+        placeholder="批量链接采集：每行一条 http(s) 链接（可从 Excel「数据来源」整列复制粘贴）"
+        value={bulkUrlText}
+        onChange={(e) => setBulkUrlText(e.target.value)}
+        style={{ marginBottom: 12 }}
+      />
+      <Button
+        type="default"
+        size="large"
+        block
+        loading={busy}
+        icon={<LinkOutlined />}
+        onClick={() => void submitBulkUrls()}
+        style={{ marginBottom: 16 }}
+      >
+        批量排队采集（需 EEA Capture）
+      </Button>
       <Space.Compact block>
         <Input
           prefix={<LinkOutlined />}
@@ -363,7 +456,7 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
       <div className="import-dragger-wrap">
         <Upload.Dragger
           multiple
-          accept=".html,.htm,.pdf,.doc,.docx,.ppt,.pptx,.md,.txt,.png,.jpg,.jpeg"
+          accept=".html,.htm,.pdf,.doc,.docx,.ppt,.pptx,.md,.txt,.png,.jpg,.jpeg,.xlsx,.xlsm"
           showUploadList={false}
           beforeUpload={(file) => {
             void handleBeforeUpload(file)
@@ -474,7 +567,7 @@ function SignalImportFlowPanel() {
         <BulbOutlined />
         <div>
           <Text strong>公网在线页面</Text>
-          <Text type="secondary">在 EEA Capture 客户端提交 URL，自动抓取并留存网页</Text>
+          <Text type="secondary">在平台批量粘贴链接排队，EEA Capture 客户端自动抓取并上传</Text>
         </div>
       </div>
       <div className="signal-import-notice">

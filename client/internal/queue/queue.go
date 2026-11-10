@@ -50,6 +50,9 @@ type Job struct {
 	RetryCapture  bool
 	RetrySafe     bool
 	Stage         string
+	ServerStage   string
+	ServerStatus  string
+	Progress      int
 	EvidenceState string
 	captureURL    string
 	archive       []byte
@@ -108,7 +111,7 @@ func New(engine CaptureEngine, api *platform.Client, opts Options) *Queue {
 		opts.Workers = 2
 	}
 	if opts.Timeout <= 0 {
-		opts.Timeout = 90 * time.Second
+		opts.Timeout = 150 * time.Second
 	}
 	q := &Queue{
 		engine: engine,
@@ -460,11 +463,7 @@ func (q *Queue) runJob(job *Job) {
 			break
 		}
 
-		timeout := q.opts.Timeout
-		if job.Kind != KindURL && q.opts.UploadTimeout > 0 {
-			timeout = q.opts.UploadTimeout
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), timeout)
+		ctx, cancel := context.WithTimeout(context.Background(), q.jobAttemptTimeout(job))
 		err = q.attempt(ctx, job)
 		cancel()
 		if err == nil {
@@ -499,6 +498,22 @@ func (q *Queue) runJob(job *Job) {
 	q.finish(job, err)
 }
 
+func (q *Queue) jobAttemptTimeout(job *Job) time.Duration {
+	if job.CaptureJobID != "" || job.Kind != KindURL {
+		if q.opts.UploadTimeout > 0 {
+			return q.opts.UploadTimeout
+		}
+	}
+	if job.Kind == KindURL && job.archive != nil && q.opts.UploadTimeout > 0 {
+		return q.opts.UploadTimeout
+	}
+	if job.Kind == KindURL && q.opts.UploadTimeout > q.opts.Timeout {
+		// Live URL capture uses separate capture budget inside attempt; reserve upload/poll time.
+		return q.opts.UploadTimeout
+	}
+	return q.opts.Timeout
+}
+
 func (q *Queue) attempt(ctx context.Context, job *Job) error {
 	if job.CaptureJobID != "" {
 		q.mu.Lock()
@@ -508,10 +523,11 @@ func (q *Queue) attempt(ctx context.Context, job *Job) error {
 
 		var sig *platform.Signal
 		var err error
+		progress := q.captureJobProgressReporter(job)
 		if retry {
 			sig, err = q.api.RetryCaptureJob(ctx, jobID)
 		} else {
-			sig, err = q.api.WaitCaptureJob(ctx, jobID)
+			sig, err = q.api.WaitCaptureJobWithProgress(ctx, jobID, progress)
 		}
 		if err != nil {
 			return err
@@ -552,11 +568,12 @@ func (q *Queue) attempt(ctx context.Context, job *Job) error {
 			return err
 		}
 		sig, err := q.api.SubmitFileJob(ctx, platform.FileJobInput{
-			Path:          job.Path,
-			SubmissionID:  job.SubmissionID,
-			CaptureJobID:  job.CaptureJobID,
-			RetryJob:      job.RetryCapture,
-			OnJobAccepted: q.onCaptureJobAccepted(job),
+			Path:                 job.Path,
+			SubmissionID:         job.SubmissionID,
+			CaptureJobID:         job.CaptureJobID,
+			RetryJob:             job.RetryCapture,
+			OnJobAccepted:        q.onCaptureJobAccepted(job),
+			OnCaptureJobProgress: q.captureJobProgressReporter(job),
 		})
 		if err != nil {
 			return err
@@ -597,14 +614,15 @@ func (q *Queue) attempt(ctx context.Context, job *Job) error {
 			}
 		}
 		sig, err := q.api.Capture(ctx, platform.CaptureInput{
-			URL:           src,
-			Channel:       platform.InferChannel(src),
-			Archive:       data,
-			Filename:      filepath.Base(job.Path),
-			SubmissionID:  job.SubmissionID,
-			CaptureJobID:  job.CaptureJobID,
-			RetryJob:      job.RetryCapture,
-			OnJobAccepted: q.onCaptureJobAccepted(job),
+			URL:                  src,
+			Channel:              platform.InferChannel(src),
+			Archive:              data,
+			Filename:             filepath.Base(job.Path),
+			SubmissionID:         job.SubmissionID,
+			CaptureJobID:         job.CaptureJobID,
+			RetryJob:             job.RetryCapture,
+			OnJobAccepted:        q.onCaptureJobAccepted(job),
+			OnCaptureJobProgress: q.captureJobProgressReporter(job),
 		})
 		if err != nil {
 			return err
@@ -623,8 +641,14 @@ func (q *Queue) attempt(ctx context.Context, job *Job) error {
 		src := job.captureURL
 		title := job.Title
 		if data == nil {
+			captureBudget := q.opts.Timeout
+			if captureBudget <= 0 {
+				captureBudget = 150 * time.Second
+			}
+			capCtx, capCancel := context.WithTimeout(context.Background(), captureBudget)
 			q.setStage(job, "capturing")
-			page, err := q.engine.Capture(ctx, job.URL)
+			page, err := q.engine.Capture(capCtx, job.URL)
+			capCancel()
 			if err != nil {
 				return err
 			}
@@ -639,19 +663,30 @@ func (q *Queue) attempt(ctx context.Context, job *Job) error {
 			q.persistChangedLocked()
 			q.mu.Unlock()
 		}
+		uploadCtx := ctx
+		if dl, ok := ctx.Deadline(); !ok || time.Until(dl) < 5*time.Second {
+			uploadBudget := q.opts.UploadTimeout
+			if uploadBudget <= 0 {
+				uploadBudget = 15 * time.Minute
+			}
+			var cancel context.CancelFunc
+			uploadCtx, cancel = context.WithTimeout(context.Background(), uploadBudget)
+			defer cancel()
+		}
 		q.setStage(job, "uploading")
 		channel := job.Channel
 		if channel == "" {
 			channel = platform.InferChannel(src)
 		}
-		sig, err := q.api.Capture(ctx, platform.CaptureInput{
-			URL:           src,
-			Channel:       channel,
-			Archive:       data,
-			SubmissionID:  job.SubmissionID,
-			CaptureJobID:  job.CaptureJobID,
-			RetryJob:      job.RetryCapture,
-			OnJobAccepted: q.onCaptureJobAccepted(job),
+		sig, err := q.api.Capture(uploadCtx, platform.CaptureInput{
+			URL:                  src,
+			Channel:              channel,
+			Archive:              data,
+			SubmissionID:         job.SubmissionID,
+			CaptureJobID:         job.CaptureJobID,
+			RetryJob:             job.RetryCapture,
+			OnJobAccepted:        q.onCaptureJobAccepted(job),
+			OnCaptureJobProgress: q.captureJobProgressReporter(job),
 		})
 		if err != nil {
 			return err
@@ -678,10 +713,24 @@ func (q *Queue) recordCaptureSignal(job *Job, sig *platform.Signal) {
 func (q *Queue) setStage(job *Job, stage string) {
 	q.mu.Lock()
 	job.Stage = stage
+	job.Progress = platform.LocalJobProgressPercent(stage, job.ServerStatus, job.ServerStage)
 	q.persistChangedLocked()
 	snapshot := *job
 	q.mu.Unlock()
 	q.notify(snapshot)
+}
+
+func (q *Queue) captureJobProgressReporter(job *Job) platform.CaptureJobProgressFunc {
+	return func(cj platform.CaptureJob) {
+		q.mu.Lock()
+		job.ServerStage = cj.Stage
+		job.ServerStatus = cj.Status
+		job.Progress = platform.LocalJobProgressPercent(job.Stage, cj.Status, cj.Stage)
+		q.persistChangedLocked()
+		snapshot := *job
+		q.mu.Unlock()
+		q.notify(snapshot)
+	}
 }
 
 func (q *Queue) onCaptureJobAccepted(job *Job) func(string) {
@@ -779,6 +828,9 @@ func isSafeManualRetry(job *Job, err error) bool {
 }
 
 func retryable(err error) bool {
+	if err != nil && strings.Contains(err.Error(), "prepare article images") {
+		return false
+	}
 	var captureJob *platform.CaptureJobStatusError
 	if errors.As(err, &captureJob) {
 		return captureJob.Status == "failed"

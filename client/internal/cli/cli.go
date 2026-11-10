@@ -15,6 +15,7 @@ import (
 	"eea/capture/internal/capture"
 	"eea/capture/internal/config"
 	"eea/capture/internal/netinfo"
+	"eea/capture/internal/importdrain"
 	"eea/capture/internal/platform"
 	"eea/capture/internal/queue"
 )
@@ -51,6 +52,7 @@ func usage(out io.Writer) {
   capture upload --html F --html-url U   saved HTML with an explicit source URL
   capture upload --file F       upload raw documents
   capture upload --resume       resume persisted unfinished jobs
+  capture upload --drain-server   process server URL batches (awaiting_client)
   capture doctor                check browser and API
   capture version`)
 
@@ -97,6 +99,7 @@ func runUpload(args []string, out io.Writer) int {
 	apiBase := fs.String("api-base", "", "override api_base")
 	channel := fs.String("channel", "", "override channel_code")
 	resume := fs.Bool("resume", false, "resume persisted unfinished jobs")
+	drainServer := fs.Bool("drain-server", false, "claim and capture jobs queued from the web UI URL paste")
 	engine := fs.String("engine", "", "edge or chrome")
 	browserPath := fs.String("browser-path", "", "explicit browser executable")
 	headless := fs.Bool("headless", false, "run the browser headless")
@@ -105,8 +108,8 @@ func runUpload(args []string, out io.Writer) int {
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-	if len(urls) == 0 && len(files) == 0 && len(htmls) == 0 && !*resume {
-		fmt.Fprintln(out, "nothing to do: pass --url, --html, --file or --resume")
+	if len(urls) == 0 && len(files) == 0 && len(htmls) == 0 && !*resume && !*drainServer {
+		fmt.Fprintln(out, "nothing to do: pass --url, --html, --file, --drain-server or --resume")
 		return 2
 	}
 	if *htmlURL != "" && len(htmls) != 1 {
@@ -137,20 +140,28 @@ func runUpload(args []string, out io.Writer) int {
 	if *headless {
 		cfg.Headless = true
 	}
+	if *drainServer {
+		cfg.CaptureArchive = capture.ArchiveModeEmbedded
+		// Visible browser: many publisher sites reject headless loads (chrome-error://).
+		cfg.Headless = false
+	}
 	if *parallel > 0 {
 		cfg.MaxParallel = *parallel
 	}
+	_ = config.EnsureSingleFileExtension(dir, &cfg)
 
 	api := platform.New(base, cfg.MaxUploadMB)
 
 	engineImpl := &deferredEngine{opts: capture.Options{
-		Engine:          cfg.CaptureEngine,
-		BrowserPath:     cfg.BrowserPath,
-		UserDataDir:     cfg.UserDataDir,
-		Headless:        cfg.Headless,
-		ReadyWait:       time.Duration(cfg.ReadyTimeout) * time.Second,
-		InteractiveWait: time.Duration(cfg.InteractiveTimeout) * time.Second,
-		MinTextChars:    cfg.MinTextChars,
+		Engine:                  cfg.CaptureEngine,
+		BrowserPath:             cfg.BrowserPath,
+		UserDataDir:             cfg.UserDataDir,
+		Headless:                cfg.Headless,
+		ArchiveMode:             cfg.CaptureArchive,
+		SingleFileExtensionPath: cfg.SingleFileExtensionPath,
+		ReadyWait:               time.Duration(cfg.ReadyTimeout) * time.Second,
+		InteractiveWait:         time.Duration(cfg.InteractiveTimeout) * time.Second,
+		MinTextChars:            cfg.MinTextChars,
 	}}
 	defer engineImpl.Close()
 
@@ -172,6 +183,16 @@ func runUpload(args []string, out io.Writer) int {
 		}
 	}
 	q.Start()
+	if *drainServer {
+		ctx := context.Background()
+		for round := 0; round < 500; round++ {
+			okN, failN := importdrain.DrainAwaitingJobs(ctx, out, api, engineImpl, *channel)
+			if okN == 0 && failN == 0 {
+				break
+			}
+			time.Sleep(2 * time.Second)
+		}
+	}
 	for _, u := range urls {
 		current[q.SubmitURL(strings.TrimSpace(u), *channel)] = true
 	}
@@ -249,11 +270,22 @@ func runDoctor(args []string, out io.Writer) int {
 	base := cfg.EffectiveAPIBase()
 	fmt.Fprintf(out, "api_base      %s\n", base)
 	fmt.Fprintf(out, "auto_api      %v (lan %s)\n", cfg.AutoAPI, orDash(netinfo.PrimaryIPv4()))
-	exe, err := capture.ResolveBrowser(cfg.CaptureEngine, cfg.BrowserPath)
-	if err != nil {
-		fmt.Fprintf(out, "browser       missing (%v)\n", err)
+	var exe string
+	var browserErr error
+	if cfg.CaptureArchive == capture.ArchiveModeExtension || cfg.CaptureArchive == capture.ArchiveModeAuto || cfg.CaptureArchive == "" {
+		exe, browserErr = capture.ResolveBrowserForExtension(cfg.CaptureEngine, cfg.BrowserPath)
+	} else {
+		exe, browserErr = capture.ResolveBrowser(cfg.CaptureEngine, cfg.BrowserPath)
+	}
+	if browserErr != nil {
+		fmt.Fprintf(out, "browser       missing (%v)\n", browserErr)
 	} else {
 		fmt.Fprintf(out, "browser       %s\n", exe)
+		if capture.BlocksCommandLineExtensionLoad(cfg.BrowserPath) && cfg.BrowserPath != "" {
+			fmt.Fprintln(out, "browser_note  Google Chrome stable blocks --load-extension; edge or Chromium required")
+		} else if strings.EqualFold(cfg.CaptureEngine, "chrome") && capture.BlocksCommandLineExtensionLoad(exe) {
+			fmt.Fprintln(out, "browser_note  use capture_engine edge for SingleFile extension loading")
+		}
 	}
 	profile, _ := filepath.Abs(cfg.UserDataDir)
 	fmt.Fprintf(out, "profile       %s\n", profile)
@@ -272,6 +304,22 @@ func runDoctor(args []string, out io.Writer) int {
 		return 1
 	}
 	fmt.Fprintln(out, "capture       ok")
+
+	fmt.Fprintf(out, "capture_archive %s\n", cfg.CaptureArchive)
+	stageDir := filepath.Join(filepath.Dir(profile), "extensions", "singlefile")
+	switch cfg.CaptureArchive {
+	case capture.ArchiveModeEmbedded:
+		fmt.Fprintln(out, "singlefile    embedded core (no browser extension)")
+	case capture.ArchiveModeExtension, capture.ArchiveModeAuto, "":
+		if path, err := capture.PrepareSingleFileExtension(stageDir, cfg.CaptureEngine, cfg.SingleFileExtensionPath); err != nil {
+			fmt.Fprintf(out, "singlefile    not ready (%v)\n", err)
+			if cfg.CaptureArchive == capture.ArchiveModeExtension {
+				return 1
+			}
+		} else {
+			fmt.Fprintf(out, "singlefile    %s\n", path)
+		}
+	}
 	return 0
 }
 

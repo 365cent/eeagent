@@ -406,6 +406,15 @@ async def test_overview_reflects_live_state_not_a_frozen_snapshot(client):
     assert after["tech_themes"] == before["tech_themes"]
 
 
+async def test_sync_stamp_changes_after_signal_create(client):
+    before = (await client.get("/api/v1/sync-stamp")).json()
+    assert "fingerprint" in before
+    assert "changed_at" in before
+    await create_signal(client)
+    after = (await client.get("/api/v1/sync-stamp")).json()
+    assert after["fingerprint"] != before["fingerprint"]
+
+
 async def test_overview_weekly_counts_use_utc_week_created_rows(client):
     current = await create_signal(client, url="https://example.com/current-week")
     previous = await create_signal(client, url="https://example.com/previous-week")

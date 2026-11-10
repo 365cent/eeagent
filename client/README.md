@@ -34,6 +34,20 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -Version
 
 运行时依赖：本机 Edge 或 Chrome（默认用 Edge），Windows 10/11。
 
+### macOS（GUI + DMG）
+
+**windigo 仅支持 Windows（Win32），无法在 macOS 上运行。** macOS 使用相同采集核心的 Fyne 窗口（粘贴链接、拖放文件、任务列表），浏览器仍为 Edge/Chrome + CDP。
+
+```bash
+cd client
+./scripts/package-macos.sh v0.1.0
+# dist/EEA Capture.app
+# dist/EEA-Capture-v0.1.0-macOS.dmg
+open "dist/EEA Capture.app"
+```
+
+`.app` 从 `Contents/Resources/config.json` 读取配置；开发时也可在 `client/` 目录直接 `go run ./cmd/capture`（使用当前目录的 `config.json`）。需要本机安装 Google Chrome 或 Microsoft Edge。
+
 ---
 
 ## 目录结构
@@ -74,7 +88,9 @@ dist/                发布产物（gitignored）
 | `page_ready_timeout_sec` | 普通页面等待可读正文稳定的上限，默认 25 |
 | `interactive_timeout_sec` | 微信/Cloudflare 验证页等待人工完成的上限，默认 180 |
 | `min_text_chars` | 判定“有正文”的最少字符数，默认 10；不足则拒绝归档 |
-| `headless` | `true` 则无窗口，登录场景应保持 `false` |
+| `headless` | `true` 则无窗口；`capture_archive=extension` 时会强制可见窗口以加载 SingleFile |
+| `capture_archive` | `extension`（默认）/ `auto` / `embedded` — 见下方「工作原理」 |
+| `singlefile_extension_path` | 留空则自动从本机 Edge/Chrome 复制到 `data/extensions/singlefile` |
 
 环境变量覆盖：`EEA_API_BASE`、`EEA_CLIENT_CONFIG`（指定别的配置文件）。
 
@@ -118,12 +134,22 @@ capture.exe version
 Edge/Chrome (--remote-debugging-port=0, 独立 profile)
    │  CDP over websocket（stdlib 手写，无第三方依赖）
    ├─ Page.navigate → 等 load / readyState=complete
-   ├─ Runtime.evaluate 注入 SingleFile core（go:embed，1 MB）
-   └─ SingleFile.getPageData({loadDeferredContent:true}) → 自包含 HTML
+   ├─ [默认] 加载本机已安装的 SingleFile 扩展 → content.capture（与手动“保存页面”同源）
+   └─ [回退] Runtime.evaluate 注入 single-file-core（go:embed）
           │
           └─ POST /api/v1/capture/jobs  multipart: url / file / submission_id
                  └─ GET /api/v1/capture/jobs/{id} 轮询到终态并显示 signal
 ```
+
+`config.json` 中 `capture_archive`：
+
+| 值 | 行为 |
+| --- | --- |
+| `auto`（默认） | 若能在 Edge/Chrome 配置目录找到 SingleFile，则用扩展归档；否则走内嵌 core |
+| `extension` | 仅扩展；未安装时报错 |
+| `embedded` | 仅内嵌 core（轻量，但复杂站点可能少于商店扩展） |
+
+自动化通过 `--load-extension` 注入商店版 SingleFile（优先从配置目录复制，否则从 Chrome Web Store 下载 CRX 解压到 profile 旁的 `extensions/singlefile`）。**Google Chrome 稳定版会忽略 `--load-extension`**，因此 `capture_archive=extension` 时请用 **`capture_engine: "edge"`**（或 Chromium / Google Chrome for Testing）。手动安装扩展见 [SingleFile](https://chromewebstore.google.com/detail/singlefile/mpiodijhokgodhhofbcjdecpffjipkle)。也可将已保存的 `.html` 拖入客户端上传。自建扩展树见 [`scripts/vendor-singlefile-extension.sh`](scripts/vendor-singlefile-extension.sh)，路径写入 `singlefile_extension_path`。
 
 - 单例浏览器进程，多标签并发抓取；抓完即关标签。
 - profile 下的 `DevToolsActivePort` 若指向死端口，会先探测再清理；若同 profile 已有存活浏览器则直接复用。

@@ -14,7 +14,7 @@ REF_CODES: dict[str, list[tuple[str, ...]]] = {
         ("creation_supply", "创造端（供应链）", "供应链（创造端）"),
         ("delivery_oem", "传递端（主机厂）"),
         ("realization_consumer", "兑现端（消费者）"),
-        ("regulation_standard", "规制端（行业标准/规定）"),
+        ("regulation_standard", "规制端（行业标准/规定）", "规则端（行业标准/规定）"),
     ],
     "signal_type": [
         ("strategy", "战略"),

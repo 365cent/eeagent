@@ -7,16 +7,21 @@ each chat-capable candidate is verified with one minimal completion (single
 "ping" turn, `max_tokens=1`) before it is used. The pick is cached briefly so
 one request does not re-probe every candidate.
 
-Vision stays unset by default as well: `VISION_MODEL` wins when explicitly
-configured, otherwise the gateway list is searched for Qwen 3.8 first and
-Qwen 3.6 second (ids change over time, so matching is by pattern, not id).
+Vision uses the same `LLM_BASE_URL` and `LLM_API_KEY` as chat
+(`…/chat/completions` with image parts). `VISION_MODEL` wins when set; otherwise
+the gateway list is searched for Qwen 3.8 then 3.6 (ids change over time).
 """
 from __future__ import annotations
 
+import asyncio
+import logging
 import re
 import time
+from contextlib import asynccontextmanager
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 from app.core.config import get_settings
 
@@ -50,6 +55,17 @@ _VISION_PREFERENCE = (
 )
 
 _cache: dict[str, tuple[str, float]] = {}
+_resolve_lock = asyncio.Lock()
+_chat_sem = asyncio.Semaphore(2)
+_studio_sem = asyncio.Semaphore(1)
+
+DEFAULT_CHAT_MODEL_ATTEMPTS = 3
+
+
+def configured_chat_model(settings=None) -> str:
+    """``LLM_MODEL`` from settings when set (including gateway ids such as ``auto``)."""
+    settings = settings or get_settings()
+    return (settings.llm_model or "").strip()
 
 
 def _cached(kind: str) -> str | None:
@@ -95,8 +111,52 @@ async def list_models(*, timeout: float = 15.0) -> list[str]:
 
 
 def chat_candidates(models: list[str]) -> list[str]:
-    """Chat-capable ids, preserving gateway order."""
+    """Chat-capable ids in gateway order (embeddings/rerank/vision-only names excluded)."""
     return [m for m in models if not _NON_CHAT.search(m)]
+
+
+def _upstream_retryable(exc: LLMUpstreamError) -> bool:
+    if exc.status in (408, 429, 500, 502, 503, 504, 554):
+        return True
+    detail = exc.detail.lower()
+    return "timeout" in detail or "edgeone" in detail
+
+
+def upstream_from_pydantic_ai(exc: BaseException) -> LLMUpstreamError:
+    """Map pydantic-ai provider failures to ``LLMUpstreamError`` for API handlers."""
+    from pydantic_ai.exceptions import ModelAPIError, ModelHTTPError
+
+    if isinstance(exc, ModelHTTPError):
+        body = exc.body
+        text = body.strip() if isinstance(body, str) else (str(body) if body is not None else "")
+        detail = text or f"LLM 上游 HTTP {exc.status_code}"
+        return LLMUpstreamError(int(exc.status_code), f"{exc.model_name}: {detail}"[:500])
+    if isinstance(exc, ModelAPIError):
+        return LLMUpstreamError(502, f"{exc.model_name}: {exc}"[:500])
+    return LLMUpstreamError(502, str(exc)[:500])
+
+
+async def build_chat_model_chain(max_models: int = DEFAULT_CHAT_MODEL_ATTEMPTS) -> list[str]:
+    """Models to try: ``LLM_MODEL`` first when set, else probed default, then `/models` list."""
+    settings = get_settings()
+    models = await list_models()
+    candidates = chat_candidates(models)
+    if not candidates:
+        raise LLMNoModelError("gateway lists no chat-capable models")
+    explicit = configured_chat_model(settings)
+    primary = explicit if explicit else await resolve_chat_model()
+    chain: list[str] = [primary]
+    for model in candidates:
+        if model not in chain:
+            chain.append(model)
+    return chain[:max(1, max_models)]
+
+
+@asynccontextmanager
+async def studio_generation_slot():
+    """One studio LLM completion at a time (avoids EdgeOne timeouts under burst)."""
+    async with _studio_sem:
+        yield
 
 
 async def _probe_chat(model: str, *, timeout: float = 20.0) -> bool:
@@ -123,18 +183,24 @@ async def _probe_chat(model: str, *, timeout: float = 20.0) -> bool:
 async def resolve_chat_model(*, force: bool = False) -> str:
     """Configured model, else the first gateway candidate that answers a probe."""
     settings = get_settings()
-    if settings.llm_model:
-        return settings.llm_model
+    explicit = configured_chat_model(settings)
+    if explicit:
+        return explicit
     if not force:
         hit = _cached("chat")
         if hit:
             return hit
-    models = await list_models()
-    candidates = chat_candidates(models)
-    for candidate in candidates:
-        if await _probe_chat(candidate):
-            return _remember("chat", candidate)
-    raise LLMNoModelError(f"no chat model answered a probe; candidates={candidates}")
+    async with _resolve_lock:
+        if not force:
+            hit = _cached("chat")
+            if hit:
+                return hit
+        models = await list_models()
+        candidates = chat_candidates(models)
+        for candidate in candidates:
+            if await _probe_chat(candidate):
+                return _remember("chat", candidate)
+        raise LLMNoModelError(f"no chat model answered a probe; candidates={candidates}")
 
 
 def pick_vision_model(models: list[str], explicit: str = "") -> str:
@@ -164,32 +230,33 @@ async def resolve_vision_model(*, force: bool = False) -> str:
     return _remember("vision", model)
 
 
-async def chat_completion(
-    messages: list[dict[str, str]],
+async def _post_chat_completion(
     *,
-    temperature: float = 0.3,
-    max_tokens: int = 1200,
+    base: str,
+    model: str,
+    messages: list[dict[str, str]],
+    temperature: float,
+    max_tokens: int,
+    timeout: float,
 ) -> tuple[str, str]:
-    """Return (assistant_text, model_name)."""
-    settings = get_settings()
-    base = settings.llm_base_url_normalized
-    if not base:
-        raise LLMNotConfiguredError("LLM_BASE_URL must be set in backend/.env")
-    model = await resolve_chat_model()
-
     payload = {
         "model": model,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
-
-    async with httpx.AsyncClient(timeout=90.0) as client:
+    async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(
             f"{base}/chat/completions", headers=_headers(), json=payload
         )
         if resp.status_code >= 400:
             body = resp.text[:500]
+            logger.warning(
+                "chat completion failed model=%s status=%s detail=%s",
+                model,
+                resp.status_code,
+                body[:200] if body else resp.reason_phrase,
+            )
             raise LLMUpstreamError(resp.status_code, body or resp.reason_phrase)
         data = resp.json()
 
@@ -200,3 +267,46 @@ async def chat_completion(
     if not isinstance(content, str) or not content.strip():
         raise LLMUpstreamError(502, "empty assistant content from LLM")
     return content.strip(), str(data.get("model") or model)
+
+
+async def chat_completion(
+    messages: list[dict[str, str]],
+    *,
+    temperature: float = 0.3,
+    max_tokens: int = 1200,
+    max_model_attempts: int = 1,
+) -> tuple[str, str]:
+    """Return (assistant_text, model_name) via ``LLM_BASE_URL`` OpenAI chat API."""
+    settings = get_settings()
+    base = settings.llm_base_url_normalized
+    if not base:
+        raise LLMNotConfiguredError("LLM_BASE_URL must be set in backend/.env")
+    timeout = 120.0 if max_tokens <= 1200 else 180.0
+    attempts = max(1, max_model_attempts)
+    chain = await build_chat_model_chain(max_models=attempts)
+
+    last: LLMUpstreamError | None = None
+    for idx, model in enumerate(chain):
+        try:
+            async with _chat_sem:
+                return await _post_chat_completion(
+                    base=base,
+                    model=model,
+                    messages=messages,
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                    timeout=timeout,
+                )
+        except LLMUpstreamError as exc:
+            last = exc
+            if idx + 1 >= len(chain) or not _upstream_retryable(exc):
+                raise
+            logger.info(
+                "chat completion retry next_model=%s after model=%s status=%s",
+                chain[idx + 1],
+                model,
+                exc.status,
+            )
+    if last is not None:
+        raise last
+    raise LLMNoModelError("no chat model attempts remain")

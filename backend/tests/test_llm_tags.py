@@ -14,7 +14,7 @@ from pydantic_ai.models.function import FunctionModel, AgentInfo
 from pydantic_ai.models.test import TestModel
 
 import app.services.llm as llm
-from app.services.llm import LLMTagSuggestion, suggest_tags_with_llm
+from app.services.llm import LLMExcerpt, LLMTagSuggestion, suggest_excerpt_with_llm, suggest_tags_with_llm
 
 pytestmark = pytest.mark.anyio
 
@@ -27,6 +27,28 @@ def _settings(**overrides):
     )
     base.update(overrides)
     return types.SimpleNamespace(**base)
+
+
+async def test_llm_excerpt_from_function_model(monkeypatch):
+    def fake(messages, info: AgentInfo) -> ModelResponse:
+        tool_name = info.output_tools[0].name
+        return ModelResponse(
+            parts=[
+                ToolCallPart(
+                    tool_name,
+                    {"excerpt": "蔚来 ET9 强调中央计算与区域供电架构。"},
+                )
+            ]
+        )
+
+    async def agent_factory():
+        return Agent(FunctionModel(fake), output_type=LLMExcerpt)
+
+    monkeypatch.setattr(llm, "_build_excerpt_agent", agent_factory)
+    monkeypatch.setattr(llm, "get_settings", lambda: _settings())
+
+    out = await suggest_excerpt_with_llm("蔚来", "正文很长……")
+    assert out == "蔚来 ET9 强调中央计算与区域供电架构。"
 
 
 async def test_structured_suggestion_parsed_from_function_model(monkeypatch):
@@ -48,8 +70,11 @@ async def test_structured_suggestion_parsed_from_function_model(monkeypatch):
             ]
         )
 
+    async def build_agent():
+        return Agent(FunctionModel(fake), output_type=LLMTagSuggestion)
+
     monkeypatch.setattr(llm, "get_settings", lambda: _settings())
-    monkeypatch.setattr(llm, "_build_agent", lambda: Agent(FunctionModel(fake), output_type=LLMTagSuggestion))
+    monkeypatch.setattr(llm, "_build_agent", build_agent)
     result = await suggest_tags_with_llm("eFuse 配电趋势", "某主机厂发布 eFuse 方案")
     assert result == LLMTagSuggestion(
         value_chain_stage_code="creation_supply",
@@ -60,14 +85,13 @@ async def test_structured_suggestion_parsed_from_function_model(monkeypatch):
 
 async def test_test_model_custom_output_args_roundtrip(monkeypatch):
     monkeypatch.setattr(llm, "get_settings", lambda: _settings())
-    monkeypatch.setattr(
-        llm,
-        "_build_agent",
-        lambda: Agent(
+    async def build_agent():
+        return Agent(
             TestModel(custom_output_args={"value_chain_stage_code": "delivery_oem", "tech_tags": ["域控制器"]}),
             output_type=LLMTagSuggestion,
-        ),
-    )
+        )
+
+    monkeypatch.setattr(llm, "_build_agent", build_agent)
     result = await suggest_tags_with_llm("主机厂电子架构", "中央计算")
     assert result is not None
     assert result.value_chain_stage_code == "delivery_oem"
@@ -75,15 +99,14 @@ async def test_test_model_custom_output_args_roundtrip(monkeypatch):
 
 
 async def test_empty_llm_model_returns_none_then_jieba_fallback(monkeypatch):
-    """LLM_MODEL unset → None without any network call; the jieba path in
-    signals.py keeps suggesting (verified directly against suggest_tags)."""
+    """No resolvable chat model → None; jieba path still works."""
     from app.services.tagging import suggest_tags
 
-    def explode():
-        raise AssertionError("no agent may be built when LLM_MODEL is empty")
+    async def no_chat_model():
+        return None
 
     monkeypatch.setattr(llm, "get_settings", lambda: _settings(llm_model=""))
-    monkeypatch.setattr(llm, "_build_agent", explode)
+    monkeypatch.setattr(llm, "_chat_model_id", no_chat_model)
     assert await suggest_tags_with_llm("eFuse", "eFuse eFuse 智能配电") is None
     # the caller's jieba fallback still produces tags
     assert "eFuse" in suggest_tags("eFuse 配电 智能配电 eFuse")
@@ -95,10 +118,11 @@ async def test_unreachable_or_failing_model_returns_none(monkeypatch):
     def failing(messages, info: AgentInfo) -> ModelResponse:
         raise RuntimeError("gateway unreachable")
 
+    async def build_agent():
+        return Agent(FunctionModel(failing), output_type=LLMTagSuggestion)
+
     monkeypatch.setattr(llm, "get_settings", lambda: _settings())
-    monkeypatch.setattr(
-        llm, "_build_agent", lambda: Agent(FunctionModel(failing), output_type=LLMTagSuggestion)
-    )
+    monkeypatch.setattr(llm, "_build_agent", build_agent)
     assert await suggest_tags_with_llm("标题", "正文") is None
 
 
@@ -112,10 +136,11 @@ async def test_invalid_structured_output_returns_none(monkeypatch):
             parts=[ToolCallPart(tool_name, {"value_chain_stage_code": "not_a_stage", "tech_tags": ["x"]})]
         )
 
+    async def build_agent():
+        return Agent(FunctionModel(bogus), output_type=LLMTagSuggestion)
+
     monkeypatch.setattr(llm, "get_settings", lambda: _settings())
-    monkeypatch.setattr(
-        llm, "_build_agent", lambda: Agent(FunctionModel(bogus), output_type=LLMTagSuggestion)
-    )
+    monkeypatch.setattr(llm, "_build_agent", build_agent)
     assert await suggest_tags_with_llm("标题", "正文") is None
 
 
@@ -127,7 +152,11 @@ async def test_endpoint_falls_back_to_jieba_when_llm_unavailable(client, monkeyp
     async def none_suggestion(title, body):
         return None
 
+    async def jieba_only(*_a, **_k):
+        return ["eFuse", "配电"], "jieba-frequency", None
+
     monkeypatch.setattr(signals_api, "suggest_tags_with_llm", none_suggestion)
+    monkeypatch.setattr(signals_api, "suggest_tech_tags", jieba_only)
     resp = await client.post(
         "/api/v1/signals",
         json={
@@ -142,16 +171,15 @@ async def test_endpoint_falls_back_to_jieba_when_llm_unavailable(client, monkeyp
     got = await client.get(f"/api/v1/signals/{sid}/tag-suggestions")
     assert got.status_code == 200, got.text
     body = got.json()
-    assert body["source"] == "jieba-frequency"
-    assert body["suggested_tags"]  # non-empty jieba tags
-    assert body["value_chain_stage_code"] is None
-    assert body["signal_type_code"] is None
-    assert set(body) == {
-        "suggested_tags",
-        "value_chain_stage_code",
-        "signal_type_code",
-        "source",
-    }
+    assert body["source"] in ("jieba-frequency", "embedding-rerank")
+    assert body["suggested_tags"]  # non-empty jieba/rerank tags
+    assert body["signal_type_code"] == "technology"  # rule fallback from eFuse / 配电正文
+    assert body["protected_fields"] == []
+    if body["source"] == "embedding-rerank":
+        assert body["degraded_reason"]  # LLM pick unavailable while rerank may still run
+    else:
+        assert body["degraded_reason"]
+    assert {"suggested_tags", "value_chain_stage_code", "signal_type_code", "source", "protected_fields", "degraded_reason"} <= set(body)
 
 
 async def test_endpoint_uses_llm_when_available(client, monkeypatch):
@@ -159,10 +187,14 @@ async def test_endpoint_uses_llm_when_available(client, monkeypatch):
 
     async def good(title, body):
         return LLMTagSuggestion(
-            value_chain_stage_code="delivery_oem", signal_type_code="technology", tech_tags=["eFuse", "域控制器"]
+            value_chain_stage_code="delivery_oem", signal_type_code="technology", tech_tags=[]
         )
 
+    async def good_tags(*_a, **_k):
+        return ["eFuse", "域控制器"], "llm-rerank-refine", 0.85
+
     monkeypatch.setattr(signals_api, "suggest_tags_with_llm", good)
+    monkeypatch.setattr(signals_api, "suggest_tech_tags", good_tags)
     resp = await client.post(
         "/api/v1/signals",
         json={
@@ -177,9 +209,10 @@ async def test_endpoint_uses_llm_when_available(client, monkeypatch):
     sid = resp.json()["id"]
     got = await client.get(f"/api/v1/signals/{sid}/tag-suggestions")
     assert got.status_code == 200, got.text
-    assert got.json() == {
-        "suggested_tags": ["eFuse", "域控制器"],
-        "value_chain_stage_code": "delivery_oem",
-        "signal_type_code": "technology",
-        "source": "llm",
-    }
+    payload = got.json()
+    assert payload["suggested_tags"] == ["eFuse", "域控制器"]
+    assert payload["value_chain_stage_code"] == "delivery_oem"
+    assert payload["signal_type_code"] == "technology"
+    assert payload["source"] == "llm-rerank-refine"
+    assert payload["protected_fields"] == []
+    assert payload["degraded_reason"] is None

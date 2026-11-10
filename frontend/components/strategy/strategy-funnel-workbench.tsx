@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import type { FormInstance } from 'antd/es/form'
 import { Alert, Button, Card, Empty, Form, Input, InputNumber, Select, Space, Tag, Timeline, Typography } from 'antd'
 import { fetchLandingPoints, fetchStrategyAssessmentHistory, fetchStrategyFunnel, patchStrategyFunnel } from '@/lib/api/eea-api'
 import type {
@@ -82,6 +83,45 @@ const CLASSIFICATIONS: StrategyClassification[] = ['前瞻布局', '短期可落
 const funnelQueryKey = (landingPointId: string) => ['eea', 'strategy', 'funnel', landingPointId] as const
 const historyQueryKey = (landingPointId: string) => ['eea', 'strategy', 'history', landingPointId] as const
 
+function syncScanForm(form: FormInstance<ScanForm>, funnel: StrategyFunnelOut) {
+  form.setFieldsValue({
+    scan_scope: funnel.scan_scope ?? '',
+    scan_sources_text: funnel.scan_sources?.join('\n') ?? '',
+  })
+}
+
+function syncTier1Form(form: FormInstance<Tier1Form>, funnel: StrategyFunnelOut) {
+  form.setFieldsValue({
+    tier1_current_business_relation: funnel.tier1_current_business_relation ?? '',
+    tier1_future_business_relation: funnel.tier1_future_business_relation ?? '',
+    valuable_role: funnel.valuable_role ?? '',
+    adaptation_decision: funnel.adaptation_decision ?? undefined,
+    adaptation_reason: funnel.adaptation_reason ?? '',
+  })
+}
+
+function syncScoreForm(form: FormInstance<ScoreForm>, funnel: StrategyFunnelOut) {
+  form.setFieldsValue({
+    score_business: funnel.score_drafts.business.score,
+    rationale_business: funnel.score_drafts.business.rationale ?? '',
+    score_maturity: funnel.score_drafts.maturity.score,
+    rationale_maturity: funnel.score_drafts.maturity.rationale ?? '',
+    score_moat: funnel.score_drafts.moat.score,
+    rationale_moat: funnel.score_drafts.moat.rationale ?? '',
+    score_supply_chain: funnel.score_drafts.supply_chain.score,
+    rationale_supply_chain: funnel.score_drafts.supply_chain.rationale ?? '',
+    score_feasibility: funnel.score_drafts.feasibility.score,
+    rationale_feasibility: funnel.score_drafts.feasibility.rationale ?? '',
+  })
+}
+
+function syncClassificationForm(form: FormInstance<ClassificationForm>, funnel: StrategyFunnelOut) {
+  form.setFieldsValue({
+    classification: funnel.classification ?? undefined,
+    strategy_note: funnel.strategy_note ?? '',
+  })
+}
+
 function activeStageFor(currentStep: StrategyFunnelCurrentStep): FunnelStage | null {
   switch (currentStep) {
     case 'industry_scan': return 1
@@ -159,6 +199,153 @@ function scorePayload(values: ScoreForm): StrategyFunnelPatchPayload {
     score_feasibility: values.score_feasibility,
     rationale_feasibility: values.rationale_feasibility.trim(),
   }
+}
+
+type StageFormProps = {
+  funnel: StrategyFunnelOut
+  saving: boolean
+  onSubmit: (payload: StrategyFunnelPatchPayload) => void
+}
+
+function IndustryScanStageForm({ funnel, saving, onSubmit }: StageFormProps) {
+  const [form] = Form.useForm<ScanForm>()
+  useEffect(() => {
+    syncScanForm(form, funnel)
+  }, [form, funnel])
+  return (
+    <Form<ScanForm>
+      form={form}
+      layout="vertical"
+      onFinish={(values) => {
+        const scanSources = values.scan_sources_text.split(/\r?\n/).map((source) => source.trim()).filter(Boolean)
+        onSubmit({ scan_scope: values.scan_scope.trim(), scan_sources: scanSources })
+      }}
+    >
+      <Form.Item label="行业扫描范围" name="scan_scope" rules={[{ required: true, whitespace: true, message: '请填写行业扫描范围。' }]}>
+        <Input.TextArea rows={3} placeholder="记录本次行业级全景扫描的范围。" />
+      </Form.Item>
+      <Form.Item
+        label="扫描来源（每行一项）"
+        name="scan_sources_text"
+        rules={[{
+          validator: (_, value) => typeof value === 'string' && value.split(/\r?\n/).some((source) => source.trim())
+            ? Promise.resolve()
+            : Promise.reject(new Error('请至少记录一项扫描来源。')),
+        }]}
+      >
+        <Input.TextArea rows={4} placeholder="填写实际使用的来源标题或 URL，每行一项。" />
+      </Form.Item>
+      <Button type="primary" htmlType="submit" loading={saving}>保存扫描范围与来源</Button>
+    </Form>
+  )
+}
+
+function Tier1AdaptationStageForm({ funnel, saving, onSubmit }: StageFormProps) {
+  const [form] = Form.useForm<Tier1Form>()
+  useEffect(() => {
+    syncTier1Form(form, funnel)
+  }, [form, funnel])
+  return (
+    <Form<Tier1Form>
+      form={form}
+      layout="vertical"
+      onFinish={(values) => onSubmit({
+        tier1_current_business_relation: values.tier1_current_business_relation.trim(),
+        tier1_future_business_relation: values.tier1_future_business_relation.trim(),
+        valuable_role: values.valuable_role.trim(),
+        adaptation_decision: values.adaptation_decision,
+        adaptation_reason: values.adaptation_reason.trim(),
+      })}
+    >
+      <Alert
+        type="info"
+        showIcon
+        title="判断句：这项技术与公司现在/未来业务有什么关系，公司能否在其中承担有价值的角色？"
+        style={{ marginBottom: 16 }}
+      />
+      <Form.Item label="当前业务关系" name="tier1_current_business_relation" rules={[{ required: true, whitespace: true, message: '请记录当前业务关系。' }]}>
+        <Input.TextArea rows={3} />
+      </Form.Item>
+      <Form.Item label="未来业务关系" name="tier1_future_business_relation" rules={[{ required: true, whitespace: true, message: '请记录未来业务关系。' }]}>
+        <Input.TextArea rows={3} />
+      </Form.Item>
+      <Form.Item label="公司可承担的有价值角色" name="valuable_role" rules={[{ required: true, whitespace: true, message: '请记录有价值的角色。' }]}>
+        <Input.TextArea rows={3} />
+      </Form.Item>
+      <Form.Item label="适配结论" name="adaptation_decision" rules={[{ required: true, message: '请选择通过或拒绝。' }]}>
+        <Select
+          options={[
+            { value: 'pass', label: '通过，进入五维研判' },
+            { value: 'reject', label: '拒绝，退出且不评分' },
+          ]}
+        />
+      </Form.Item>
+      <Form.Item label="适配判断理由 / 退出理由" name="adaptation_reason" rules={[{ required: true, whitespace: true, message: '请填写判断理由。' }]}>
+        <Input.TextArea rows={3} />
+      </Form.Item>
+      <Button type="primary" htmlType="submit" loading={saving}>保存适配结论</Button>
+    </Form>
+  )
+}
+
+function ScoringStageForm({ funnel, saving, onSubmit }: StageFormProps) {
+  const [form] = Form.useForm<ScoreForm>()
+  useEffect(() => {
+    syncScoreForm(form, funnel)
+  }, [form, funnel])
+  return (
+    <Form<ScoreForm> form={form} layout="vertical" onFinish={(values) => onSubmit(scorePayload(values))}>
+      <Paragraph type="secondary">每个维度填写 1–5 的整数与本次判断依据。综合分只显示服务器返回值。</Paragraph>
+      <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+        {SCORE_DIMENSIONS.map(({ key, label, scoreField, rationaleField }) => (
+          <Card key={key} size="small" title={label}>
+            <Form.Item
+              label="评分（1–5 整数）"
+              name={scoreField}
+              rules={[
+                { required: true, message: '请选择 1–5 的整数。' },
+                { type: 'integer', min: 1, max: 5, message: '评分必须是 1–5 的整数。' },
+              ]}
+            >
+              <InputNumber min={1} max={5} step={1} precision={0} style={{ width: 140 }} />
+            </Form.Item>
+            <Form.Item label="评分依据" name={rationaleField} rules={[{ required: true, whitespace: true, message: '请填写该维度的判断依据。' }]}>
+              <Input.TextArea rows={3} />
+            </Form.Item>
+          </Card>
+        ))}
+      </Space>
+      <div style={{ marginTop: 16, marginBottom: 16 }}>
+        <Text strong>服务端总分：{funnel.score_total == null ? '尚未返回' : `${funnel.score_total} / 25`}</Text>
+      </div>
+      <Button type="primary" htmlType="submit" loading={saving}>保存五维评分与依据</Button>
+    </Form>
+  )
+}
+
+function ClassificationStageForm({ funnel, saving, onSubmit }: StageFormProps) {
+  const [form] = Form.useForm<ClassificationForm>()
+  useEffect(() => {
+    syncClassificationForm(form, funnel)
+  }, [form, funnel])
+  return (
+    <Form<ClassificationForm>
+      form={form}
+      layout="vertical"
+      onFinish={(values) => onSubmit({
+        classification: values.classification,
+        strategy_note: values.strategy_note.trim(),
+      })}
+    >
+      <Form.Item label="策略分类（三选一）" name="classification" rules={[{ required: true, message: '请选择一项分类。' }]}>
+        <Select options={CLASSIFICATIONS.map((value) => ({ value, label: value }))} />
+      </Form.Item>
+      <Form.Item label="策略备注" name="strategy_note" rules={[{ required: true, whitespace: true, message: '请填写策略备注。' }]}>
+        <Input.TextArea rows={4} />
+      </Form.Item>
+      <Button type="primary" htmlType="submit" loading={saving}>保存分类与策略备注</Button>
+    </Form>
+  )
 }
 
 function CurrentAssessment({ assessment, funnel }: { assessment: AssessmentOut | null; funnel: StrategyFunnelOut }) {
@@ -256,11 +443,6 @@ export function StrategyFunnelWorkbench() {
   const [landingPointId, setLandingPointId] = useState<string>()
   const [editingStage, setEditingStage] = useState<FunnelStage | null>(null)
   const [notice, setNotice] = useState<{ type: 'success' | 'error'; text: string } | null>(null)
-  const [scanForm] = Form.useForm<ScanForm>()
-  const [tier1Form] = Form.useForm<Tier1Form>()
-  const [scoreForm] = Form.useForm<ScoreForm>()
-  const [classificationForm] = Form.useForm<ClassificationForm>()
-
   const landingPointsQuery = useQuery({
     queryKey: ['eea', 'landing-points'],
     queryFn: () => fetchLandingPoints(),
@@ -292,48 +474,8 @@ export function StrategyFunnelWorkbench() {
   )
 
   useEffect(() => {
-    scanForm.resetFields()
-    tier1Form.resetFields()
-    scoreForm.resetFields()
-    classificationForm.resetFields()
     setEditingStage(null)
-    if (!funnel) return
-
-    scanForm.setFieldsValue({
-      scan_scope: funnel.scan_scope ?? '',
-      scan_sources_text: funnel.scan_sources?.join('\n') ?? '',
-    })
-    tier1Form.setFieldsValue({
-      tier1_current_business_relation: funnel.tier1_current_business_relation ?? '',
-      tier1_future_business_relation: funnel.tier1_future_business_relation ?? '',
-      valuable_role: funnel.valuable_role ?? '',
-      adaptation_decision: funnel.adaptation_decision ?? undefined,
-      adaptation_reason: funnel.adaptation_reason ?? '',
-    })
-    scoreForm.setFieldsValue({
-      score_business: funnel.score_drafts.business.score,
-      rationale_business: funnel.score_drafts.business.rationale ?? '',
-      score_maturity: funnel.score_drafts.maturity.score,
-      rationale_maturity: funnel.score_drafts.maturity.rationale ?? '',
-      score_moat: funnel.score_drafts.moat.score,
-      rationale_moat: funnel.score_drafts.moat.rationale ?? '',
-      score_supply_chain: funnel.score_drafts.supply_chain.score,
-      rationale_supply_chain: funnel.score_drafts.supply_chain.rationale ?? '',
-      score_feasibility: funnel.score_drafts.feasibility.score,
-      rationale_feasibility: funnel.score_drafts.feasibility.rationale ?? '',
-    })
-    classificationForm.setFieldsValue({
-      classification: funnel.classification ?? undefined,
-      strategy_note: funnel.strategy_note ?? '',
-    })
-  }, [
-    landingPointId,
-    funnel,
-    scanForm,
-    tier1Form,
-    scoreForm,
-    classificationForm,
-  ])
+  }, [landingPointId])
 
   const saveMutation = useMutation({
     mutationFn: ({ landingPointId: id, payload }: SaveVariables) => patchStrategyFunnel(id, payload),
@@ -368,116 +510,12 @@ export function StrategyFunnelWorkbench() {
   }
 
   function renderStageForm(stage: FunnelStage) {
-    if (stage === 1) {
-      return (
-        <Form<ScanForm> form={scanForm} layout="vertical" onFinish={(values) => {
-          const scanSources = values.scan_sources_text.split(/\r?\n/).map((source) => source.trim()).filter(Boolean)
-          submit({ scan_scope: values.scan_scope.trim(), scan_sources: scanSources })
-        }}>
-          <Form.Item label="行业扫描范围" name="scan_scope" rules={[{ required: true, whitespace: true, message: '请填写行业扫描范围。' }]}>
-            <Input.TextArea rows={3} placeholder="记录本次行业级全景扫描的范围。" />
-          </Form.Item>
-          <Form.Item
-            label="扫描来源（每行一项）"
-            name="scan_sources_text"
-            rules={[{
-              validator: (_, value) => typeof value === 'string' && value.split(/\r?\n/).some((source) => source.trim())
-                ? Promise.resolve()
-                : Promise.reject(new Error('请至少记录一项扫描来源。')),
-            }]}
-          >
-            <Input.TextArea rows={4} placeholder="填写实际使用的来源标题或 URL，每行一项。" />
-          </Form.Item>
-          <Button type="primary" htmlType="submit" loading={saveMutation.isPending}>保存扫描范围与来源</Button>
-        </Form>
-      )
-    }
-
-    if (stage === 2) {
-      return (
-        <Form<Tier1Form> form={tier1Form} layout="vertical" onFinish={(values) => submit({
-          tier1_current_business_relation: values.tier1_current_business_relation.trim(),
-          tier1_future_business_relation: values.tier1_future_business_relation.trim(),
-          valuable_role: values.valuable_role.trim(),
-          adaptation_decision: values.adaptation_decision,
-          adaptation_reason: values.adaptation_reason.trim(),
-        })}>
-          <Alert
-            type="info"
-            showIcon
-            title="判断句：这项技术与公司现在/未来业务有什么关系，公司能否在其中承担有价值的角色？"
-            style={{ marginBottom: 16 }}
-          />
-          <Form.Item label="当前业务关系" name="tier1_current_business_relation" rules={[{ required: true, whitespace: true, message: '请记录当前业务关系。' }]}>
-            <Input.TextArea rows={3} />
-          </Form.Item>
-          <Form.Item label="未来业务关系" name="tier1_future_business_relation" rules={[{ required: true, whitespace: true, message: '请记录未来业务关系。' }]}>
-            <Input.TextArea rows={3} />
-          </Form.Item>
-          <Form.Item label="公司可承担的有价值角色" name="valuable_role" rules={[{ required: true, whitespace: true, message: '请记录有价值的角色。' }]}>
-            <Input.TextArea rows={3} />
-          </Form.Item>
-          <Form.Item label="适配结论" name="adaptation_decision" rules={[{ required: true, message: '请选择通过或拒绝。' }]}>
-            <Select
-              options={[
-                { value: 'pass', label: '通过，进入五维研判' },
-                { value: 'reject', label: '拒绝，退出且不评分' },
-              ]}
-            />
-          </Form.Item>
-          <Form.Item label="适配判断理由 / 退出理由" name="adaptation_reason" rules={[{ required: true, whitespace: true, message: '请填写判断理由。' }]}>
-            <Input.TextArea rows={3} />
-          </Form.Item>
-          <Button type="primary" htmlType="submit" loading={saveMutation.isPending}>保存适配结论</Button>
-        </Form>
-      )
-    }
-
-    if (stage === 3) {
-      return (
-        <Form<ScoreForm> form={scoreForm} layout="vertical" onFinish={(values) => submit(scorePayload(values))}>
-          <Paragraph type="secondary">每个维度填写 1–5 的整数与本次判断依据。综合分只显示服务器返回值。</Paragraph>
-          <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-            {SCORE_DIMENSIONS.map(({ key, label, scoreField, rationaleField }) => (
-              <Card key={key} size="small" title={label}>
-                <Form.Item
-                  label="评分（1–5 整数）"
-                  name={scoreField}
-                  rules={[
-                    { required: true, message: '请选择 1–5 的整数。' },
-                    { type: 'integer', min: 1, max: 5, message: '评分必须是 1–5 的整数。' },
-                  ]}
-                >
-                  <InputNumber min={1} max={5} step={1} precision={0} style={{ width: 140 }} />
-                </Form.Item>
-                <Form.Item label="评分依据" name={rationaleField} rules={[{ required: true, whitespace: true, message: '请填写该维度的判断依据。' }]}>
-                  <Input.TextArea rows={3} />
-                </Form.Item>
-              </Card>
-            ))}
-          </Space>
-          <div style={{ marginTop: 16, marginBottom: 16 }}>
-            <Text strong>服务端总分：{funnel?.score_total == null ? '尚未返回' : `${funnel.score_total} / 25`}</Text>
-          </div>
-          <Button type="primary" htmlType="submit" loading={saveMutation.isPending}>保存五维评分与依据</Button>
-        </Form>
-      )
-    }
-
-    return (
-      <Form<ClassificationForm> form={classificationForm} layout="vertical" onFinish={(values) => submit({
-        classification: values.classification,
-        strategy_note: values.strategy_note.trim(),
-      })}>
-        <Form.Item label="策略分类（三选一）" name="classification" rules={[{ required: true, message: '请选择一项分类。' }]}>
-          <Select options={CLASSIFICATIONS.map((value) => ({ value, label: value }))} />
-        </Form.Item>
-        <Form.Item label="策略备注" name="strategy_note" rules={[{ required: true, whitespace: true, message: '请填写策略备注。' }]}>
-          <Input.TextArea rows={4} />
-        </Form.Item>
-        <Button type="primary" htmlType="submit" loading={saveMutation.isPending}>保存分类与策略备注</Button>
-      </Form>
-    )
+    if (!funnel) return null
+    const stageProps = { funnel, saving: saveMutation.isPending, onSubmit: submit }
+    if (stage === 1) return <IndustryScanStageForm {...stageProps} />
+    if (stage === 2) return <Tier1AdaptationStageForm {...stageProps} />
+    if (stage === 3) return <ScoringStageForm {...stageProps} />
+    return <ClassificationStageForm {...stageProps} />
   }
 
   function renderStage(stage: FunnelStage, title: string, summary: string) {

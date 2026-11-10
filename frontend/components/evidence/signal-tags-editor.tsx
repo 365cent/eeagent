@@ -7,6 +7,7 @@ import { useSignalTagSuggestions, useVocab } from '@/hooks/use-eea-queries'
 import { useSignalMutations } from '@/hooks/use-signal-mutations'
 import { EeaApiError } from '@/lib/api/client'
 import { suggestionSourceLabel } from '@/lib/suggestion-source'
+import { protectedFieldLabels } from '@/lib/suggestion-source'
 import type { TagSuggestion } from '@/lib/api/types'
 
 const { Text } = Typography
@@ -14,6 +15,7 @@ const { Text } = Typography
 type SignalTagsEditorProps = {
   signalId: string
   tags: string[]
+  updatedAt?: string | null
 }
 
 function scoreHint(out: TagSuggestion): string {
@@ -24,9 +26,9 @@ function scoreHint(out: TagSuggestion): string {
   return parts.join(' · ')
 }
 
-export function SignalTagsEditor({ signalId, tags }: SignalTagsEditorProps) {
+export function SignalTagsEditor({ signalId, tags, updatedAt }: SignalTagsEditorProps) {
   const { message: messageApi } = AntApp.useApp()
-  const { setTags } = useSignalMutations(signalId)
+  const { setTags, invalidate } = useSignalMutations(signalId, updatedAt)
   const vocabularyQuery = useVocab('tech_tag')
   const suggestionsQuery = useSignalTagSuggestions(signalId)
   const [draftTags, setDraftTags] = useState<string[]>(tags)
@@ -62,6 +64,9 @@ export function SignalTagsEditor({ signalId, tags }: SignalTagsEditorProps) {
       setEditing(false)
     } catch (err) {
       const detail = err instanceof EeaApiError ? err.message : String(err)
+      if (err instanceof EeaApiError && err.status === 409) {
+        void invalidate()
+      }
       messageApi.error(detail || '保存失败')
     }
   }
@@ -73,7 +78,11 @@ export function SignalTagsEditor({ signalId, tags }: SignalTagsEditorProps) {
   }
 
   const displayedTags = editing ? draftTags : tags
-  const suggestions = (suggestionsQuery.data?.suggested_tags ?? []).filter((tag) => !displayedTags.includes(tag))
+  const tagsProtected = suggestionsQuery.data?.protected_fields?.includes('tech_tags')
+  const protectedLabels = protectedFieldLabels(suggestionsQuery.data?.protected_fields)
+  const suggestions = tagsProtected
+    ? []
+    : (suggestionsQuery.data?.suggested_tags ?? []).filter((tag) => !displayedTags.includes(tag))
 
   return (
     <div className="signal-tags-editor">
@@ -145,6 +154,16 @@ export function SignalTagsEditor({ signalId, tags }: SignalTagsEditorProps) {
           {suggestionsQuery.data?.source ? ` · ${suggestionSourceLabel(suggestionsQuery.data.source)}` : ''}
           {suggestionsQuery.data ? ` · ${scoreHint(suggestionsQuery.data)}` : ''}
         </Text>
+        {suggestionsQuery.data?.degraded_reason ? (
+          <Text type="warning" style={{ display: 'block' }}>
+            {suggestionsQuery.data.degraded_reason}
+          </Text>
+        ) : null}
+        {protectedLabels.length ? (
+          <Text type="secondary" style={{ display: 'block' }}>
+            已人工确认，不再提供建议：{protectedLabels.join('、')}
+          </Text>
+        ) : null}
         {suggestionsQuery.isLoading ? (
           <Spin size="small" style={{ marginLeft: 8 }} />
         ) : suggestionsQuery.isError ? (

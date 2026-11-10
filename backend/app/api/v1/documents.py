@@ -9,9 +9,10 @@ POST /documents/{id}/ingest.
 """
 from __future__ import annotations
 
+import mimetypes
 import uuid
 
-from fastapi import APIRouter, Depends, File, HTTPException, Response, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,8 +21,25 @@ from app.core.config import get_settings
 from app.db.base import get_db
 from app.models.models import Document
 from app.schemas.schemas import DocumentDetail, DocumentRawOut
-from app.services.doc_ingest import ingest_document
+from app.services.doc_ingest import ingest_document, normalize_document_mime
+from app.services.doc_pdf_preview import (
+    DocumentPreviewError,
+    UnsupportedDocumentPreviewError,
+    build_pdf_preview_bytes,
+    document_pdf_preview_supported,
+)
+from starlette.concurrency import run_in_threadpool
+
 from app.services.objectstore import load_bytes, save_bytes, sha256_bytes
+from app.services.pptx_deck_preview import (
+    PptxDeckPreviewError,
+    PptxDeckPreviewUnavailableError,
+    build_pptx_deck_preview,
+    deck_preview_index_key,
+    deck_preview_prefix,
+    inject_deck_preview_base_href,
+    pptx_deck_preview_supported,
+)
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
@@ -137,11 +155,12 @@ async def upload_raw_document(
         doc = existing
     else:
         object_key = save_bytes(data, folder="documents", ext="bin")
+        mime = normalize_document_mime(file.filename, file.content_type) or "application/octet-stream"
         stmt = (
             pg_insert(Document)
             .values(
                 sha256=digest,
-                mime=file.content_type or "application/octet-stream",
+                mime=mime,
                 size=len(data),
                 filename=file.filename,
                 object_key=object_key,
@@ -185,6 +204,80 @@ async def get_canonical_markdown(
             404, f"canonical object {doc.canonical_md_object_key!r} missing from the object store"
         )
     return Response(content=data, media_type="text/markdown; charset=utf-8")
+
+
+@router.api_route("/{document_id}/preview.pdf", methods=["GET", "HEAD"])
+async def get_document_pdf_preview(
+    request: Request,
+    document_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+):
+    """Inline PDF for evidence viewing. Native PDF is passthrough; Office formats need LibreOffice."""
+    doc = await _load(db, document_id)
+    if not document_pdf_preview_supported(doc.filename, doc.mime):
+        raise HTTPException(415, "该文档类型不支持 PDF 预览")
+    data = load_bytes(doc.object_key)
+    if data is None:
+        raise HTTPException(404, f"raw object {doc.object_key!r} missing from the object store")
+    try:
+        pdf_bytes = await run_in_threadpool(build_pdf_preview_bytes, data, doc.filename, doc.mime)
+    except UnsupportedDocumentPreviewError as exc:
+        raise HTTPException(415, str(exc)) from exc
+    except DocumentPreviewError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    filename = (doc.filename or "document").rsplit(".", 1)[0] + ".pdf"
+    headers = {
+        "Content-Disposition": f'inline; filename="{filename}"',
+        "Content-Length": str(len(pdf_bytes)),
+    }
+    if request.method == "HEAD":
+        return Response(status_code=200, media_type="application/pdf", headers=headers)
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+
+
+@router.get("/{document_id}/deck-preview")
+async def get_document_deck_preview_html(document_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """deckpeek HTML slide viewer (structure mode); assets under …/deck-preview/{path}."""
+    doc = await _load(db, document_id)
+    if not pptx_deck_preview_supported(doc.filename, doc.mime):
+        raise HTTPException(415, "该文档不是 PPTX，无法使用幻灯片预览")
+    data = load_bytes(doc.object_key)
+    if data is None:
+        raise HTTPException(404, f"raw object {doc.object_key!r} missing from the object store")
+    try:
+        await run_in_threadpool(build_pptx_deck_preview, data, doc.filename, doc.sha256)
+    except PptxDeckPreviewUnavailableError as exc:
+        raise HTTPException(503, str(exc)) from exc
+    except PptxDeckPreviewError as exc:
+        raise HTTPException(500, str(exc)) from exc
+
+    html = load_bytes(deck_preview_index_key(doc.sha256))
+    if html is None:
+        raise HTTPException(500, "幻灯片预览生成失败（index.html 缺失）")
+    base_href = f"/api/v1/documents/{document_id}/deck-preview/"
+    body = inject_deck_preview_base_href(html, base_href)
+    return Response(content=body, media_type="text/html; charset=utf-8")
+
+
+@router.get("/{document_id}/deck-preview/{asset_path:path}")
+async def get_document_deck_preview_asset(
+    document_id: uuid.UUID, asset_path: str, db: AsyncSession = Depends(get_db)
+):
+    doc = await _load(db, document_id)
+    if not pptx_deck_preview_supported(doc.filename, doc.mime):
+        raise HTTPException(415, "该文档不是 PPTX")
+    if ".." in asset_path.split("/"):
+        raise HTTPException(400, "invalid asset path")
+    key = f"{deck_preview_prefix(doc.sha256)}/{asset_path.lstrip('/')}"
+    payload = load_bytes(key)
+    if payload is None:
+        raise HTTPException(404, f"deck preview asset {asset_path!r} not found")
+    media_type, _ = mimetypes.guess_type(asset_path)
+    return Response(
+        content=payload,
+        media_type=media_type or "application/octet-stream",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
 
 
 @router.post("/{document_id}/ingest", response_model=DocumentDetail)

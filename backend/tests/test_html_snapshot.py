@@ -70,6 +70,25 @@ PLAIN_ARTICLE_HTML = """<!DOCTYPE html>
 # 什么都没有：三项元数据 None，正文取 <body> 兜底
 BARE_HTML = """<html><body><p>只有一段正文</p></body></html>"""
 
+def _edn_article_body_html() -> str:
+    import base64
+
+    payload = base64.b64encode(b"\x89PNG\r\n" + b"x" * 2000).decode("ascii")
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"/><title>中央计算白皮书</title></head>
+<body>
+<nav>首页 资讯 navigation-noise</nav>
+<div class="art-con article_body article_text">
+<div class="article_text">
+<p>中央计算架构与区域控制器是本文主线。</p>
+<img src="data:image/png;base64,{payload}" alt="diagram"/>
+</div>
+</div>
+<footer>footer-noise-edn</footer>
+</body>
+</html>"""
+
 # 德赛 OA / Froala：正文在 .fr-view；<main> 还带评论与访问统计噪声
 OA_FROALA_HTML = """<!DOCTYPE html>
 <html>
@@ -118,6 +137,55 @@ def test_bytes_and_str_inputs_agree() -> None:
     from_str = parse_html_snapshot(WEIXIN_MP_HTML)
     from_bytes = parse_html_snapshot(WEIXIN_MP_HTML.encode("utf-8"))
     assert from_str == from_bytes
+
+
+def test_inline_remote_images_when_page_url_set(monkeypatch) -> None:
+    png = b"\x89PNG\r\n" + b"x" * 2000
+
+    class _Response:
+        status_code = 200
+        content = png
+
+        @property
+        def headers(self):
+            return {"content-type": "image/png"}
+
+    class _Client:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url, headers=None):
+            assert url.startswith("https://")
+            return _Response()
+
+    monkeypatch.setattr("httpx.Client", _Client)
+    html = """<!DOCTYPE html><html><body>
+<div class="art-con article_body"><div class="article_text">
+<p>蔚来 ET9 数字架构说明文字补充长度以满足解析容器阈值与图像提取流程测试需要。</p>
+<img src="https://cdn.example/mbxy.png" alt="架构图一">
+</div></div></body></html>"""
+    snap = parse_html_snapshot(
+        html,
+        page_url="https://www.ednchina.com/technews/31623.html",
+    )
+    assert len(snap.figures) == 1
+    assert "> 图 1：架构图一" in snap.body_md
+    assert snap.figures[0].caption == "架构图一"
+
+
+def test_edn_article_body_container_and_figures() -> None:
+    snap = parse_html_snapshot(_edn_article_body_html())
+    assert "中央计算架构" in snap.body_md
+    assert "navigation-noise" not in snap.body_md
+    assert "footer-noise-edn" not in snap.body_md
+    assert len(snap.figures) == 1
+    assert "diagram" in (snap.figures[0].caption or "")
 
 
 def test_fallback_to_article_when_no_js_content() -> None:

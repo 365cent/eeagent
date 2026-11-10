@@ -15,6 +15,15 @@ function stripMarkdownInline(value: string): string {
     .trim()
 }
 
+/** Legacy DB excerpts that are really site chrome / nav rails. */
+export function excerptLooksLikeChrome(text: string): boolean {
+  const t = text.replace(/\s+/g, ' ')
+  if (/https?:\/\//.test(t)) return true
+  if (t.includes('全部标签') && t.includes('+')) return true
+  if ((t.match(/\+/g)?.length ?? 0) >= 4 && t.length < 500) return true
+  return false
+}
+
 /** Plain-text preview for sidebars (no raw `**` or headings). */
 export function plainMarkdownSnippet(markdown: string, maxLen = 280): string {
   const collapsed = collapseMarkdownBlocks(markdown)
@@ -31,8 +40,16 @@ export function sourceExcerptSnippet(markdown: string, title: string | undefined
     .map((block) => stripMarkdownInline(block.replace(/\s+/g, ' ')))
     .filter((block) => block.length > 0 && !/^>\s/.test(block))
     .filter((block) => {
-      if (titlePlain && block.startsWith(titlePlain.slice(0, Math.min(20, titlePlain.length)))) return false
+      if (
+        titlePlain &&
+        block.startsWith(titlePlain.slice(0, Math.min(20, titlePlain.length))) &&
+        block.length <= titlePlain.length + 12
+      ) {
+        return false
+      }
       if (/^[\s\S]{0,80}[\(（][^)）]{2,80}[\)）]\d{4}-\d{2}-\d{2}/.test(block)) return false
+      if (/(?:[\w\u4e00-\u9fff/.-]{2,24}\s*\+\s*){3,}/.test(block)) return false
+      if ((block.includes('全部标签') || block.includes('首页')) && block.includes('+')) return false
       return true
     })
   const collapsed = blocks.join(' ').replace(/\s+/g, ' ').trim()

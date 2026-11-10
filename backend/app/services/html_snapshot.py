@@ -5,8 +5,9 @@ SingleFile HTML, weixin mp articles included) into the quartet the ingest
 pipeline needs: markdown body + title + publisher + published_at.
 
 Design constraints:
-- Pure function, zero I/O, no network. W4 may swap the internals for
-  MarkItDown; the function signature stays (TODO.md B3 note: "实现可换，接口不变").
+- No network by default. When ``page_url`` is supplied, remaining remote
+  article ``img`` sources may be fetched and inlined before figure lift
+  (SingleFile archives that still reference the CDN).
 - Bad input never raises; missing metadata defaults to None.
 - SingleFile pages inline images as base64 <img>: they must not leak into
   the body markdown (that body feeds jieba tags downstream).
@@ -18,7 +19,9 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from html import escape as html_escape
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
+
+import base64
 
 import io
 
@@ -244,7 +247,7 @@ def extract_published_at(soup: BeautifulSoup) -> datetime | None:
 # ----------------------------------------------------------------- body
 _STRIP_TAGS = ("script", "style", "noscript", "svg", "iframe", "template")
 # Prefer article-like regions before portal chrome (<main> often wraps comments).
-_BODY_SELECTORS = ("#js_content", ".fr-view", "article", "main", "body")
+_BODY_SELECTORS = ("#js_content", ".article_body", ".fr-view", "article", "main", "body")
 _MIN_CONTAINER_TEXT = 80
 # Trim OA / portal widgets that MarkItDown would otherwise keep as plain text.
 _BODY_NOISE_MARKERS = (
@@ -286,6 +289,45 @@ def _decode_data_image(src: str) -> tuple[str, bytes] | None:
     if len(data) < _MIN_FIGURE_BYTES:
         return None
     return match.group(1).lower(), data
+
+
+def _inline_remote_images(container, page_url: str | None) -> None:
+    """Promote remote article images to data: URIs when the archive still hotlinks the CDN."""
+    if not page_url or container is None:
+        return
+    try:
+        import httpx
+    except ImportError:  # pragma: no cover
+        return
+    referer = page_url
+    headers = {
+        "User-Agent": "EEA-evidence/1.0",
+        "Accept": "image/avif,image/webp,image/apng,image/*,*/*;q=0.8",
+        "Referer": referer,
+    }
+    for img in list(container.find_all("img")):
+        src = (img.get("src") or img.get("data-src") or "").strip()
+        if not src or src.startswith("data:"):
+            continue
+        resolved = src if src.startswith(("http://", "https://")) else urljoin(page_url, src)
+        try:
+            with httpx.Client(timeout=20.0, follow_redirects=True) as client:
+                response = client.get(resolved, headers=headers)
+        except httpx.HTTPError:
+            continue
+        if response.status_code >= 400:
+            continue
+        blob = response.content
+        if len(blob) < _MIN_FIGURE_BYTES or len(blob) > 4 * 1024 * 1024:
+            continue
+        mime = (response.headers.get("content-type") or "image/png").split(";")[0].strip().lower()
+        if not mime.startswith("image/"):
+            mime = "image/png"
+        encoded = base64.b64encode(blob).decode("ascii")
+        img["src"] = f"data:{mime};base64,{encoded}"
+        for attr in ("data-src", "data-original", "data-lazy-src"):
+            if img.has_attr(attr):
+                del img[attr]
 
 
 def _lift_content_images(container) -> list:
@@ -349,6 +391,12 @@ def _pick_body_container(soup: BeautifulSoup):
     js_content = soup.select_one("#js_content")
     if js_content is not None:
         return js_content
+
+    article_shell = soup.select_one(".art-con.article_body, .article_body")
+    if article_shell is not None:
+        container = article_shell.select_one(".article_text") or article_shell
+        if _container_text_len(container) >= _MIN_CONTAINER_TEXT or container.select("img"):
+            return container
 
     fr_view = soup.select_one(".fr-view")
     if fr_view is not None and _container_text_len(fr_view) >= _MIN_CONTAINER_TEXT:
@@ -415,9 +463,12 @@ def _prepend_title_heading(markdown: str, title: str | None) -> str:
     return f"# {heading}\n\n{markdown}"
 
 
-def _extract_body(soup: BeautifulSoup, *, title: str | None = None) -> tuple[str, list]:
+def _extract_body(
+    soup: BeautifulSoup, *, title: str | None = None, page_url: str | None = None
+) -> tuple[str, list]:
     container = _pick_body_container(soup)
     _prune_portal_chrome(container)
+    _inline_remote_images(container, page_url)
 
     figures = _lift_content_images(container)
     for tag_name in _STRIP_TAGS:
@@ -437,7 +488,7 @@ def _extract_body(soup: BeautifulSoup, *, title: str | None = None) -> tuple[str
 
 
 # --------------------------------------------------------------- facade
-def parse_html_snapshot(html: bytes | str) -> HtmlSnapshot:
+def parse_html_snapshot(html: bytes | str, *, page_url: str | None = None) -> HtmlSnapshot:
     """Parse one captured HTML page. Never raises; metadata may be None.
 
     Accepts the raw bytes read from an upload (charset auto-sniffed via
@@ -461,7 +512,7 @@ def parse_html_snapshot(html: bytes | str) -> HtmlSnapshot:
     except Exception:  # noqa: BLE001
         published_at = None
     try:
-        body_md, figures = _extract_body(soup, title=title)
+        body_md, figures = _extract_body(soup, title=title, page_url=page_url)
     except Exception:  # noqa: BLE001
         body_md, figures = "", []
 
@@ -474,7 +525,29 @@ def parse_html_snapshot(html: bytes | str) -> HtmlSnapshot:
     )
 
 
-async def enrich_snapshot_figures(snapshot: HtmlSnapshot) -> HtmlSnapshot:
+async def _caption_snapshot_figures(figures: list) -> None:
+    from app.core.config import get_settings
+    from app.services.doc_ingest import caption_figure
+    from app.services.llm_gateway import resolve_vision_model
+
+    settings = get_settings()
+    try:
+        model = await resolve_vision_model()
+    except Exception:  # noqa: BLE001
+        return
+    for figure in figures:
+        alt = figure.caption
+        described = await caption_figure(
+            figure, model=model, retries=settings.vision_caption_retry
+        )
+        figure.caption = described or alt
+
+
+async def enrich_snapshot_figures(
+    snapshot: HtmlSnapshot,
+    *,
+    vision_captions: bool = True,
+) -> HtmlSnapshot:
     """Replace alt-text figure quotes with a one-line vision description.
 
     Best-effort: if the gateway has no vision model, the alt-text quote stays.
@@ -482,23 +555,20 @@ async def enrich_snapshot_figures(snapshot: HtmlSnapshot) -> HtmlSnapshot:
     """
     if not snapshot.figures:
         return snapshot
+    import asyncio
+
     from app.core.config import get_settings
-    from app.services.doc_ingest import caption_figure
-    from app.services.llm_gateway import resolve_vision_model
 
     settings = get_settings()
     figures = snapshot.figures[: settings.max_figures]
-    try:
-        model = await resolve_vision_model()
-    except Exception:  # noqa: BLE001
-        model = None
-    if model:
-        for figure in figures:
-            alt = figure.caption
-            described = await caption_figure(
-                figure, model=model, retries=settings.vision_caption_retry
+    if vision_captions:
+        try:
+            await asyncio.wait_for(
+                _caption_snapshot_figures(figures),
+                timeout=settings.doc_ingest_vision_timeout_seconds,
             )
-            figure.caption = described or alt
+        except (asyncio.TimeoutError, Exception):  # noqa: BLE001
+            pass
     snapshot.body_md = _quotes_for_figures(snapshot.body_md, figures)
     # Tokens are already quotes; a second pass only updates lines we still
     # have as blockquotes. Rewrite those lines from the (possibly new) caption.

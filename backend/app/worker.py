@@ -2,7 +2,10 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import signal
+
+os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
 
 from app.services.capture_jobs import worker_loop
 

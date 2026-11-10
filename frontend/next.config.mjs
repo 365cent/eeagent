@@ -1,3 +1,5 @@
+const apiOrigin = (process.env.EEA_API_ORIGIN ?? 'http://127.0.0.1:8000').replace(/\/$/, '')
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   // LAN access: the platform is opened at http://10.215.8.74:3000.
@@ -10,6 +12,9 @@ const nextConfig = {
   },
   experimental: {
     optimizePackageImports: ['antd', '@ant-design/icons', 'lucide-react'],
+  },
+  async rewrites() {
+    return [{ source: '/api/v1/:path*', destination: `${apiOrigin}/api/v1/:path*` }]
   },
   async headers() {
     return [

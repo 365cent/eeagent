@@ -84,15 +84,16 @@ func (c *Client) Base() string { return c.base }
 
 // CaptureInput is one page capture awaiting upload.
 type CaptureInput struct {
-	URL           string
-	Channel       string
-	Archive       []byte
-	Filename      string
-	Published     string
-	SubmissionID  string
-	CaptureJobID  string
-	RetryJob      bool
-	OnJobAccepted func(string)
+	URL                  string
+	Channel              string
+	Archive              []byte
+	Filename             string
+	Published            string
+	SubmissionID         string
+	CaptureJobID         string
+	RetryJob             bool
+	OnJobAccepted        func(string)
+	OnCaptureJobProgress CaptureJobProgressFunc
 }
 
 // NewSubmissionID returns an RFC 4122 version-4 id. An empty result means the
@@ -182,6 +183,7 @@ type CaptureJob struct {
 	ID           string         `json:"id"`
 	SubmissionID string         `json:"submission_id"`
 	Status       string         `json:"status"`
+	Stage        string         `json:"stage"`
 	AttemptCount int            `json:"attempt_count"`
 	CreatedAt    time.Time      `json:"created_at"`
 	UpdatedAt    time.Time      `json:"updated_at"`
@@ -191,6 +193,9 @@ type CaptureJob struct {
 	Error        string         `json:"error"`
 	Result       *CaptureResult `json:"result"`
 }
+
+// CaptureJobProgressFunc is called whenever a durable job poll returns new state.
+type CaptureJobProgressFunc func(CaptureJob)
 
 const captureJobPollInterval = 2 * time.Second
 
@@ -212,7 +217,7 @@ func (c *Client) Capture(ctx context.Context, in CaptureInput) (*Signal, error) 
 		if in.RetryJob {
 			return c.retryCaptureJobAndWait(ctx, in.CaptureJobID, in.OnJobAccepted)
 		}
-		return c.waitForCaptureJobID(ctx, in.CaptureJobID)
+		return c.waitForCaptureJobID(ctx, in.CaptureJobID, in.OnCaptureJobProgress)
 	}
 	if strings.TrimSpace(in.URL) == "" {
 		return nil, errors.New("url is required")
@@ -289,7 +294,7 @@ func (c *Client) Capture(ctx context.Context, in CaptureInput) (*Signal, error) 
 		if in.OnJobAccepted != nil {
 			in.OnJobAccepted(job.ID)
 		}
-		return c.waitForCaptureJob(ctx, job)
+		return c.waitForCaptureJob(ctx, job, in.OnCaptureJobProgress)
 	}
 
 	if legacy {
@@ -331,7 +336,16 @@ func (c *Client) GetCaptureJob(ctx context.Context, jobID string) (*CaptureJob, 
 // WaitCaptureJob polls an already accepted job until it succeeds, fails,
 // cancels, or the caller's context ends.
 func (c *Client) WaitCaptureJob(ctx context.Context, jobID string) (*Signal, error) {
-	return c.waitForCaptureJobID(ctx, jobID)
+	return c.waitForCaptureJobID(ctx, jobID, nil)
+}
+
+// WaitCaptureJobWithProgress polls like WaitCaptureJob and reports backend stage updates.
+func (c *Client) WaitCaptureJobWithProgress(
+	ctx context.Context,
+	jobID string,
+	onProgress CaptureJobProgressFunc,
+) (*Signal, error) {
+	return c.waitForCaptureJobID(ctx, jobID, onProgress)
 }
 
 // RetryCaptureJob asks the backend to retry a failed durable capture, then
@@ -363,12 +377,12 @@ func (c *Client) retryCaptureJobAndWait(ctx context.Context, jobID string, onAcc
 		if onAccepted != nil {
 			onAccepted(current.ID)
 		}
-		return c.waitForCaptureJob(ctx, *current)
+		return c.waitForCaptureJob(ctx, *current, nil)
 	}
 	if onAccepted != nil {
 		onAccepted(job.ID)
 	}
-	return c.waitForCaptureJob(ctx, *job)
+	return c.waitForCaptureJob(ctx, *job, nil)
 }
 
 // CancelCaptureJob asks the backend to cancel a queued durable capture.
@@ -391,11 +405,15 @@ func (c *Client) captureJobAction(ctx context.Context, jobID, action string) (*C
 	return &job, nil
 }
 
-func (c *Client) waitForCaptureJobID(ctx context.Context, jobID string) (*Signal, error) {
+func (c *Client) waitForCaptureJobID(
+	ctx context.Context,
+	jobID string,
+	onProgress CaptureJobProgressFunc,
+) (*Signal, error) {
 	for {
 		job, err := c.GetCaptureJob(ctx, jobID)
 		if err == nil {
-			return c.waitForCaptureJob(ctx, *job)
+			return c.waitForCaptureJob(ctx, *job, onProgress)
 		}
 		if ctx.Err() != nil {
 			return nil, &CaptureJobPollError{JobID: jobID, Err: ctx.Err()}
@@ -409,9 +427,16 @@ func (c *Client) waitForCaptureJobID(ctx context.Context, jobID string) (*Signal
 	}
 }
 
-func (c *Client) waitForCaptureJob(ctx context.Context, job CaptureJob) (*Signal, error) {
+func (c *Client) waitForCaptureJob(
+	ctx context.Context,
+	job CaptureJob,
+	onProgress CaptureJobProgressFunc,
+) (*Signal, error) {
 	if job.ID == "" {
 		return nil, errors.New("capture job response did not include an id")
+	}
+	if onProgress != nil {
+		onProgress(job)
 	}
 	delay := captureJobPollInterval
 	for {
@@ -445,6 +470,9 @@ func (c *Client) waitForCaptureJob(ctx context.Context, job CaptureJob) (*Signal
 			continue
 		}
 		job = *updated
+		if onProgress != nil {
+			onProgress(job)
+		}
 		delay = captureJobPollInterval
 	}
 }
@@ -554,11 +582,12 @@ func (e *SubmissionOutcomeUnknownError) Unwrap() error { return e.Err }
 // FileJobInput submits a raw document through the durable capture job API when
 // available. CaptureJobID resumes polling or backend retry without re-uploading.
 type FileJobInput struct {
-	Path          string
-	SubmissionID  string
-	CaptureJobID  string
-	RetryJob      bool
-	OnJobAccepted func(string)
+	Path                 string
+	SubmissionID         string
+	CaptureJobID         string
+	RetryJob             bool
+	OnJobAccepted        func(string)
+	OnCaptureJobProgress CaptureJobProgressFunc
 }
 
 func (c *Client) SubmitFileJob(ctx context.Context, in FileJobInput) (*Signal, error) {
@@ -566,7 +595,7 @@ func (c *Client) SubmitFileJob(ctx context.Context, in FileJobInput) (*Signal, e
 		if in.RetryJob {
 			return c.retryCaptureJobAndWait(ctx, in.CaptureJobID, in.OnJobAccepted)
 		}
-		return c.waitForCaptureJobID(ctx, in.CaptureJobID)
+		return c.waitForCaptureJobID(ctx, in.CaptureJobID, in.OnCaptureJobProgress)
 	}
 	if strings.TrimSpace(in.Path) == "" {
 		return nil, errors.New("file path is required")
@@ -640,7 +669,7 @@ func (c *Client) SubmitFileJob(ctx context.Context, in FileJobInput) (*Signal, e
 	if in.OnJobAccepted != nil {
 		in.OnJobAccepted(job.ID)
 	}
-	return c.waitForCaptureJob(ctx, job)
+	return c.waitForCaptureJob(ctx, job, in.OnCaptureJobProgress)
 }
 
 func captureSubmissionError(err error, idempotent bool) error {

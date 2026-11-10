@@ -112,3 +112,27 @@ async def test_theme_list_offers_no_merge_and_no_priority_sort(client):
 async def test_theme_detail_404(client):
     r = await client.get("/api/v1/themes/00000000-0000-0000-0000-0000000000aa")
     assert r.status_code == 404
+
+
+async def test_theme_eight_signals_sixteen_sources(client):
+    theme = await create_theme(client, working_name="低压系统智能化-验收样例")
+    urls = [f"https://source-{i}.example.com/article" for i in range(16)]
+    for idx, url in enumerate(urls[:8]):
+        sig = await create_signal(
+            client,
+            title=f"活跃成员{idx + 1}",
+            url=url,
+            evidence_status_code="retained",
+        )
+        await assign_signal_theme(client, sig["id"], theme["id"])
+    for idx, url in enumerate(urls[8:]):
+        sig = await create_signal(
+            client,
+            title=f"归档成员{idx + 1}",
+            url=url,
+            evidence_status_code="archived",
+        )
+        await assign_signal_theme(client, sig["id"], theme["id"])
+    detail = (await client.get(f"/api/v1/themes/{theme['id']}")).json()
+    assert detail["metrics"]["signal_frequency"] == 8
+    assert detail["metrics"]["source_count"] == 16

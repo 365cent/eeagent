@@ -47,7 +47,7 @@ uv sync --locked
 uv run python --version
 ```
 
-版本输出应为 Python 3.12.x。`backend/scripts/bootstrap.py`、`dev.py` 和 `start_api.py` 使用 `.pg/pgsql/bin` 下的 Windows portable PostgreSQL 路径；macOS 开发不要用这些脚本启动本机数据库。
+版本输出应为 Python 3.12.x。macOS 上用 **同一套** `scripts/bootstrap.py` 与 `scripts/dev.py`：bootstrap 连接本机 PostgreSQL 并迁移/种子；dev 启动 API + 采集 worker（不下载 Windows portable 二进制）。
 
 ## Backend 检查
 
@@ -66,29 +66,28 @@ uv run pytest -q
 
 在 PostgreSQL 未运行时，当前 pytest fixture 会调用 `scripts/start_api.py` 自动启动；该脚本也假定 Windows portable `.pg` 布局。因此 macOS 上须先手动启动本机 PostgreSQL，不要依赖 fixture 的自动启动分支。
 
-可选本机 API 冒烟：在已建库 `eea` 并迁移后启动服务，再从另一个终端请求健康端点。首次建库/迁移可用：
+**首次（及重复安全）** — 复制 `backend/.env.example` → `backend/.env`，确认 `DB_*` 指向上方 Homebrew PostgreSQL，然后：
 
 ```bash
-PGPASSWORD="$DB_PASSWORD" createdb -h "$DB_HOST" -p "$DB_PORT" -U "$DB_USER" eea
-uv run alembic upgrade head
-uv run uvicorn app.main:app --host 127.0.0.1 --port 8000
+cd backend
+uv sync --locked
+uv run python scripts/bootstrap.py
 ```
 
-另一终端：
+bootstrap 会创建 `eea` 库（若不存在）、`alembic upgrade head`、`app.seed`，并写入 `.pg/use-external-db` 供 dev 识别。
+
+**每天** — 同一终端 API + worker（不要再单独开 worker 窗）：
 
 ```bash
-curl --fail http://127.0.0.1:8000/healthz
+cd backend
+uv run python scripts/dev.py
 ```
 
-若 `eea` 已存在，跳过 `createdb`。`app.seed` 只写入封闭参考词表和五个已确认技术域，不创建合成信号、需求或功能决策；自动化验收样例只进入专用 `eea_test`。该启动方式是本机开发检查，不是 Linux 服务验证。
+**Ctrl+C** 同时结束 API 与 worker。仅 HTTP、不跑采集：`EEA_DEV_API_ONLY=1 uv run python scripts/dev.py`。健康检查：`curl --fail http://127.0.0.1:8000/healthz`。
 
-持久采集任务使用独立 worker。前端「导入证据」的文件拖入与 Windows 客户端文件队列也依赖该 worker 处理 `POST /api/v1/capture/jobs`。升级到当前 Alembic head（现为 0012_strategy_funnel）后，可在另一个 `backend/` 终端用相同数据库/对象目录环境前台观察开发任务：
+前端仍为第二个终端：`cd frontend && pnpm dev`。
 
-```bash
-uv run python -m app.worker
-```
-
-使用 Ctrl-C 让 worker 在当前任务结束后停止。不要把本机 worker 命令当成 systemd 生命周期或进程崩溃恢复验收；生产需按 [部署说明](../deploy/README.md)运行 `eea-worker.service`。
+`app.seed` 只写入封闭参考词表和五个已确认技术域。不要把本机 dev 当成生产 systemd 验收；生产见 [deploy/README.md](../deploy/README.md)。
 
 ## Frontend 检查
 

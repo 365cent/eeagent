@@ -23,7 +23,7 @@ export async function eeaFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
   if (!response.ok) {
     const body = await response.text().catch(() => '')
-    throw new EeaApiError(response.status, formatEeaApiError(response.status, body))
+    throw new EeaApiError(response.status, formatEeaApiError(response.status, body, path))
   }
 
   if (response.status === 204) {
@@ -45,7 +45,7 @@ export async function eeaFetchText(path: string, init?: RequestInit): Promise<st
   })
   if (!response.ok) {
     const body = await response.text().catch(() => '')
-    throw new EeaApiError(response.status, formatEeaApiError(response.status, body))
+    throw new EeaApiError(response.status, formatEeaApiError(response.status, body, path))
   }
   return response.text()
 }
@@ -56,6 +56,14 @@ export function signalArchiveUrl(signalId: string): string {
 
 export function documentCanonicalUrl(documentId: string): string {
   return `${getEeaApiBase()}/documents/${encodeURIComponent(documentId)}/canonical.md`
+}
+
+export function documentPreviewPdfUrl(documentId: string): string {
+  return `${getEeaApiBase()}/documents/${encodeURIComponent(documentId)}/preview.pdf`
+}
+
+export function documentDeckPreviewUrl(documentId: string): string {
+  return `${getEeaApiBase()}/documents/${encodeURIComponent(documentId)}/deck-preview`
 }
 
 export function toQueryString(params: Record<string, string | number | boolean | undefined | null>): string {
@@ -100,7 +108,7 @@ export function eeaPostFormData<T>(
         }
         return
       }
-      reject(new EeaApiError(xhr.status, formatEeaApiError(xhr.status, body)))
+      reject(new EeaApiError(xhr.status, formatEeaApiError(xhr.status, body, path)))
     }
     xhr.onerror = () => reject(new EeaApiError(0, '网络错误：上传失败'))
     xhr.onabort = () => reject(new EeaApiError(0, '上传已取消'))

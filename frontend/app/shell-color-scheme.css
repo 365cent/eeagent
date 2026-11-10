@@ -1,0 +1,72 @@
+/*
+ * Native shell color scheme (light / dark / system).
+ *
+ * - User override: `.app-shell[data-color-scheme='light'|'dark']` or `data-color-scheme` on `<html>` from JS.
+ * - System default: `@media (prefers-color-scheme: dark)` when shell is not forced to light.
+ * - Use `var(--eea-*)` in new UI CSS; legacy `.dark-mode` / `.light-mode` rules still work on `.app-shell`.
+ *
+ * Hex pairs: keep aligned with `config/shell-surfaces.ts`.
+ */
+
+.app-shell {
+  color-scheme: light;
+
+  --eea-surface-main: #ffffff;
+  --eea-surface-canvas: #f5f7fa;
+  --eea-surface-elevated: #ffffff;
+  --eea-text-primary: rgba(0, 0, 0, 0.88);
+  --eea-text-secondary: rgba(0, 0, 0, 0.45);
+  --eea-border-subtle: #eaeaea;
+  --eea-header-bg: color-mix(in srgb, var(--eea-surface-main) 95%, transparent);
+
+  background-color: var(--eea-surface-canvas);
+  color: var(--eea-text-primary);
+}
+
+.app-shell[data-color-scheme='dark'],
+.app-shell.dark-mode {
+  color-scheme: dark;
+
+  --eea-surface-main: #0a0a0a;
+  --eea-surface-canvas: #0a0a0a;
+  --eea-surface-elevated: #141416;
+  --eea-text-primary: #f4f4f5;
+  --eea-text-secondary: #a1a1aa;
+  --eea-border-subtle: #27272a;
+  --eea-header-bg: color-mix(in srgb, var(--eea-surface-main) 90%, transparent);
+}
+
+.app-shell[data-color-scheme='light'],
+.app-shell.light-mode {
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  .app-shell:not([data-color-scheme='light']) {
+    color-scheme: dark;
+
+    --eea-surface-main: #0a0a0a;
+    --eea-surface-canvas: #0a0a0a;
+    --eea-surface-elevated: #141416;
+    --eea-text-primary: #f4f4f5;
+    --eea-text-secondary: #a1a1aa;
+    --eea-border-subtle: #27272a;
+    --eea-header-bg: color-mix(in srgb, var(--eea-surface-main) 90%, transparent);
+  }
+}
+
+html[data-color-scheme='light'] {
+  color-scheme: light;
+}
+
+html[data-color-scheme='dark'] {
+  color-scheme: dark;
+}
+
+/* Main column surfaces — layout chrome picks these up in globals `@layer components`. */
+.app-shell .dashboard-content.platform-main-surface,
+.app-shell .dashboard-page-body,
+.app-shell .content-wrap {
+  background-color: var(--eea-surface-main);
+  color: var(--eea-text-primary);
+}

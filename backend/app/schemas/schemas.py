@@ -139,6 +139,7 @@ class SignalUpdate(RefCodeValidated):
     source_label: str | None = None
     excerpt: str | None = None
     body_text: str | None = None
+    expected_updated_at: datetime | None = None
 
 
 class SignalBase(BaseModel):
@@ -165,6 +166,10 @@ class SignalBase(BaseModel):
 
 class SignalOut(SignalBase):
     tags: list[str] = []  # populated manually from the tag relationship
+    url_duplicate_renamed: bool = Field(
+        False,
+        description="Title was auto-suffixed because this url_normalized was already retained",
+    )
 
 
 class LinkedDemandPointOut(BaseModel):
@@ -260,6 +265,37 @@ class SignalAssistantMessageOut(BaseModel):
     model: str | None = None
 
 
+class DemandDraftProposeIn(BaseModel):
+    source_tech_theme_id: uuid.UUID
+    user_hint: str | None = Field(default=None, max_length=4000)
+    use_llm: bool = False
+    selected_signal_ids: list[uuid.UUID] = Field(default_factory=list, max_length=50)
+
+
+class DemandAssistantMessageIn(BaseModel):
+    source_tech_theme_id: uuid.UUID
+    message: str = Field(min_length=1, max_length=8000)
+    history: list[AssistantChatTurn] = Field(default_factory=list, max_length=24)
+    selected_signal_ids: list[uuid.UUID] = Field(default_factory=list, max_length=50)
+
+
+class DemandDraftProposalOut(BaseModel):
+    name: str
+    value_chain_stage_code: str
+    source_tech_theme_id: uuid.UUID
+    derivation_trace: dict | None = None
+    cross_validation: dict | None = None
+    time_series: list | None = None
+    source: str | None = None
+    llm_note: str | None = None
+
+
+class DemandAssistantMessageOut(BaseModel):
+    reply: str
+    model: str | None = None
+    draft: DemandDraftProposalOut | None = None
+
+
 SignalStudioKind = Literal["audio", "mindmap", "report", "infographic"]
 
 
@@ -315,10 +351,25 @@ class LlmStatusOut(BaseModel):
 
 class TagAssignment(BaseModel):
     tag_names: list[str]
+    expected_updated_at: datetime | None = None
 
 
 class ThemeAssignment(BaseModel):
     tech_theme_id: uuid.UUID | None  # None = 移出归集
+    expected_updated_at: datetime | None = None
+
+
+class ThemeAggregateCandidate(BaseModel):
+    theme_id: uuid.UUID
+    working_name: str
+    overlap: int
+
+
+class ThemeAggregatePreview(BaseModel):
+    candidates: list[ThemeAggregateCandidate]
+    recommended_theme_id: uuid.UUID | None = None
+    can_auto_assign: bool
+    reason: str
 
 
 class DemandCreate(RefCodeValidated):
@@ -595,6 +646,18 @@ class TagSuggestion(BaseModel):
     value_chain_stage_code: str | None = None
     signal_type_code: str | None = None
     source: str = "jieba-frequency"
+    protected_fields: list[str] = Field(
+        default_factory=list,
+        description="Machine suggestions are withheld for fields the operator already corrected",
+    )
+    degraded_reason: str | None = Field(
+        default=None,
+        description="Set when the LLM path was unavailable and a rule-based fallback was used",
+    )
+    rerank_score: float | None = Field(
+        default=None,
+        description="Top candidate relevance score when MaaS rerank refined jieba recall",
+    )
 
 
 class CaptureResult(BaseModel):
@@ -618,8 +681,17 @@ class CaptureJobOut(BaseModel):
 
     id: uuid.UUID
     submission_id: uuid.UUID
-    status: Literal["queued", "running", "succeeded", "failed", "cancelled"]
-    stage: Literal["queued", "fetching", "processing", "completed", "failed", "cancelled"]
+    status: Literal["queued", "running", "succeeded", "failed", "cancelled", "awaiting_client"]
+    stage: Literal[
+        "queued",
+        "fetching",
+        "processing",
+        "completed",
+        "failed",
+        "cancelled",
+        "awaiting_client",
+        "capturing",
+    ]
     attempt_count: int
     created_at: datetime
     updated_at: datetime
@@ -629,6 +701,35 @@ class CaptureJobOut(BaseModel):
     signal_id: uuid.UUID | None = None
     error: str | None = None
     result: CaptureResult | None = None
+    source_url: str | None = None
+    channel_code: str | None = None
+    import_batch_id: uuid.UUID | None = None
+
+
+class CaptureUrlBatchIn(BaseModel):
+    """Pasted http(s) links (one per line or wrapped text)."""
+
+    text: str = Field(min_length=1, description="Raw pasted URL list")
+
+
+class PanoramaImportBatchOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    sha256: str
+    filename: str | None = None
+    status: Literal["capturing", "structuring", "completed", "failed"]
+    signals_retained: int
+    signals_failed: int
+    demands_created: int
+    functions_published: int
+    error: str | None = None
+    created_at: datetime
+    updated_at: datetime
+    structure_started_at: datetime | None = None
+    structure_finished_at: datetime | None = None
+    capture_jobs_total: int = 0
+    capture_jobs_pending: int = 0
 
 
 class OverviewWeeklyNew(BaseModel):
@@ -654,6 +755,17 @@ class OverviewStrategyFunnelCounts(BaseModel):
     )
     rejected: int = Field(description="Landing points whose current Tier1 decision is reject")
     pool_entry_blocked: int = Field(description="Landing points without a substantive deployment-boundary standard")
+
+
+class DataSyncStamp(BaseModel):
+    """Cheap fingerprint so the web client can detect catalog changes without refetching every list."""
+
+    changed_at: datetime = Field(
+        description="Latest create/update instant across core catalog entities (signals, themes, demands, capture, funnel)"
+    )
+    fingerprint: str = Field(
+        description="Opaque token; compare with the last seen value and invalidate TanStack Query caches when it differs"
+    )
 
 
 class OverviewStats(BaseModel):
@@ -686,6 +798,10 @@ class OverviewStats(BaseModel):
     as_of_utc: datetime = Field(description="UTC instant through which weekly-created counts are measured")
     weekly_new: OverviewWeeklyNew
     strategy_funnel: OverviewStrategyFunnelCounts
+    panorama_import: PanoramaImportBatchOut | None = Field(
+        default=None,
+        description="Most recent panorama workbook import batch progress, when one exists",
+    )
 
 
 class TraceDocumentOut(BaseModel):

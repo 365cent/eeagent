@@ -8,6 +8,7 @@ export type Signal = {
   status: string
   date: string
   tags: string[]
+  urlDuplicateRenamed: boolean
 }
 
 export type AppRouteOptions = {

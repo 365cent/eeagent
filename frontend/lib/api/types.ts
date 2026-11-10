@@ -27,6 +27,8 @@ export type SignalOut = {
   created_at: string
   updated_at: string
   tags?: string[]
+  /** Title auto-suffixed because url_normalized was already retained */
+  url_duplicate_renamed?: boolean
 }
 
 export type LinkedDemandPoint = {
@@ -73,7 +75,13 @@ export type DocumentDetail = DocumentRawOut & {
   ingest_error?: string | null
 }
 
-export type CaptureJobStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled'
+export type CaptureJobStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'failed'
+  | 'cancelled'
+  | 'awaiting_client'
 
 export type CaptureJobStage =
   | 'queued'
@@ -82,6 +90,8 @@ export type CaptureJobStage =
   | 'completed'
   | 'failed'
   | 'cancelled'
+  | 'awaiting_client'
+  | 'capturing'
 
 export type CaptureResult = {
   source: string
@@ -119,15 +129,32 @@ export type SignalCreatePayload = {
 
 export type TagAssignmentPayload = {
   tag_names: string[]
+  expected_updated_at?: string | null
 }
 
 export type ThemeAssignmentPayload = {
   tech_theme_id: string | null
+  expected_updated_at?: string | null
 }
 
 export type SignalUpdatePayload = {
   value_chain_stage_code?: string | null
   signal_type_code?: string | null
+  evidence_status_code?: string | null
+  expected_updated_at?: string | null
+}
+
+export type ThemeAggregateCandidate = {
+  theme_id: string
+  working_name: string
+  overlap: number
+}
+
+export type ThemeAggregatePreview = {
+  candidates: ThemeAggregateCandidate[]
+  recommended_theme_id: string | null
+  can_auto_assign: boolean
+  reason: string
 }
 
 export type TagSuggestion = {
@@ -135,6 +162,8 @@ export type TagSuggestion = {
   value_chain_stage_code: string | null
   signal_type_code: string | null
   source: string
+  protected_fields?: string[]
+  degraded_reason?: string | null
   /** Optional scores when backend T1 adds them; current API omits these. */
   freq?: number | null
   embed_score?: number | null
@@ -224,6 +253,11 @@ export type ThemeDetail = ThemeOut & {
   display_tags?: string[]
 }
 
+export type DataSyncStamp = {
+  changed_at: string
+  fingerprint: string
+}
+
 export type OverviewStats = {
   signals: number
   signals_pending_review: number
@@ -261,6 +295,25 @@ export type OverviewStats = {
     rejected: number
     pool_entry_blocked: number
   }
+  panorama_import?: PanoramaImportBatchOut | null
+}
+
+export type PanoramaImportBatchOut = {
+  id: string
+  sha256: string
+  filename?: string | null
+  status: 'capturing' | 'structuring' | 'completed' | 'failed'
+  signals_retained: number
+  signals_failed: number
+  demands_created: number
+  functions_published: number
+  error?: string | null
+  created_at: string
+  updated_at: string
+  structure_started_at?: string | null
+  structure_finished_at?: string | null
+  capture_jobs_total: number
+  capture_jobs_pending: number
 }
 
 export type DemandOut = {
@@ -293,6 +346,23 @@ export type DemandDerivationStep = {
 
 export type DemandDerivationTrace = {
   steps: DemandDerivationStep[]
+}
+
+export type DemandDraftProposal = {
+  name: string
+  value_chain_stage_code: string
+  source_tech_theme_id: string
+  derivation_trace?: DemandDerivationTrace | null
+  cross_validation?: Record<string, unknown> | null
+  time_series?: unknown[] | null
+  source?: string | null
+  llm_note?: string | null
+}
+
+export type DemandAssistantReply = {
+  reply: string
+  model: string | null
+  draft: DemandDraftProposal | null
 }
 
 export type DemandCreatePayload = {

@@ -1,6 +1,7 @@
 'use client'
 
 import type { MenuProps } from 'antd'
+import type { ReactNode } from 'react'
 import {
   AppstoreOutlined,
   BarChartOutlined,
@@ -14,8 +15,14 @@ import {
   TagsOutlined,
 } from '@ant-design/icons'
 
-/** Primary sider nav (icon + Chinese label). */
-export const mainMenuEntries = [
+export type MainMenuNode = {
+  key: string
+  title: string
+  icon: ReactNode
+}
+
+/** Primary sider nav (icon + Chinese label); flat routes only. */
+export const mainMenuTree: MainMenuNode[] = [
   { key: 'overview', title: '工作台总览', icon: <HomeOutlined /> },
   { key: 'signals', title: '信号采集·证据库', icon: <RadarChartOutlined /> },
   { key: 'topics', title: '标签与主题归纳', icon: <TagsOutlined /> },
@@ -24,12 +31,30 @@ export const mainMenuEntries = [
   { key: 'trace', title: '链条追踪与验收', icon: <FundProjectionScreenOutlined /> },
   { key: 'strategy', title: '战略研判', icon: <BarChartOutlined /> },
   { key: 'workflow', title: '交付工作流', icon: <CheckCircleFilled /> },
-] as const
+]
 
-export const mainMenuItems: MenuProps['items'] = mainMenuEntries.map((entry) => ({
-  key: entry.key,
-  icon: entry.icon,
-  label: entry.title,
+export const mainMenuEntries = mainMenuTree.map((node) => ({
+  key: node.key,
+  title: node.title,
+  icon: node.icon,
+}))
+
+export function flattenMainMenuLeafKeys(): string[] {
+  return mainMenuTree.map((node) => node.key)
+}
+
+export function isMainMenuRoute(key: string): boolean {
+  return flattenMainMenuLeafKeys().includes(key)
+}
+
+export function menuIconForKey(key: string): ReactNode | undefined {
+  return mainMenuTree.find((node) => node.key === key)?.icon
+}
+
+export const mainMenuItems: MenuProps['items'] = mainMenuTree.map((node) => ({
+  key: node.key,
+  icon: node.icon,
+  label: node.title,
 }))
 
 export const siderUtilityMenuItems: MenuProps['items'] = [
@@ -38,5 +63,5 @@ export const siderUtilityMenuItems: MenuProps['items'] = [
 ]
 
 export function primaryMenuLabel(key: string): string | undefined {
-  return mainMenuEntries.find((entry) => entry.key === key)?.title
+  return mainMenuTree.find((node) => node.key === key)?.title
 }

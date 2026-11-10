@@ -67,6 +67,7 @@ export function mapSignalOut(row: SignalOut, maps: RefCodeMaps): Signal {
     status: statusLabel,
     date: formatApiDate(row.published_at ?? row.updated_at),
     tags: row.tags ?? [],
+    urlDuplicateRenamed: row.url_duplicate_renamed === true,
   }
 }
 
@@ -186,6 +187,20 @@ export function overviewToFunnelSteps(stats: OverviewStats): FunnelStep[] {
     stats.demand_points,
     stats.landing_points,
     stats.funnel_pool,
+  ]
+  return funnelStepMeta.map((step, index) => ({
+    ...step,
+    value: String(values[index] ?? 0),
+  }))
+}
+
+/** Landing-point pipeline counts for the overview funnel card (matches strategy workbench stages). */
+export function strategyFunnelToFunnelSteps(funnel: NonNullable<OverviewStats['strategy_funnel']>): FunnelStep[] {
+  const values = [
+    funnel.industry_scan,
+    funnel.tier1_adaptation,
+    funnel.scoring,
+    funnel.classification,
   ]
   return funnelStepMeta.map((step, index) => ({
     ...step,

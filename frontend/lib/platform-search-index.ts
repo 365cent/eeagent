@@ -1,5 +1,5 @@
 import MiniSearch from 'minisearch'
-import { mainMenuEntries } from '@/config/menu'
+import { flattenMainMenuLeafKeys, mainMenuTree } from '@/config/menu'
 import { utilityPages } from '@/config/utility-pages'
 import { getLivePlatformSearchData } from '@/lib/live-platform-data'
 import type { AppRouteOptions } from '@/types/platform'
@@ -43,15 +43,16 @@ function buildDocuments(): PlatformSearchDocument[] {
 
   const docs: PlatformSearchDocument[] = []
 
-  for (const entry of mainMenuEntries) {
+  for (const key of flattenMainMenuLeafKeys()) {
+    const title = mainMenuTree.find((node) => node.key === key)?.title ?? key
     docs.push({
-      id: `nav-${entry.key}`,
+      id: `nav-${key}`,
       kind: 'nav',
-      viewKey: entry.key,
-      title: entry.title,
+      viewKey: key,
+      title,
       subtitle: '打开工作台页面',
-      body: entry.key,
-      route: { view: entry.key },
+      body: key,
+      route: { view: key },
     })
   }
 

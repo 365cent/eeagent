@@ -1,0 +1,4 @@
+# 构建/打包用（运行时不安装也可）
+-r requirements.txt
+pyinstaller>=6.0
+pillow>=10.0        # 仅 make_icon.py 重新生成 deckpeek.ico 时需要

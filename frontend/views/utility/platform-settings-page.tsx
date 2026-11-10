@@ -15,21 +15,21 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import {
-  defaultSettings,
-  loadPlatformSettings,
-  savePlatformSettings,
-  type PlatformSettingsPrefs,
-} from '@/lib/platform-prefs'
+import { defaultSettings, loadPlatformSettings, savePlatformSettings, type PlatformSettingsPrefs } from '@/lib/platform-prefs'
 import { PageHeader } from '@/components/shared/page-header'
-import { mainMenuEntries } from '@/config/menu'
+import { flattenMainMenuLeafKeys, mainMenuTree } from '@/config/menu'
 import type { UtilityPageConfig } from '@/config/utility-pages'
 
 const { Text } = Typography
 
 const landingOptions = [
   { value: 'overview', label: '工作台总览' },
-  ...mainMenuEntries.filter((e) => e.key !== 'overview').map((e) => ({ value: e.key, label: e.title })),
+  ...flattenMainMenuLeafKeys()
+    .filter((key) => key !== 'overview')
+    .map((key) => {
+      const label = mainMenuTree.find((node) => node.key === key)?.title ?? key
+      return { value: key, label }
+    }),
 ]
 
 type PlatformSettingsPageProps = {
@@ -39,11 +39,12 @@ type PlatformSettingsPageProps = {
 export function PlatformSettingsPage({ config }: PlatformSettingsPageProps) {
   const { message: messageApi } = AntApp.useApp()
   const [form] = Form.useForm<PlatformSettingsPrefs>()
-  const [loading, setLoading] = useState(true)
+  const [initialValues, setInitialValues] = useState<PlatformSettingsPrefs>(() => loadPlatformSettings())
 
   useEffect(() => {
-    form.setFieldsValue(loadPlatformSettings())
-    setLoading(false)
+    const loaded = loadPlatformSettings()
+    setInitialValues(loaded)
+    form.setFieldsValue(loaded)
   }, [form])
 
   const onSave = async () => {
@@ -67,10 +68,10 @@ export function PlatformSettingsPage({ config }: PlatformSettingsPageProps) {
           </Button>
         }
       />
-      <Form form={form} layout="vertical" initialValues={defaultSettings}>
+      <Form form={form} layout="vertical" initialValues={initialValues ?? defaultSettings}>
       <Row gutter={[18, 18]}>
         <Col xs={24} lg={14}>
-          <Card className="panel-card" title="工作空间" loading={loading}>
+          <Card className="panel-card" title="工作空间">
             <Form.Item name="workspaceName" label="工作空间名称" rules={[{ required: true }]}>
               <Input />
             </Form.Item>

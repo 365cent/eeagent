@@ -2,9 +2,12 @@
 
 import types
 
+import httpx
 import pytest
 
 import app.services.llm_gateway as gw
+from app.core.config import get_settings
+from app.services import semantic_api
 
 pytestmark = pytest.mark.anyio
 
@@ -37,6 +40,7 @@ def test_chat_candidates_skip_non_chat_models():
         "Qwen3.6-35B",
         "Qwen3.8-27B",
     ]
+    assert "auto" in gw.chat_candidates(["auto", "deepseek-v4-flash-hw"])
 
 
 def test_vision_prefers_qwen38_then_qwen36():
@@ -84,6 +88,11 @@ async def test_resolve_chat_model_fails_when_no_candidate_answers(monkeypatch):
         await gw.resolve_chat_model(force=True)
 
 
+def test_configured_chat_model_passes_through_env_id():
+    assert gw.configured_chat_model(_settings(llm_model="auto")) == "auto"
+    assert gw.configured_chat_model(_settings(llm_model="fixed-model")) == "fixed-model"
+
+
 async def test_configured_model_short_circuits_probe(monkeypatch):
     monkeypatch.setattr(gw, "get_settings", lambda: _settings(llm_model="fixed-model"))
 
@@ -103,3 +112,34 @@ async def test_resolve_vision_model_uses_gateway_list(monkeypatch):
 
     monkeypatch.setattr(gw, "list_models", fake_list)
     assert await gw.resolve_vision_model(force=True) == "Qwen3.6-35B"
+
+
+async def test_maas_embedding_and_rerank(monkeypatch):
+    monkeypatch.setenv("MAAS_API_BASE_URL", "https://maas.example.com/v2")
+    monkeypatch.setenv("MAAS_API_KEY", "test-key")
+    get_settings.cache_clear()
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers=None, json=None):
+            assert headers and headers["Authorization"] == "Bearer test-key"
+            if url.endswith("/embeddings"):
+                return httpx.Response(200, json={"data": [{"index": 0, "embedding": [0.1, 0.2]}]})
+            if url.endswith("/rerank"):
+                return httpx.Response(
+                    200,
+                    json={"results": [{"index": 0, "relevance_score": 0.5}]},
+                )
+            raise AssertionError(url)
+
+    monkeypatch.setattr(semantic_api.httpx, "AsyncClient", FakeClient)
+    assert await semantic_api.create_embeddings(["hello"]) == [[0.1, 0.2]]
+    assert await semantic_api.rerank("q", ["a"]) == [(0, 0.5)]

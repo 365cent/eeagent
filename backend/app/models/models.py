@@ -142,11 +142,12 @@ class CaptureJob(Base):
     __table_args__ = (
         UniqueConstraint("submission_id", name="uq_capture_job_submission"),
         CheckConstraint(
-            "status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled')",
+            "status IN ('queued', 'running', 'succeeded', 'failed', 'cancelled', 'awaiting_client')",
             name="ck_capture_job_status",
         ),
         CheckConstraint(
-            "stage IN ('queued', 'fetching', 'processing', 'completed', 'failed', 'cancelled')",
+            "stage IN ('queued', 'fetching', 'processing', 'completed', 'failed', 'cancelled', "
+            "'awaiting_client', 'capturing')",
             name="ck_capture_job_stage",
         ),
         CheckConstraint("attempt_count >= 0", name="ck_capture_job_attempt_count"),
@@ -175,6 +176,9 @@ class CaptureJob(Base):
     signal_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("eea_signal.id", ondelete="SET NULL")
     )
+    import_batch_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eea_panorama_import_batch.id", ondelete="SET NULL")
+    )
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
@@ -182,6 +186,59 @@ class CaptureJob(Base):
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class PanoramaImportBatch(Base):
+    __tablename__ = "eea_panorama_import_batch"
+    __table_args__ = (
+        UniqueConstraint("sha256", name="uq_panorama_import_sha256"),
+        CheckConstraint(
+            "status IN ('capturing', 'structuring', 'completed', 'failed')",
+            name="ck_panorama_import_status",
+        ),
+        Index("eea_panorama_import_batch_status_idx", "status", "created_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    filename: Mapped[str | None] = mapped_column(Text)
+    workbook_object_key: Mapped[str] = mapped_column(Text, nullable=False)
+    snapshot_json: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="capturing", server_default="capturing")
+    error: Mapped[str | None] = mapped_column(Text)
+    signals_retained: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    signals_failed: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    demands_created: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    functions_published: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    structure_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    structure_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class PanoramaImportUrl(Base):
+    __tablename__ = "eea_panorama_import_url"
+    __table_args__ = (
+        UniqueConstraint("batch_id", "url_normalized", name="uq_panorama_import_url"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    batch_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eea_panorama_import_batch.id", ondelete="CASCADE"), nullable=False
+    )
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    url_normalized: Mapped[str] = mapped_column(Text, nullable=False)
+    contexts: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
+    channel_code: Mapped[str | None] = mapped_column(Text)
+    is_pdf: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    capture_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eea_capture_job.id", ondelete="SET NULL")
+    )
+    signal_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eea_signal.id", ondelete="SET NULL")
+    )
 
 
 class Document(Base):

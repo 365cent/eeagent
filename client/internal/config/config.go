@@ -30,6 +30,9 @@ type Config struct {
 	InteractiveTimeout int    `json:"interactive_timeout_sec"`
 	MinTextChars       int    `json:"min_text_chars"`
 	Headless           bool   `json:"headless"`
+	// capture_archive: auto | extension | embedded (auto prefers the store extension).
+	CaptureArchive            string `json:"capture_archive"`
+	SingleFileExtensionPath   string `json:"singlefile_extension_path"`
 }
 
 // Default returns the settings used when config.json is absent.
@@ -42,11 +45,12 @@ func Default() Config {
 		QueueDir:           filepath.Join("data", "capture-queue"),
 		MaxParallel:        2,
 		MaxUploadMB:        120,
-		TimeoutSec:         90,
+		TimeoutSec:         150,
 		UploadTimeout:      900,
 		ReadyTimeout:       25,
 		InteractiveTimeout: 180,
 		MinTextChars:       10,
+		CaptureArchive:     "extension",
 	}
 }
 
@@ -84,6 +88,13 @@ func (c *Config) applyDefaults() {
 	}
 	if c.MinTextChars <= 0 {
 		c.MinTextChars = d.MinTextChars
+	}
+	if strings.TrimSpace(c.CaptureArchive) == "" {
+		c.CaptureArchive = d.CaptureArchive
+	}
+	archive := strings.TrimSpace(c.CaptureArchive)
+	if archive == "extension" || archive == "auto" {
+		c.Headless = false
 	}
 	c.APIBase = strings.TrimRight(c.APIBase, "/")
 }

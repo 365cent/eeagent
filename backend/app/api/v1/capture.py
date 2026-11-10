@@ -18,12 +18,12 @@ from __future__ import annotations
 
 import json
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from functools import partial
 from pathlib import Path
 
 from anyio import to_thread
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
@@ -33,6 +33,8 @@ from app.core.config import get_settings
 from app.db.base import get_db
 from app.models.models import CaptureJob, Document, Signal
 from app.schemas.schemas import CaptureJobOut, CaptureResult, DocumentRawOut
+from app.services.body_excerpt import lead_excerpt_from_markdown
+from app.services.doc_ingest import normalize_document_mime
 from app.services.doc_summary import build_document_body_summary
 from app.services.objectstore import load_bytes, save_bytes
 from app.services.objectstore import sha256_bytes
@@ -119,6 +121,9 @@ async def _capture_job_out(db: AsyncSession, job: CaptureJob) -> CaptureJobOut:
         signal_id=job.signal_id,
         error=job.error,
         result=result,
+        source_url=job.source_url,
+        channel_code=job.channel_code,
+        import_batch_id=job.import_batch_id,
     )
 
 
@@ -187,7 +192,7 @@ async def _document_path(
         channel_code=channel_code or (_infer_channel_code(source_url) if source_url else "web"),
         publisher=publisher,
         source_label=source_label,
-        excerpt=body_text[:200] if body_text else None,
+        excerpt=lead_excerpt_from_markdown(_document_title(doc), body_text) if body_text else None,
         body_text=body_text or None,
         document_id=doc.id,
         capture_submission_id=capture_submission_id,
@@ -283,7 +288,11 @@ async def capture(
         url = page.final_url
     else:
         filename = file.filename if file is not None else None
-        mime = file.content_type if file is not None else None
+        mime = (
+            normalize_document_mime(filename, file.content_type)
+            if file is not None
+            else None
+        )
 
     if len(data) > get_settings().doc_raw_upload_max_bytes:
         raise HTTPException(413, f"capture file exceeds {get_settings().doc_raw_upload_max_bytes} bytes")
@@ -356,7 +365,11 @@ async def create_capture_job(
         )
 
     filename = file.filename if file is not None and data else None
-    mime = file.content_type if file is not None and data else None
+    mime = (
+        normalize_document_mime(filename, file.content_type)
+        if file is not None and data
+        else None
+    )
     fingerprint = _submission_fingerprint(
         url=url,
         data=data,
@@ -434,6 +447,172 @@ async def create_capture_job(
         if existing.fingerprint != fingerprint:
             raise HTTPException(409, "submission_id was already used for a different capture")
         return await _capture_job_out(db, existing)
+    await db.refresh(job)
+    return await _capture_job_out(db, job)
+
+
+@router.get("/jobs", response_model=list[CaptureJobOut])
+async def list_capture_jobs(
+    status: str | None = Query(None),
+    import_batch_id: uuid.UUID | None = Query(None),
+    limit: int = Query(20, ge=1, le=100),
+    db: AsyncSession = Depends(get_db),
+):
+    q = select(CaptureJob).order_by(CaptureJob.created_at).limit(limit)
+    if status:
+        q = q.where(CaptureJob.status == status)
+    if import_batch_id is not None:
+        q = q.where(CaptureJob.import_batch_id == import_batch_id)
+    jobs = (await db.execute(q)).scalars().all()
+    return [await _capture_job_out(db, job) for job in jobs]
+
+
+@router.post("/jobs/{job_id}/claim", response_model=CaptureJobOut)
+async def claim_capture_job_for_client(
+    job_id: uuid.UUID,
+    worker_id: str = Form("capture-client"),
+    db: AsyncSession = Depends(get_db),
+):
+    result = await db.execute(
+        select(CaptureJob).where(CaptureJob.id == job_id).with_for_update()
+    )
+    job = result.scalar_one_or_none()
+    if job is None:
+        raise HTTPException(404, "capture job not found")
+    if job.status != "awaiting_client":
+        raise HTTPException(409, f"job is not awaiting client capture (status={job.status})")
+    now = datetime.now(timezone.utc)
+    job.status = "running"
+    job.stage = "capturing"
+    job.worker_id = worker_id[:120]
+    job.lease_until = now + timedelta(minutes=30)
+    job.started_at = job.started_at or now
+    await db.commit()
+    await db.refresh(job)
+    return await _capture_job_out(db, job)
+
+
+def _worker_id_matches(job_worker: str | None, caller_worker: str) -> bool:
+    if not job_worker:
+        return True
+    prefix = caller_worker.split(":")[0]
+    return job_worker == caller_worker or job_worker.startswith(prefix)
+
+
+@router.post("/jobs/{job_id}/client-release", response_model=CaptureJobOut)
+async def client_release_capture_job(
+    job_id: uuid.UUID,
+    worker_id: str = Form("capture-client"),
+    reason: str = Form("Client released job back to import queue."),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return a reserved import job to awaiting_client (abort, disconnect, retry)."""
+    result = await db.execute(
+        select(CaptureJob).where(CaptureJob.id == job_id).with_for_update()
+    )
+    job = result.scalar_one_or_none()
+    if job is None:
+        raise HTTPException(404, "capture job not found")
+    if job.status != "running" or job.stage != "capturing":
+        raise HTTPException(409, f"job is not held for client capture (status={job.status}, stage={job.stage})")
+    if job.payload_object_key:
+        raise HTTPException(409, "job already has an uploaded payload")
+    if job.worker_id and not _worker_id_matches(job.worker_id, worker_id):
+        raise HTTPException(409, "job is held by another client")
+    job.status = "awaiting_client"
+    job.stage = "awaiting_client"
+    job.worker_id = None
+    job.lease_until = None
+    job.error = (reason or "Client released job back to import queue.")[:2000]
+    await db.commit()
+    await db.refresh(job)
+    if job.import_batch_id is not None:
+        from app.services.panorama_import import refresh_batch_capture_stats
+
+        await refresh_batch_capture_stats(db, job.import_batch_id)
+    return await _capture_job_out(db, job)
+
+
+@router.post("/jobs/{job_id}/client-fail", response_model=CaptureJobOut)
+async def client_fail_capture_job(
+    job_id: uuid.UUID,
+    worker_id: str = Form("capture-client"),
+    error: str = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Record a terminal client-side capture failure (page load, captcha, etc.)."""
+    result = await db.execute(
+        select(CaptureJob).where(CaptureJob.id == job_id).with_for_update()
+    )
+    job = result.scalar_one_or_none()
+    if job is None:
+        raise HTTPException(404, "capture job not found")
+    if job.status not in {"awaiting_client", "running"}:
+        raise HTTPException(409, f"job cannot be failed from client (status={job.status})")
+    if job.status == "running" and job.worker_id and not _worker_id_matches(job.worker_id, worker_id):
+        raise HTTPException(409, "job is held by another client")
+    now = datetime.now(timezone.utc)
+    job.status = "failed"
+    job.stage = "failed"
+    job.error = error[:2000]
+    job.worker_id = None
+    job.lease_until = None
+    job.finished_at = now
+    await db.commit()
+    await db.refresh(job)
+    if job.import_batch_id is not None:
+        from app.services.panorama_import import refresh_batch_capture_stats
+
+        await refresh_batch_capture_stats(db, job.import_batch_id)
+    return await _capture_job_out(db, job)
+
+
+@router.post("/jobs/{job_id}/client-submit", response_model=CaptureJobOut)
+async def client_submit_capture_job(
+    job_id: uuid.UUID,
+    file: UploadFile = File(...),
+    worker_id: str = Form("capture-client"),
+    db: AsyncSession = Depends(get_db),
+):
+    """Attach browser-captured bytes to a panorama import job and queue server processing."""
+    settings = get_settings()
+    data = await file.read(settings.doc_raw_upload_max_bytes + 1)
+    if len(data) > settings.doc_raw_upload_max_bytes:
+        raise HTTPException(413, f"capture file exceeds {settings.doc_raw_upload_max_bytes} bytes")
+    result = await db.execute(
+        select(CaptureJob).where(CaptureJob.id == job_id).with_for_update()
+    )
+    job = result.scalar_one_or_none()
+    if job is None:
+        raise HTTPException(404, "capture job not found")
+    if job.status not in {"awaiting_client", "running"}:
+        raise HTTPException(409, f"job cannot accept client upload (status={job.status})")
+    if job.status == "running" and job.worker_id and not _worker_id_matches(job.worker_id, worker_id):
+        raise HTTPException(409, "job is held by another client")
+    filename = file.filename
+    mime = normalize_document_mime(filename, file.content_type)
+    payload_key = await to_thread.run_sync(partial(save_bytes, data, folder="capture-jobs", ext="bin"))
+    job.payload_object_key = payload_key
+    job.payload_size = len(data)
+    job.filename = filename
+    job.mime = mime
+    job.via = "upload"
+    job.status = "queued"
+    job.stage = "queued"
+    job.worker_id = None
+    job.lease_until = None
+    job.error = None
+    job.available_at = datetime.now(timezone.utc)
+    job.fingerprint = _submission_fingerprint(
+        url=job.source_url,
+        data=data,
+        filename=filename,
+        mime=mime,
+        channel_code=job.channel_code,
+        publisher=job.publisher,
+        source_label=job.source_label,
+    )
+    await db.commit()
     await db.refresh(job)
     return await _capture_job_out(db, job)
 

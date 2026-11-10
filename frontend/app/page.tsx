@@ -1,14 +1,13 @@
-'use client'
+import { ViewRouteClient } from '@/components/view-route-client'
+import { resolveInitialView } from '@/lib/resolve-initial-view'
 
-import { useSearchParams } from 'next/navigation'
-import DashboardClient from '@/components/dashboard-client-loader'
+type HomePageProps = {
+  searchParams: Promise<{ view?: string | string[] }>
+}
 
-const viewPattern = /^[a-zA-Z][a-zA-Z0-9_-]*$/
-
-export default function Page() {
-  const searchParams = useSearchParams()
-  const view = searchParams.get('view') ?? ''
-  const initialView = viewPattern.test(view) ? view : 'overview'
-
-  return <DashboardClient initialView={initialView} />
+export default async function Page({ searchParams }: HomePageProps) {
+  const sp = await searchParams
+  const raw = sp.view
+  const view = Array.isArray(raw) ? raw[0] : raw
+  return <ViewRouteClient initialView={resolveInitialView(view)} />
 }

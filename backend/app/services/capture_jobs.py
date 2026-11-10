@@ -32,10 +32,53 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _is_client_browser_capture(job: CaptureJob) -> bool:
+    """Jobs held for EEA Capture upload before bytes are attached."""
+    return job.stage == "capturing" and not job.payload_object_key
+
+
+async def reclaim_stale_client_captures(now: datetime | None = None) -> int:
+    """Return client-held import jobs whose lease expired without a payload upload."""
+    now = now or _now()
+    async with SessionLocal() as db:
+        result = await db.execute(
+            select(CaptureJob)
+            .where(
+                CaptureJob.status == "running",
+                CaptureJob.stage == "capturing",
+                CaptureJob.payload_object_key.is_(None),
+                or_(CaptureJob.lease_until.is_(None), CaptureJob.lease_until <= now),
+            )
+            .with_for_update(skip_locked=True)
+        )
+        rows = result.scalars().all()
+        if not rows:
+            await db.commit()
+            return 0
+        batch_ids: set[uuid.UUID] = set()
+        for row in rows:
+            if row.import_batch_id is not None:
+                batch_ids.add(row.import_batch_id)
+            row.status = "awaiting_client"
+            row.stage = "awaiting_client"
+            row.worker_id = None
+            row.lease_until = None
+            row.error = (row.error or "Client capture interrupted; re-queued for EEA Capture.").strip()
+        await db.commit()
+        if batch_ids:
+            from app.services.panorama_import import refresh_batch_capture_stats
+
+            async with SessionLocal() as refresh_db:
+                for batch_id in batch_ids:
+                    await refresh_batch_capture_stats(refresh_db, batch_id)
+        return len(rows)
+
+
 async def claim_next_job(worker_id: str) -> uuid.UUID | None:
     """Claim one ready job; expired leases are eligible for recovery."""
     settings = get_settings()
     now = _now()
+    await reclaim_stale_client_captures(now)
     lease_until = now + timedelta(seconds=max(settings.capture_worker_lease_seconds, 60))
     async with SessionLocal() as db:
         expired = await db.execute(
@@ -48,6 +91,13 @@ async def claim_next_job(worker_id: str) -> uuid.UUID | None:
             .with_for_update(skip_locked=True)
         )
         for row in expired.scalars():
+            if _is_client_browser_capture(row):
+                row.status = "awaiting_client"
+                row.stage = "awaiting_client"
+                row.worker_id = None
+                row.lease_until = None
+                row.error = "Client capture lease expired; re-queued for EEA Capture."
+                continue
             row.status = "failed"
             row.stage = "failed"
             row.error = "Worker lease expired after the automatic retry limit."
@@ -55,9 +105,16 @@ async def claim_next_job(worker_id: str) -> uuid.UUID | None:
             row.lease_until = None
             row.worker_id = None
 
-        eligible = or_(
-            and_(CaptureJob.status == "queued", CaptureJob.available_at <= now),
-            and_(CaptureJob.status == "running", CaptureJob.lease_until <= now),
+        eligible = and_(
+            or_(
+                and_(CaptureJob.status == "queued", CaptureJob.available_at <= now),
+                and_(
+                    CaptureJob.status == "running",
+                    CaptureJob.lease_until <= now,
+                    CaptureJob.payload_object_key.isnot(None),
+                ),
+            ),
+            CaptureJob.status != "awaiting_client",
         )
         result = await db.execute(
             select(CaptureJob)
@@ -115,6 +172,8 @@ def _failure_text(exc: Exception) -> str:
         detail = exc.detail
         message = detail if isinstance(detail, str) else str(detail)
     elif isinstance(exc, FetchError):
+        message = str(exc)
+    elif isinstance(exc, FileNotFoundError) and str(exc):
         message = str(exc)
     else:
         message = f"Processing failed ({exc.__class__.__name__}); inspect worker logs using the job ID."
@@ -205,14 +264,23 @@ async def _execute_capture(job_id: uuid.UUID, worker_id: str) -> None:
             if existing.capture_submission_sha256 != fingerprint:
                 raise HTTPException(409, "submission_id was already used for a different capture")
             signal_id = existing.id
+            batch_id = job.import_batch_id
             await db.commit()
             await _mark_succeeded(job_id, worker_id, signal_id)
+            if batch_id is not None:
+                from app.services.panorama_import_hooks import on_import_capture_job_succeeded
+
+                await on_import_capture_job_succeeded(batch_id, job_id, signal_id)
             return
 
         await db.commit()
         data = await to_thread.run_sync(partial(load_bytes, object_key)) if object_key else b""
         if object_key and data is None:
-            raise FileNotFoundError("capture payload object is missing")
+            root = get_settings().object_dir
+            raise FileNotFoundError(
+                f"capture payload object is missing under OBJECT_DIR ({root}): {object_key}. "
+                "Ensure the API and capture worker use the same OBJECT_DIR."
+            )
         if not data:
             settings = get_settings()
             if not source_url or settings.app_env == "production" or not settings.capture_server_fetch_enabled:
@@ -225,6 +293,8 @@ async def _execute_capture(job_id: uuid.UUID, worker_id: str) -> None:
             data, filename, mime, source_url = page.data, page.filename, page.content_type, page.final_url
 
         await _set_stage(job_id, worker_id, "processing")
+        # Bulk import batches: skip per-figure vision LLM (96 URLs × many figures would stall the queue).
+        vision_captions = job.import_batch_id is None
         if _is_html(mime=mime, filename=filename):
             signal = await _signal_from_html(
                 db,
@@ -234,6 +304,7 @@ async def _execute_capture(job_id: uuid.UUID, worker_id: str) -> None:
                 html_label="file",
                 capture_submission_id=submission_id,
                 capture_submission_sha256=fingerprint,
+                figure_vision_captions=vision_captions,
             )
         else:
             signal, _ = await _document_path(
@@ -250,6 +321,11 @@ async def _execute_capture(job_id: uuid.UUID, worker_id: str) -> None:
             )
         signal_id = signal.id
         await _mark_succeeded(job_id, worker_id, signal_id)
+        if job.import_batch_id is not None:
+            from app.services.panorama_import_hooks import on_import_capture_job_succeeded
+
+            await on_import_capture_job_succeeded(job.import_batch_id, job_id, signal_id)
+        return
 
 
 async def run_claimed_job(job_id: uuid.UUID, worker_id: str) -> None:

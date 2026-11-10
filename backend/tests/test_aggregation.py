@@ -136,3 +136,35 @@ async def test_manual_assignment_overrides_auto_aggregation(client):
 
     overridden = await assign_signal_theme(client, sig["id"], theme_b["id"])
     assert overridden["tech_theme_id"] == theme_b["id"]
+
+
+async def test_patch_signal_rejects_stale_expected_updated_at(client):
+    sig = await create_signal(client, body_text=SUPPLY_CHAIN_BODY)
+    stale = sig["updated_at"]
+    await client.patch(
+        f"/api/v1/signals/{sig['id']}",
+        json={"value_chain_stage_code": "delivery_oem"},
+    )
+    conflict = await client.patch(
+        f"/api/v1/signals/{sig['id']}",
+        json={"value_chain_stage_code": "creation_supply", "expected_updated_at": stale},
+    )
+    assert conflict.status_code == 409
+
+
+async def test_theme_aggregate_preview_lists_candidates(client):
+    theme_a = await _theme_with_tags(client, "主题甲", ["智能配电", "eFuse", "区域控制"])
+    await _theme_with_tags(client, "主题乙", ["gamma", "delta"])
+    target = await create_signal(client, url="https://example.com/target", body_text=SUPPLY_CHAIN_BODY)
+    await set_signal_tags(client, target["id"], ["智能配电", "eFuse"])
+    preview = (await client.get(f"/api/v1/signals/{target['id']}/theme-aggregate-preview")).json()
+    assert preview["can_auto_assign"] is True
+    assert preview["recommended_theme_id"] == theme_a["id"]
+
+
+async def test_auto_aggregate_refuses_when_theme_already_set(client):
+    theme = await create_theme(client)
+    sig = await create_signal(client, body_text=SUPPLY_CHAIN_BODY)
+    await set_signal_tags(client, sig["id"], ["智能配电", "eFuse"])
+    await assign_signal_theme(client, sig["id"], theme["id"])
+    assert (await client.post(f"/api/v1/signals/{sig['id']}/auto-aggregate")).status_code == 409

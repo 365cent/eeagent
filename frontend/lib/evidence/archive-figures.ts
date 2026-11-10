@@ -27,6 +27,13 @@ function pickBodyContainer(doc: Document): Element {
   const jsContent = doc.querySelector('#js_content')
   if (jsContent) return jsContent
 
+  const articleShell =
+    doc.querySelector('.art-con.article_body') ?? doc.querySelector('.article_body')
+  if (articleShell) {
+    const inner = articleShell.querySelector('.article_text') ?? articleShell
+    if (containerTextLen(inner) >= 80 || inner.querySelector('img')) return inner
+  }
+
   const frView = doc.querySelector('.fr-view')
   if (frView && containerTextLen(frView) >= 80) return frView
 

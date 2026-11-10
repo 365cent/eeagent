@@ -25,6 +25,15 @@ try {
 
     Copy-Item README.md, config.example.json -Destination $pkg
     Copy-Item (Join-Path $dist "capture.exe") -Destination $pkg
+    $bundledExt = Join-Path $root "data\extensions\singlefile"
+    if (Test-Path (Join-Path $bundledExt "manifest.json")) {
+        $extDest = Join-Path $pkg "data\extensions\singlefile"
+        New-Item -ItemType Directory -Force -Path (Split-Path $extDest) | Out-Null
+        Copy-Item -Recurse -Force $bundledExt $extDest
+        Write-Host "bundled SingleFile -> data/extensions/singlefile"
+    } else {
+        Write-Warning "client/data/extensions/singlefile missing — run 'capture doctor' once with network to stage, then rebuild release"
+    }
     if (Test-Path $zip) { Remove-Item -Force $zip }
     Compress-Archive -Path (Join-Path $pkg "*") -DestinationPath $zip -CompressionLevel Optimal
 } finally {

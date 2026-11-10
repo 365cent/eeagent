@@ -63,3 +63,17 @@ def build_document_body_summary(filename: str, canonical_md: str) -> str:
         else:
             lines.append("（文档未解析出可摘要内容，完整内容见 GET /documents/{id}/canonical.md）")
     return "\n".join(lines)[:_TOTAL_CHARS]
+
+
+def excerpt_from_canonical(title: str | None, canonical_md: str) -> str:
+    """Signal excerpt for document-sourced signals: first slide/section title."""
+    headings = [
+        text.strip()
+        for _, text in _HEADING.findall(canonical_md or "")
+        if text.strip() and not text.strip().startswith("Notes")
+    ]
+    if headings:
+        lead = headings[0]
+        return lead if len(lead) <= 320 else f"{lead[:319]}…"
+    collapsed = re.sub(r"\s+", " ", (canonical_md or "").strip())[:320]
+    return collapsed or (title or "")

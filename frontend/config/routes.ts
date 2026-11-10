@@ -2,6 +2,7 @@
 export const PRIMARY_VIEW_KEYS = [
   'overview',
   'signals',
+  'archived',
   'topics',
   'traceDetail',
   'technology',
@@ -38,6 +39,7 @@ export function isRegisteredView(view: string): boolean {
 export const ROUTE_PATH = {
   overview: '/',
   signals: '/signals',
+  archived: '/archived',
   topics: '/topics',
   trace: '/trace',
   technology: '/technology',

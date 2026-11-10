@@ -5,7 +5,6 @@
 package ui
 
 import (
-	"context"
 	"fmt"
 	"net/url"
 	"os/exec"
@@ -22,7 +21,6 @@ import (
 	"github.com/rodrigocfd/windigo/win"
 
 	"eea/capture/internal/archive"
-	"eea/capture/internal/capture"
 	"eea/capture/internal/config"
 	"eea/capture/internal/platform"
 	"eea/capture/internal/queue"
@@ -98,10 +96,14 @@ type appState struct {
 func newApp(cfg config.Config, dir string) *appState {
 	w := ui.DpiX(460)
 	h := ui.DpiY(308)
+	panelNote := ""
+	if err := config.EnsureSingleFileExtension(dir, &cfg); err != nil {
+		panelNote = err.Error()
+	}
 	app := &appState{
 		cfg:          cfg,
 		dir:          dir,
-		panelNote:    "",
+		panelNote:    panelNote,
 		engine:       &lazyEngine{opts: engineOptions(cfg)},
 		engineChrome: strings.EqualFold(cfg.CaptureEngine, "chrome"),
 		headlessOn:   cfg.Headless,
@@ -474,15 +476,10 @@ func (a *appState) savePanel() {
 		a.engine.close()
 		a.engine = &lazyEngine{opts: engineOptions(a.cfg)}
 	}
-	a.closePanel()
-}
-
-func bounded(text string, lo, hi int) (int, error) {
-	n, err := strconv.Atoi(strings.TrimSpace(text))
-	if err != nil || n < lo || n > hi {
-		return 0, fmt.Errorf("out of range")
+	if err := config.EnsureSingleFileExtension(a.dir, &a.cfg); err != nil {
+		a.panelNote = err.Error()
 	}
-	return n, nil
+	a.closePanel()
 }
 
 func (a *appState) submitText() {
@@ -501,6 +498,13 @@ func (a *appState) submitText() {
 		a.invalidate()
 		return
 	}
+	if err := config.EnsureSingleFileExtension(a.dir, &a.cfg); err != nil {
+		a.notice = err.Error()
+		a.invalidate()
+		return
+	}
+	a.engine.close()
+	a.engine = &lazyEngine{opts: engineOptions(a.cfg)}
 	a.notice = ""
 	a.edt.SetText("")
 	a.showJobs = true
@@ -886,16 +890,19 @@ func jobStatusLabel(job queue.Job) string {
 	case queue.StatusQueued:
 		return "排队中"
 	case queue.StatusRunning:
+		label := "处理中"
 		switch job.Stage {
 		case "capturing":
-			return "抓取中"
+			label = "抓取中"
 		case "uploading":
-			return "上传中"
+			label = "上传中"
 		case "processing":
-			return "解析中"
-		default:
-			return "处理中"
+			label = "解析中"
 		}
+		if job.Progress > 0 && job.Progress < 100 {
+			return fmt.Sprintf("%s %d%%", label, job.Progress)
+		}
+		return label
 	case queue.StatusDone:
 		if job.Kind == queue.KindManualFallback {
 			return "手工补录·待复核"
@@ -1007,44 +1014,3 @@ func segoeFont(height int, weight co.FW) win.HFONT {
 	return font
 }
 
-func engineOptions(cfg config.Config) capture.Options {
-	return capture.Options{
-		Engine:          cfg.CaptureEngine,
-		BrowserPath:     cfg.BrowserPath,
-		UserDataDir:     cfg.UserDataDir,
-		Headless:        cfg.Headless,
-		ReadyWait:       time.Duration(cfg.ReadyTimeout) * time.Second,
-		InteractiveWait: time.Duration(cfg.InteractiveTimeout) * time.Second,
-		MinTextChars:    cfg.MinTextChars,
-	}
-}
-
-type lazyEngine struct {
-	mu   sync.Mutex
-	b    *capture.Browser
-	opts capture.Options
-}
-
-func (l *lazyEngine) Capture(ctx context.Context, url string) (*capture.Archive, error) {
-	l.mu.Lock()
-	if l.b == nil {
-		b, err := capture.Launch(ctx, l.opts)
-		if err != nil {
-			l.mu.Unlock()
-			return nil, err
-		}
-		l.b = b
-	}
-	b := l.b
-	l.mu.Unlock()
-	return b.Capture(ctx, url)
-}
-
-func (l *lazyEngine) close() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
-	if l.b != nil {
-		_ = l.b.Close()
-		l.b = nil
-	}
-}

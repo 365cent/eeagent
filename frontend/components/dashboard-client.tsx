@@ -5,7 +5,7 @@ import { DashboardWorkspace } from '@/views/dashboard/workspace'
 
 type DashboardClientProps = { initialView?: string; signalId?: string }
 
-/** Loaded client-only via `dashboard-client-loader` (dynamic ssr: false). */
+/** Client dashboard shell; imported from app view routes via ViewRouteClient. */
 export default function DashboardClient({ initialView = 'overview', signalId = '1' }: DashboardClientProps) {
   return (
     <AppProviders>

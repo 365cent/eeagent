@@ -88,5 +88,24 @@ async def test_tag_suggestions_from_signal_text(client):
     r = await client.get(f"/api/v1/signals/{sig['id']}/tag-suggestions")
     assert r.status_code == 200
     body = r.json()
-    assert body["source"] == "jieba-frequency"
+    assert body["source"] in ("jieba-frequency", "embedding-rerank")
     assert len(body["suggested_tags"]) >= 1
+    if body["source"] == "embedding-rerank":
+        assert body.get("rerank_score") is not None
+
+
+async def test_tag_suggestions_omit_corrected_fields(client):
+    from tests.support import SUPPLY_CHAIN_BODY, set_signal_tags
+
+    sig = await create_signal(client, title="eFuse 研究", url="https://example.com/b", body_text=SUPPLY_CHAIN_BODY)
+    await client.patch(
+        f"/api/v1/signals/{sig['id']}",
+        json={"value_chain_stage_code": "delivery_oem", "signal_type_code": "technology"},
+    )
+    body = (await client.get(f"/api/v1/signals/{sig['id']}/tag-suggestions")).json()
+    assert "value_chain_stage_code" in body["protected_fields"]
+    assert body["value_chain_stage_code"] is None
+    await set_signal_tags(client, sig["id"], ["eFuse"])
+    body = (await client.get(f"/api/v1/signals/{sig['id']}/tag-suggestions")).json()
+    assert "tech_tags" in body["protected_fields"]
+    assert body["suggested_tags"] == []

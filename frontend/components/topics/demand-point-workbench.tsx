@@ -1,14 +1,18 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { App as AntApp, Alert, Button, Card, Input, Select, Space, Spin, Table, Tag, Typography } from 'antd'
+import { App as AntApp, Alert, Button, Card, Collapse, Input, Select, Space, Spin, Table, Tag, Typography } from 'antd'
+import { DemandDraftAssistant } from '@/components/topics/demand-draft-assistant'
+import { DemandSignalLibrary } from '@/components/topics/demand-signal-library'
+import { PlatformEmptyState } from '@/components/shared/empty-state'
 import { EeaApiError } from '@/lib/api/client'
 import { createDemand, fetchDemands, fetchRefCodes, fetchSignals, fetchThemes, patchDemand } from '@/lib/api/eea-api'
 import type {
   DemandCreatePayload,
   DemandDerivationStep,
   DemandDerivationStepKey,
+  DemandDraftProposal,
   DemandOut,
   DemandUpdatePayload,
   SignalOut,
@@ -16,9 +20,6 @@ import type {
 } from '@/lib/api/types'
 import { eeaQueryKeys, useRefCodeMaps } from '@/hooks/use-eea-queries'
 import { labelFor } from '@/lib/eea-mappers'
-import { signalFrequencyHint, sourceCountHint } from '@/lib/metrics-copy'
-import { MetricHint } from '@/components/shared/metric-hint'
-import { PlatformEmptyState } from '@/components/shared/empty-state'
 
 const { Text } = Typography
 const { TextArea } = Input
@@ -253,6 +254,36 @@ function errorMessage(error: unknown): string {
   return error instanceof EeaApiError ? error.message : String(error)
 }
 
+function draftFromProposal(proposal: DemandDraftProposal): DemandDraft {
+  const base = emptyDraft()
+  const savedSteps = new Map((proposal.derivation_trace?.steps ?? []).map((step) => [step.key, step]))
+  base.name = proposal.name
+  base.valueChainStageCode = proposal.value_chain_stage_code
+  base.sourceThemeId = proposal.source_tech_theme_id
+  base.steps = DEMAND_STEPS.map(({ key }) => {
+    const saved = savedSteps.get(key)
+    return {
+      key,
+      content: saved?.content ?? '',
+      evidence_signal_ids: [...(saved?.evidence_signal_ids ?? [])],
+    }
+  })
+  const crossValidation = proposal.cross_validation ?? {}
+  const { conclusion, perspectives, evidence_signal_ids, ...extra } = crossValidation as Record<string, unknown>
+  base.crossValidation = {
+    conclusion: typeof conclusion === 'string' ? conclusion : null,
+    perspectivesText: Array.isArray(perspectives)
+      ? perspectives.map(asText).join('\n')
+      : asText(perspectives),
+    evidenceSignalIds: Array.isArray(evidence_signal_ids)
+      ? evidence_signal_ids.filter((id): id is string => typeof id === 'string')
+      : [],
+    extra: isRecord(extra) ? extra : {},
+  }
+  base.timeSeries = []
+  return base
+}
+
 function confirmationErrorMessage(error: unknown): string {
   if (error instanceof EeaApiError && error.status === 403) {
     return `服务端拒绝确认：确认权限仅限 taxonomy_admin 或 platform_admin。${error.message ? `（${error.message}）` : ''}`
@@ -260,7 +291,13 @@ function confirmationErrorMessage(error: unknown): string {
   return errorMessage(error)
 }
 
-export function DemandPointWorkbench() {
+type DemandPointWorkbenchProps = {
+  /** When false, render without outer Card (for Drawer shell). */
+  showCard?: boolean
+  onDirtyChange?: (dirty: boolean) => void
+}
+
+export function DemandPointWorkbench({ showCard = true, onDirtyChange }: DemandPointWorkbenchProps) {
   const { message: messageApi } = AntApp.useApp()
   const queryClient = useQueryClient()
   const refCodesQuery = useRefCodeMaps()
@@ -272,6 +309,11 @@ export function DemandPointWorkbench() {
   const [busy, setBusy] = useState<'save' | 'confirm' | null>(null)
   const [validationIssues, setValidationIssues] = useState<string[]>([])
   const [serverError, setServerError] = useState<string | null>(null)
+  const [assistantSignalIds, setAssistantSignalIds] = useState<string[]>([])
+
+  useEffect(() => {
+    onDirtyChange?.(dirty)
+  }, [dirty, onDirtyChange])
 
   const demandsQuery = useQuery({ queryKey: eeaQueryKeys.demands, queryFn: fetchDemands })
   const themesQuery = useQuery({ queryKey: eeaQueryKeys.themes, queryFn: fetchThemes })
@@ -289,7 +331,34 @@ export function DemandPointWorkbench() {
   const stageOptions = Object.entries(refCodesQuery.maps.byDomain.value_chain_stage ?? {})
     .map(([value, label]) => ({ value, label }))
   const stageCodes = stageOptions.map((option) => option.value)
-  const evidenceSignals = eligibleEvidence(evidenceQuery.data, draft.sourceThemeId)
+  const evidenceSignals = useMemo(
+    () => eligibleEvidence(evidenceQuery.data, draft.sourceThemeId),
+    [evidenceQuery.data, draft.sourceThemeId],
+  )
+
+  const evidenceSignalIdsKey = useMemo(
+    () => evidenceSignals.map((signal) => signal.id).join('\u0000'),
+    [evidenceSignals],
+  )
+
+  useEffect(() => {
+    if (!creating || !draft.sourceThemeId) {
+      setAssistantSignalIds((current) => (current.length === 0 ? current : []))
+      return
+    }
+    const ids = evidenceSignalIdsKey ? evidenceSignalIdsKey.split('\u0000') : []
+    setAssistantSignalIds((current) => {
+      if (!ids.length) return current.length === 0 ? current : []
+      if (!current.length) return ids
+      const kept = current.filter((id) => ids.includes(id))
+      const next = kept.length ? kept : ids
+      if (next.length === current.length && next.every((id, index) => id === current[index])) {
+        return current
+      }
+      return next
+    })
+  }, [creating, draft.sourceThemeId, evidenceSignalIdsKey])
+
   const evidenceOptions = evidenceSignals.map((signal) => ({
     value: signal.id,
     label: `${signal.title} · ${signal.publisher ?? signal.source_label ?? signal.url}`,
@@ -493,84 +562,176 @@ export function DemandPointWorkbench() {
     }))
   }
 
-  return (
-    <Card className="panel-card view-card" title="需求点工作台" extra={<Button type="primary" onClick={startCreate} disabled={dirty || Boolean(busy)}>新建需求点</Button>}>
-      <Space orientation="vertical" size={16} style={{ width: '100%' }}>
-        {demandsQuery.isError ? (
-          <Alert
-            type="error"
-            showIcon
-            title="需求点加载失败"
-            description={errorMessage(demandsQuery.error)}
-            action={<Button size="small" onClick={() => void demandsQuery.refetch()}>重试</Button>}
-          />
-        ) : (
-          <Table<DemandOut>
-            size="small"
-            rowKey="id"
-            loading={demandsQuery.isLoading}
-            dataSource={demands}
-            pagination={{ pageSize: 8 }}
-            locale={{
-              emptyText: <PlatformEmptyState title="暂无已保存需求点" description="从真实主题和信号证据建立需求点；新建记录会保持待复核。" />,
-            }}
-            columns={[
-              { title: '需求点', dataIndex: 'name' },
-              {
-                title: '价值链环节',
-                dataIndex: 'value_chain_stage_code',
-                render: (code: string) => labelFor(refCodesQuery.maps, 'value_chain_stage', code),
-              },
-              {
-                title: '来源主题',
-                dataIndex: 'source_tech_theme_id',
-                render: (themeId: string | null) => themes.find((theme) => theme.id === themeId)?.working_name ?? (themeId ?? '—'),
-              },
-              {
-                title: '交叉验证',
-                render: (_value, record) => asText(record.cross_validation?.conclusion) || '—',
-              },
-              {
-                title: <MetricHint label="信号频次" hint={signalFrequencyHint} />,
-                dataIndex: 'signal_frequency',
-                render: (value: number | undefined) => value ?? '—',
-              },
-              {
-                title: <MetricHint label="来源数" hint={sourceCountHint} />,
-                dataIndex: 'source_count',
-                render: (value: number | undefined) => value ?? '—',
-              },
-              {
-                title: '映射功能',
-                dataIndex: 'function_count',
-                render: (value: number | undefined) => value ?? '—',
-              },
-              {
-                title: '复核状态',
-                dataIndex: 'review_status',
-                render: (status: string | null) => (
-                  <Tag color={status === 'confirmed' ? 'success' : status === 'pending' ? 'warning' : 'default'}>
-                    {statusLabel(status)}
-                  </Tag>
-                ),
-              },
-              {
-                title: '操作',
-                render: (_value, record) => (
-                  <Button size="small" onClick={() => editDemand(record)} disabled={dirty || Boolean(busy)}>
-                    编辑
-                  </Button>
-                ),
-              },
-            ]}
-          />
-        )}
+  const railColumns = [
+    {
+      title: '需求点',
+      dataIndex: 'name',
+      ellipsis: true,
+    },
+    {
+      title: '复核',
+      width: 72,
+      dataIndex: 'review_status',
+      render: (status: string | null) => (
+        <Tag color={status === 'confirmed' ? 'success' : status === 'pending' ? 'warning' : 'default'}>
+          {statusLabel(status)}
+        </Tag>
+      ),
+    },
+  ]
 
+  const createButton = (
+    <Button type="primary" onClick={startCreate} disabled={dirty || Boolean(busy)}>
+      新建需求点
+    </Button>
+  )
+
+  const shell = (
+      <div className={`demand-workbench-layout${editing ? ' demand-workbench-layout--detail-open' : ''}`}>
+        <aside className="demand-workbench-rail" aria-label="已保存需求点">
+          {demandsQuery.isError ? (
+            <Alert
+              type="error"
+              showIcon
+              title="加载失败"
+              description={errorMessage(demandsQuery.error)}
+              action={<Button size="small" onClick={() => void demandsQuery.refetch()}>重试</Button>}
+            />
+          ) : (
+            <Table<DemandOut>
+              className="demand-workbench-list"
+              size="small"
+              rowKey="id"
+              loading={demandsQuery.isLoading}
+              dataSource={demands}
+              pagination={{ pageSize: 10, size: 'small', hideOnSinglePage: true }}
+              locale={{
+                emptyText: <PlatformEmptyState title="暂无需求点" description="新建后保存在此列表。" />,
+              }}
+              columns={railColumns}
+              rowClassName={(record) => {
+                if (editing && !creating && record.id === selectedDemandId) return 'demand-workbench-row-selected'
+                return ''
+              }}
+              onRow={(record) => ({
+                onClick: () => {
+                  if (dirty || busy) return
+                  editDemand(record)
+                },
+              })}
+            />
+          )}
+        </aside>
+
+        <main className={`demand-workbench-main${editing ? ' demand-workbench-main--active' : ''}`}>
         {editing ? (
-          <Card size="small" title={creating ? '新建需求点（保存后待复核）' : '编辑需求点'}>
-            <Space orientation="vertical" size={14} style={{ width: '100%' }}>
-              {dirty ? <Alert type="info" showIcon title="有未保存修改；保存或放弃前不能切换需求点。" /> : null}
+          <section className="demand-edit-panel" aria-label={creating ? '新建需求点' : '编辑需求点'}>
+            {!creating ? (
+              <header className="demand-detail-panel-head">
+                <Text strong className="demand-detail-panel-title">{draft.name.trim() || '未命名需求点'}</Text>
+                {selectedDemand ? (
+                  <Tag color={selectedDemand.review_status === 'confirmed' ? 'success' : 'warning'}>
+                    {statusLabel(selectedDemand.review_status)}
+                  </Tag>
+                ) : null}
+              </header>
+            ) : null}
+            <Space orientation="vertical" size={12} style={{ width: '100%' }}>
+              {dirty ? (
+                <Alert type="info" showIcon title="有未保存修改" style={{ marginBottom: 0 }} />
+              ) : null}
 
+              {creating ? (
+                <div className="demand-draft-workspace demand-draft-workspace--unified">
+                  <div className="demand-draft-workspace-toolbar">
+                    <Text strong className="demand-draft-toolbar-label">来源主题</Text>
+                    {themesQuery.isError ? (
+                      <Alert
+                        type="error"
+                        showIcon
+                        title="主题列表加载失败"
+                        description={errorMessage(themesQuery.error)}
+                        action={<Button size="small" onClick={() => void themesQuery.refetch()}>重试</Button>}
+                      />
+                    ) : (
+                      <Select
+                        allowClear
+                        showSearch={{ optionFilterProp: 'label' }}
+                        loading={themesQuery.isLoading}
+                        disabled={!themesQuery.isSuccess || Boolean(busy)}
+                        value={draft.sourceThemeId ?? undefined}
+                        onChange={(value) => updateDraft((current) => ({ ...current, sourceThemeId: value ?? null }))}
+                        options={themes.map((theme) => ({ value: theme.id, label: theme.working_name }))}
+                        placeholder="选择需求来源主题"
+                        className="demand-create-theme-select"
+                      />
+                    )}
+                  </div>
+                  {themesQuery.isSuccess && themes.length === 0 ? (
+                    <Text type="secondary" className="demand-draft-empty-themes">
+                      暂无服务端主题；先创建主题并归集信号后再建立需求点。
+                    </Text>
+                  ) : null}
+                  <aside className="demand-draft-source-column">
+                    <DemandSignalLibrary
+                      compact
+                      signals={evidenceSignals}
+                      selectedIds={assistantSignalIds}
+                      loading={Boolean(draft.sourceThemeId) && evidenceQuery.isLoading}
+                      onChangeSelected={setAssistantSignalIds}
+                    />
+                  </aside>
+                  <div className="demand-draft-chat-column">
+                    <DemandDraftAssistant
+                      compact
+                      themeId={draft.sourceThemeId}
+                      selectedSignalIds={assistantSignalIds}
+                      onApplyDraft={(proposal) => {
+                        setDraft(draftFromProposal(proposal))
+                        setDirty(true)
+                        clearFeedback()
+                      }}
+                    />
+                  </div>
+                </div>
+              ) : (
+                <div>
+                  <Text strong>来源主题</Text>
+                  {themesQuery.isError ? (
+                    <Alert
+                      type="error"
+                      showIcon
+                      title="主题列表加载失败"
+                      description={errorMessage(themesQuery.error)}
+                      action={<Button size="small" onClick={() => void themesQuery.refetch()}>重试</Button>}
+                      style={{ marginTop: 5 }}
+                    />
+                  ) : null}
+                  {themesQuery.isSuccess && themes.length === 0 ? (
+                    <Text type="secondary" style={{ display: 'block' }}>暂无服务端主题；先创建主题并归集信号后再建立需求点。</Text>
+                  ) : null}
+                  <Select
+                    allowClear
+                    showSearch={{ optionFilterProp: 'label' }}
+                    loading={themesQuery.isLoading}
+                    disabled={!themesQuery.isSuccess || Boolean(busy) || !dirty}
+                    value={draft.sourceThemeId ?? undefined}
+                    onChange={(value) => updateDraft((current) => ({ ...current, sourceThemeId: value ?? null }))}
+                    options={themes.map((theme) => ({ value: theme.id, label: theme.working_name }))}
+                    placeholder="选择需求来源主题"
+                    style={{ width: '100%', marginTop: 5 }}
+                  />
+                </div>
+              )}
+
+              <Collapse
+                bordered={false}
+                defaultActiveKey={creating ? [] : ['manual']}
+                items={[{
+                  key: 'manual',
+                  label: creating ? '手动微调（可选）' : '需求点字段与推导记录',
+                  children: (
+                    <Space orientation="vertical" size={14} style={{ width: '100%' }}>
               <div>
                 <Text strong>需求点名称</Text>
                 <Input
@@ -603,32 +764,6 @@ export function DemandPointWorkbench() {
                   onChange={(value) => updateDraft((current) => ({ ...current, valueChainStageCode: value ?? null }))}
                   options={stageOptions}
                   placeholder="从服务端价值链词表中选择"
-                  style={{ width: '100%', marginTop: 5 }}
-                />
-              </div>
-
-              <div>
-                <Text strong>来源主题</Text>
-                {themesQuery.isError ? (
-                  <Alert
-                    type="error"
-                    showIcon
-                    title="主题列表加载失败"
-                    description={errorMessage(themesQuery.error)}
-                    action={<Button size="small" onClick={() => void themesQuery.refetch()}>重试</Button>}
-                    style={{ marginTop: 5 }}
-                  />
-                ) : null}
-                {themesQuery.isSuccess && themes.length === 0 ? <Text type="secondary" style={{ display: 'block' }}>暂无服务端主题；先创建主题并归集信号后再建立需求点。</Text> : null}
-                <Select
-                  allowClear
-                  showSearch={{ optionFilterProp: 'label' }}
-                  loading={themesQuery.isLoading}
-                  disabled={!themesQuery.isSuccess || Boolean(busy)}
-                  value={draft.sourceThemeId ?? undefined}
-                  onChange={(value) => updateDraft((current) => ({ ...current, sourceThemeId: value ?? null }))}
-                  options={themes.map((theme) => ({ value: theme.id, label: theme.working_name }))}
-                  placeholder="选择需求来源主题"
                   style={{ width: '100%', marginTop: 5 }}
                 />
               </div>
@@ -849,14 +984,37 @@ export function DemandPointWorkbench() {
                   {dirty ? '放弃未保存修改' : '关闭'}
                 </Button>
               </Space>
+                    </Space>
+                  ),
+                }]}
+              />
             </Space>
-          </Card>
-        ) : null}
+          </section>
+        ) : (
+          <div className="demand-workbench-idle">
+            <Text type="secondary">在左侧选择需求点，或点击「新建需求点」。</Text>
+          </div>
+        )}
+        </main>
+      </div>
+  )
 
-        {demandsQuery.isSuccess && demands.length === 0 && !editing ? (
-          <Text type="secondary">创建的需求点会进入待复核，不会在创建请求中确认。</Text>
-        ) : null}
-      </Space>
+  if (!showCard) {
+    return (
+      <div className="demand-workbench-embedded">
+        <div className="demand-workbench-embedded-toolbar">{createButton}</div>
+        {shell}
+      </div>
+    )
+  }
+
+  return (
+    <Card
+      className="panel-card view-card demand-point-workbench-card"
+      title="需求点工作台"
+      extra={createButton}
+    >
+      {shell}
     </Card>
   )
 }

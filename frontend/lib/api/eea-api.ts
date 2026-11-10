@@ -20,6 +20,7 @@ import type {
   LandingPointStandardGrid,
   LandingPointStandardUpsert,
   ListSignalsParams,
+  DataSyncStamp,
   OverviewStats,
   PanoramaStage,
   RefCodeOut,
@@ -30,7 +31,9 @@ import type {
   StudioMindmapPayload,
   SignalStudioKind,
   AuditOut,
+  DemandAssistantReply,
   DemandCreatePayload,
+  DemandDraftProposal,
   DemandUpdatePayload,
   SignalCreatePayload,
   SignalUpdatePayload,
@@ -40,6 +43,7 @@ import type {
   SignalOut,
   TagAssignmentPayload,
   TagSuggestion,
+  ThemeAggregatePreview,
   ThemeAssignmentPayload,
   ThemeCreatePayload,
   ThemeDetail,
@@ -62,6 +66,10 @@ export function fetchRefCodes(domain?: string) {
 
 export function fetchOverview() {
   return eeaFetch<OverviewStats>('/overview')
+}
+
+export function fetchSyncStamp() {
+  return eeaFetch<DataSyncStamp>('/sync-stamp')
 }
 
 export function fetchSignals(params: ListSignalsParams = {}) {
@@ -104,6 +112,12 @@ export function patchSignal(signalId: string, payload: SignalUpdatePayload) {
   })
 }
 
+export function deleteSignal(signalId: string) {
+  return eeaFetch<void>(`/signals/${encodeURIComponent(signalId)}`, {
+    method: 'DELETE',
+  })
+}
+
 export function fetchDemands() {
   return eeaFetch<DemandOut[]>('/demands')
 }
@@ -113,6 +127,40 @@ export function createDemand(payload: DemandCreatePayload) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+  })
+}
+
+export function proposeDemandDraft(
+  sourceTechThemeId: string,
+  options?: { userHint?: string; useLlm?: boolean; selectedSignalIds?: string[] },
+) {
+  return eeaFetch<DemandDraftProposal>('/demands/assistant/draft', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      source_tech_theme_id: sourceTechThemeId,
+      user_hint: options?.userHint,
+      use_llm: options?.useLlm ?? false,
+      selected_signal_ids: options?.selectedSignalIds ?? [],
+    }),
+  })
+}
+
+export function postDemandAssistantMessage(
+  sourceTechThemeId: string,
+  message: string,
+  history: AssistantChatTurn[] = [],
+  selectedSignalIds: string[] = [],
+) {
+  return eeaFetch<DemandAssistantReply>('/demands/assistant/messages', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      source_tech_theme_id: sourceTechThemeId,
+      message,
+      history,
+      selected_signal_ids: selectedSignalIds,
+    }),
   })
 }
 
@@ -384,6 +432,20 @@ export async function captureSignal(
   return result.signal
 }
 
+export async function importCaptureUrlList(text: string) {
+  return eeaFetch<import('@/lib/api/types').PanoramaImportBatchOut>('/imports/capture-urls', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ text }),
+  })
+}
+
+export function fetchPanoramaImportBatch(batchId: string) {
+  return eeaFetch<import('@/lib/api/types').PanoramaImportBatchOut>(
+    `/imports/panorama/${encodeURIComponent(batchId)}`,
+  )
+}
+
 export async function uploadRawDocument(
   file: File,
   options?: { onUploadProgress?: UploadProgressHandler },
@@ -492,6 +554,12 @@ export function postSignalAutoAggregate(signalId: string) {
   return eeaFetch<SignalDetail>(`/signals/${encodeURIComponent(signalId)}/auto-aggregate`, {
     method: 'POST',
   })
+}
+
+export function fetchThemeAggregatePreview(signalId: string) {
+  return eeaFetch<ThemeAggregatePreview>(
+    `/signals/${encodeURIComponent(signalId)}/theme-aggregate-preview`,
+  )
 }
 
 export function recordVisit(page?: string) {

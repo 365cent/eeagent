@@ -1,0 +1,69 @@
+@startuml EEA_Functional_Blocks
+' UML Component — 功能框图（图1）
+skinparam shadowing false
+skinparam defaultFontName "PingFang SC"
+skinparam packageStyle rectangle
+skinparam componentStyle rectangle
+skinparam linetype ortho
+top to bottom direction
+
+package "前端工作面 <<UI>>" as UI {
+  component "工作台总览" as P0
+  component "信号采集·证据库" as P1
+  component "标签与主题归总" as P2
+  component "技术全景图" as P3
+  component "链路追溯验收" as P4
+  component "战略四步漏斗" as P5
+  component "推导流水线" as P6
+  component "EEA Agent 助手" as PA
+}
+
+package "应用层 eea-api <<API>>" as API {
+  component "采集与存证" as A1
+  component "标签与纠偏" as A2
+  component "主题归集与指标" as A3
+  component "需求点与映射" as A4
+  component "落脚点与标准" as A5
+  component "战略研判与版本" as A6
+  component "追溯链读取" as A7
+  component "总览计数" as A8
+  component "Agent 会话与变更单" as A9
+}
+
+package "支撑服务 <<Service>>" as SVC {
+  component "eea-doc-ingest" as S1
+  component "eea-agent" as S2
+  component "分词与频次" as S3
+  component "检索 / RAG" as S4
+}
+
+database "PostgreSQL" as D1
+storage "对象存储" as D2
+database "向量索引" as D3
+
+P0 --> A8 : REST
+P1 --> A1
+P2 --> A2
+P2 --> A3
+P3 --> A4
+P3 --> A5
+P4 --> A7
+P5 --> A6
+P6 --> A3
+P6 --> A4
+PA --> A9
+
+A1 --> S1
+A3 --> S3
+A7 --> S4
+A9 --> S2
+
+A1 --> D1
+A1 --> D2
+S1 --> D2
+S4 --> D3
+A5 --> D1
+A6 --> D1
+A9 --> D1
+
+@enduml

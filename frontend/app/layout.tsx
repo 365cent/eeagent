@@ -1,8 +1,6 @@
 import { Analytics } from '@vercel/analytics/next'
 import { AntdRegistry } from '@ant-design/nextjs-registry'
 import type { Metadata, Viewport } from 'next'
-import { Suspense } from 'react'
-import { AppRouteSkeleton } from '@/components/app-route-skeleton'
 import 'antd/dist/reset.css'
 import './globals.css'
 import './dashboard.css'
@@ -48,11 +46,7 @@ export default function RootLayout({
   return (
     <html lang="zh-CN">
       <body className="antialiased" suppressHydrationWarning>
-        <AntdRegistry>
-          <Suspense fallback={<AppRouteSkeleton />}>
-            {children}
-          </Suspense>
-        </AntdRegistry>
+        <AntdRegistry>{children}</AntdRegistry>
         {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>

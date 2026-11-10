@@ -12,5 +12,7 @@
   "headless": false,
   "page_ready_timeout_sec": 25,
   "interactive_timeout_sec": 180,
-  "min_text_chars": 10
+  "min_text_chars": 10,
+  "capture_archive": "extension",
+  "singlefile_extension_path": ""
 }

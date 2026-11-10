@@ -22,6 +22,15 @@ _STAGE_KEYWORDS: dict[str, tuple[str, ...]] = {
     "regulation_standard": ("标准", "法规", "规制"),
 }
 
+# REQ-TAG-04 style keyword rules over signal_type ref codes.
+_SIGNAL_TYPE_KEYWORDS: dict[str, tuple[str, ...]] = {
+    "strategy": ("战略", "并购", "投融资", "生态合作", "布局"),
+    "technology": ("技术", "专利", "研发", "架构", "芯片", "efuse", "域控"),
+    "talent": ("人才", "招聘", "团队", "组织架构"),
+    "capital": ("融资", "资本", "估值", "投资", "基金"),
+    "standard": ("标准", "法规", "规范", "认证", "国标"),
+}
+
 
 def judge_stage(title: str, snapshot_text: str) -> str | None:
     """Initial-judge the value chain stage from title + snapshot (REQ-TAG-04).
@@ -39,11 +48,36 @@ def judge_stage(title: str, snapshot_text: str) -> str | None:
     return best
 
 
+def judge_signal_type(title: str, snapshot_text: str) -> str | None:
+    """Initial-judge signal type from title + snapshot keyword hits."""
+    text = f"{title}\n{snapshot_text}".lower()
+    best: str | None = None
+    best_score = 0
+    for signal_type in codes("signal_type"):
+        score = sum(text.count(kw.lower()) for kw in _SIGNAL_TYPE_KEYWORDS.get(signal_type, ()))
+        if score > best_score:
+            best, best_score = signal_type, score
+    return best
+
+
 def _tags_match(suggested: str, theme_tag: str) -> bool:
     """Exact or containment match. jieba splits compound tags (智能配电 →
     智能/配电), so a suggested token matches the theme's compound tag — and
     vice versa — by containment."""
     return suggested == theme_tag or suggested in theme_tag or theme_tag in suggested
+
+
+def rank_theme_overlaps(
+    theme_tags: dict[uuid.UUID, set[str]], suggested_tags: set[str]
+) -> list[tuple[uuid.UUID, int]]:
+    if not suggested_tags:
+        return []
+    overlaps: dict[uuid.UUID, int] = {}
+    for theme_id, tags in theme_tags.items():
+        matched = sum(1 for s in suggested_tags if any(_tags_match(s, t) for t in tags))
+        if matched:
+            overlaps[theme_id] = matched
+    return sorted(overlaps.items(), key=lambda item: (-item[1], str(item[0])))
 
 
 def select_best_theme(
@@ -56,17 +90,13 @@ def select_best_theme(
     """
     if not suggested_tags:
         return None, "信号没有任何技术方向标签，无法按标签归集"
-    overlaps: dict[uuid.UUID, int] = {}
-    for theme_id, tags in theme_tags.items():
-        matched = sum(1 for s in suggested_tags if any(_tags_match(s, t) for t in tags))
-        if matched:
-            overlaps[theme_id] = matched
-    if not overlaps:
+    ranked = rank_theme_overlaps(theme_tags, suggested_tags)
+    if not ranked:
         return None, "没有任何主题与该信号的技术方向标签存在重合"
-    top = max(overlaps.values())
+    top = ranked[0][1]
     if top < 2:
         return None, f"与最佳主题仅重合 {top} 个标签（需 ≥2），不自动归集"
-    winners = [tid for tid, n in overlaps.items() if n == top]
+    winners = [tid for tid, n in ranked if n == top]
     if len(winners) > 1:
         return None, f"{len(winners)} 个主题以 {top} 个标签并列最高，无唯一匹配"
     return winners[0], f"以 {top} 个标签重合唯一匹配"

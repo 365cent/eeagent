@@ -2,7 +2,7 @@
 
 EEA is a foresight / signal intelligence platform: FastAPI backend, Next.js UI, and an optional Windows capture client for public-web ingestion.
 
-From the **repository root**, use three terminals when developing locally: start the **backend** first, then the **frontend**; run the **capture client** when you need uploads from the public web.
+From the **repository root**, use **two terminals** for daily dev: **backend** (API + capture worker), then **frontend**. Run the **capture client** when you need uploads from the public web.
 
 Project status and implementation order: [project TODO](TODO.md), [source and requirement index](docs/PROJECT-INDEX.md), [requirement traceability](docs/REQUIREMENTS-TRACEABILITY.md). The development host is macOS; use the [Mac setup and checks](docs/DEVELOPMENT-MAC.md). The PowerShell bootstrap and commands below are Windows development instructions; they are not the Linux production deployment procedure. See [Linux deployment work](deploy/TODO.md).
 
@@ -21,7 +21,7 @@ uv run python scripts/bootstrap.py
 
 | Mode | Command | Stop |
 |------|---------|------|
-| **Foreground** (logs in terminal) | `uv run python scripts/dev.py` | **Ctrl+C** |
+| **Foreground** (API + capture worker, logs in terminal) | `uv run python scripts/dev.py` | **Ctrl+C** |
 | **Background** (daemon) | `uv run python scripts/start_api.py` | `uv run python scripts/stop_api.py` |
 
 - API: **http://127.0.0.1:8000** (Swagger: `/docs`, health: `/healthz`)

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   AlertOutlined,
   ApartmentOutlined,
@@ -26,6 +26,7 @@ import {
   FilterOutlined,
   FundProjectionScreenOutlined,
   HomeOutlined,
+  InboxOutlined,
   LinkOutlined,
   PictureOutlined,
   QuestionCircleOutlined,
@@ -52,7 +53,7 @@ import { ProCard } from '@ant-design/pro-components'
 import type { ColumnsType } from 'antd/es/table'
 import { PlatformLayout } from '@/components/layout/platform-layout'
 import { PageHeader } from '@/components/shared/page-header'
-import { mainMenuItems } from '@/config/menu'
+import { isMainMenuRoute } from '@/config/menu'
 import { utilityPages } from '@/config/utility-pages'
 import { ALL_VIEW_KEYS } from '@/config/routes'
 import {
@@ -67,16 +68,34 @@ import {
   useRefCodeMaps,
   eeaQueryKeys,
 } from '@/hooks/use-eea-queries'
-import { overviewToTraceMetrics, formatApiDate } from '@/lib/eea-mappers'
+import {
+  overviewToFunnelSteps,
+  overviewToTraceMetrics,
+  strategyFunnelToFunnelSteps,
+  formatApiDate,
+} from '@/lib/eea-mappers'
+import { StrategyFunnelCard } from '@/components/overview/strategy-funnel-card'
+import { PanoramaImportBanner } from '@/components/import/panorama-import-banner'
+import { NotificationsCenter } from '@/components/notifications/notifications-center'
+import { usePlatformNotifications } from '@/hooks/use-platform-notifications'
 import { setLivePlatformSearchData } from '@/lib/live-platform-data'
 import { resetPlatformSearchIndex } from '@/lib/platform-search-index'
 import { isUuid } from '@/lib/api/api-errors'
 import { EeaApiError, signalArchiveUrl, documentCanonicalUrl } from '@/lib/api/client'
-import { fetchLandingPoints } from '@/lib/api/eea-api'
+import { DocumentDeckPreview } from '@/components/evidence/document-deck-preview'
+import { DocumentPdfViewer } from '@/components/evidence/document-pdf-viewer'
+import { documentPdfPreviewSupported, documentPptxDeckPreviewSupported } from '@/lib/document-preview'
+import { fetchDocument, fetchLandingPoints, patchSignal } from '@/lib/api/eea-api'
 import { buildAppPath } from '@/lib/navigation'
-import { sourceExcerptSnippet } from '@/lib/evidence/audio-overview-segments'
+import { excerptLooksLikeChrome, sourceExcerptSnippet } from '@/lib/evidence/audio-overview-segments'
 import type { AppRouteOptions, NavigateFn, Signal } from '@/types/platform'
 import type { StudioInfographicPayload, StudioMindmapPayload } from '@/lib/api/types'
+import {
+  clearStudioKind,
+  loadStudioCache,
+  persistStudioKind,
+  type StudioCacheEntry,
+} from '@/lib/studio-cache'
 import type { MenuProps } from 'antd'
 import { EvidenceAssistantChat } from '@/components/evidence/evidence-assistant-chat'
 import { EvidenceAudioTransport } from '@/components/evidence/evidence-audio-transport'
@@ -93,10 +112,16 @@ import { FunctionDerivationEditor } from '@/components/technology/function-deriv
 import { LandingPointWorkbench } from '@/components/technology/landing-point-workbench'
 import { StrategyFunnelWorkbench } from '@/components/strategy/strategy-funnel-workbench'
 import { PlatformEmptyState, signalsTableLocale } from '@/components/shared/empty-state'
+import { useSignalTablePagination } from '@/lib/signal-table-pagination'
+import { QuerySurface } from '@/components/shared/query-surface'
+import { useEeaDataSync } from '@/hooks/use-eea-data-sync'
+import { useShellColorScheme } from '@/hooks/use-shell-color-scheme'
+import { querySurfaceState } from '@/hooks/use-query-surface'
 import { NewSignalImportPage } from '@/components/import/new-signal-import'
 import { WorkflowStudio } from '@/components/workflow-studio'
 import { PlatformSettingsPage } from '@/views/utility/platform-settings-page'
 import { ProfilePage } from '@/views/utility/profile-page'
+import { ArchivedSignalsView } from '@/views/evidence/archived-signals-view'
 
 const { Text, Title, Paragraph } = Typography
 
@@ -165,7 +190,8 @@ export function SignalRowActions({
   onNavigate: (target: string) => void
   onQuickPreview?: (signal: Signal) => void
 }) {
-  const { message: messageApi } = AntApp.useApp()
+  const { message: messageApi, modal: modalApi } = AntApp.useApp()
+  const queryClient = useQueryClient()
 
   const items: MenuProps['items'] = [
     { key: 'view', label: '查看证据', icon: <FileSearchOutlined /> },
@@ -207,7 +233,25 @@ export function SignalRowActions({
         break
       }
       case 'archive':
-        messageApi.warning('当前没有可用的信号归档接口，尚未修改数据。')
+        modalApi.confirm({
+          title: '归档停用该信号？',
+          content: '信号将从主证据库移出并写入数据库（evidence_status=archived）。可在「归档证据库」恢复或永久删除。',
+          okText: '归档',
+          cancelText: '取消',
+          onOk: async () => {
+            try {
+              await patchSignal(record.key, { evidence_status_code: 'archived' })
+              messageApi.success('已归档停用，可在「归档证据库」管理')
+              await Promise.all([
+                queryClient.invalidateQueries({ queryKey: ['eea', 'signals'] }),
+                queryClient.invalidateQueries({ queryKey: eeaQueryKeys.overview }),
+              ])
+            } catch (err) {
+              const detail = err instanceof EeaApiError ? err.message : String(err)
+              messageApi.error(detail || '归档失败')
+            }
+          },
+        })
         break
       default:
         break
@@ -243,7 +287,16 @@ function buildSignalTableColumns({
         <button type="button" className="signal-title signal-title-button" onClick={() => onTitleClick(record)}>
           <span className="signal-dot" />
           <span>
-            <Text strong>{value}</Text>
+            <Space size={6} wrap>
+              <Text strong>{value}</Text>
+              {record.urlDuplicateRenamed ? (
+                <Tooltip title="与已有证据同源；上传已允许，标题已自动加后缀区分">
+                  <Tag color="gold" style={{ margin: 0 }}>
+                    重复来源
+                  </Tag>
+                </Tooltip>
+              ) : null}
+            </Space>
             <span className="signal-meta">{record.publisher} · {record.channel}</span>
           </span>
         </button>
@@ -296,9 +349,24 @@ export function SignalsView({
     onTitleClick: onPreviewSignal,
     onQuickPreview: onPreviewSignal,
   })
+  const signalPagination = useSignalTablePagination()
   return (
     <>
-      <PageHeader eyebrow="01 · 原始信息采集" title="信号与证据库" description="收集产业信号，留存可追溯证据，并通过封闭词表完成机器预标。" action={<Button type="primary" icon={<PlusOutlined />} onClick={() => onNavigate('newSignal')}>粘贴 URL 抓取</Button>} />
+      <PageHeader
+        eyebrow="01 · 原始信息采集"
+        title="信号与证据库"
+        description="收集产业信号，留存可追溯证据，并通过封闭词表完成机器预标。"
+        action={
+          <Space>
+            <Button icon={<InboxOutlined />} onClick={() => onNavigate('archived')}>
+              归档证据库
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => onNavigate('newSignal')}>
+              新增信号
+            </Button>
+          </Space>
+        }
+      />
       {themeId ? <Alert type="info" showIcon style={{ marginBottom: 16 }} title="正在查看该主题下的信号" action={<Button size="small" onClick={onClearTheme}>清除主题筛选</Button>} /> : null}
       {overviewQuery.isError ? <QueryFailure message="信号统计加载失败，请检查服务连接后重试。" onRetry={() => { void overviewQuery.refetch() }} /> : null}
       <Row gutter={16} className="summary-row">
@@ -313,7 +381,7 @@ export function SignalsView({
         ) : !refCodeQuery.isSuccess || isLoading ? (
           <Spin />
         ) : (
-          <Table rowKey="key" columns={columns} dataSource={signalRows} pagination={{ pageSize: 6 }} scroll={{ x: 960 }} locale={signalsTableLocale(() => onNavigate('newSignal'))} />
+          <Table rowKey="key" columns={columns} dataSource={signalRows} pagination={signalPagination} scroll={{ x: 960 }} locale={signalsTableLocale(() => onNavigate('newSignal'))} />
         )}
       </Card>
     </>
@@ -701,43 +769,100 @@ function DeductionChainWorkspace({ onNavigate, initialLandingPointId }: { onNavi
   )
 }
 
-type EvidenceStageView = 'archive' | 'markdown' | 'assistant' | 'mindmap' | 'report' | 'infographic'
-
-type StudioCacheEntry = {
-  mindmap?: StudioMindmapPayload
-  report?: string
-  infographic?: StudioInfographicPayload
-}
-
-const CORE_STAGE_VIEWS: EvidenceStageView[] = ['archive', 'markdown', 'assistant']
+type EvidenceStageView =
+  | 'archive'
+  | 'deckPreview'
+  | 'documentPdf'
+  | 'markdown'
+  | 'assistant'
+  | 'mindmap'
+  | 'report'
+  | 'infographic'
 
 function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: string) => void; signalId: string }) {
   const [sourceOpen, setSourceOpen] = useState(true)
   const [previewOpen, setPreviewOpen] = useState(true)
   const [stageView, setStageView] = useState<EvidenceStageView>('markdown')
   const [bodyText, setBodyText] = useState<string | null>(null)
+  const [canonicalMd, setCanonicalMd] = useState<string | null>(null)
+  const [archiveFrameLoaded, setArchiveFrameLoaded] = useState(false)
   const [figureByIndex, setFigureByIndex] = useState<Record<number, string>>({})
   const [studioCacheBySignal, setStudioCacheBySignal] = useState<Record<string, StudioCacheEntry>>({})
   const markdownArticleRef = useRef<HTMLElement>(null)
   const { signal: liveSignal, detail, isLoading, isError } = useSignalDetail(signalId)
   const { maps } = useRefCodeMaps()
   const apiId = detail?.id ?? (isUuid(signalId) ? signalId : null)
+  const documentId = detail?.document_id ?? null
+  const documentQuery = useQuery({
+    queryKey: ['eea', 'document', documentId ?? 'none'] as const,
+    queryFn: () => fetchDocument(documentId!),
+    enabled: Boolean(documentId),
+    staleTime: 60_000,
+  })
+  const documentMeta = documentQuery.data
+  const showDeckTab = Boolean(
+    documentId &&
+      documentMeta &&
+      documentPptxDeckPreviewSupported(documentMeta.filename, documentMeta.mime),
+  )
+  const showPdfTab = Boolean(
+    documentId &&
+      documentMeta &&
+      documentPdfPreviewSupported(documentMeta.filename, documentMeta.mime),
+  )
+  const documentPreviewPending = Boolean(documentId && (documentQuery.isLoading || documentQuery.isFetching))
   const signal = liveSignal
   const statusTag = signal?.status === '已留存' ? 'green' : signal?.status === '待人工复核' ? 'warning' : 'default'
   const hasArchive = Boolean(detail?.snapshot_html_object_key)
-  const isDocumentSource = Boolean(detail?.document_id)
+  const isDocumentSource = Boolean(documentId)
+  const coreStageViews = useMemo((): EvidenceStageView[] => {
+    if (showDeckTab) return ['deckPreview', 'markdown', 'assistant']
+    if (showPdfTab) return ['documentPdf', 'markdown', 'assistant']
+    if (hasArchive) return ['archive', 'markdown', 'assistant']
+    return ['markdown', 'assistant']
+  }, [showDeckTab, showPdfTab, hasArchive])
   const linkedDemands = detail?.linked_demand_points ?? []
-  const hasBody = Boolean(detail?.body_object_key || bodyText || detail?.excerpt)
-  const markdownSource = bodyText ?? detail?.excerpt ?? signal?.title ?? ''
+  const hasBody = Boolean(
+    detail?.body_object_key || bodyText || detail?.excerpt || (isDocumentSource && canonicalMd),
+  )
+  const markdownSource =
+    (isDocumentSource && canonicalMd) || bodyText || detail?.excerpt || signal?.title || ''
   const studioCacheKey = apiId ?? signal?.key ?? signalId
   const studioCache = studioCacheBySignal[studioCacheKey] ?? {}
 
+  useEffect(() => {
+    if (!studioCacheKey || !isUuid(studioCacheKey)) return
+    const persisted = loadStudioCache(studioCacheKey)
+    if (!persisted.mindmap && !persisted.report && !persisted.infographic) return
+    setStudioCacheBySignal((prev) => ({
+      ...prev,
+      [studioCacheKey]: { ...persisted, ...prev[studioCacheKey] },
+    }))
+  }, [studioCacheKey])
+
   const rememberStudioResult = useCallback(
     (kind: keyof StudioCacheEntry, payload: StudioCacheEntry[keyof StudioCacheEntry]) => {
+      if (isUuid(studioCacheKey)) {
+        persistStudioKind(studioCacheKey, kind, payload as StudioCacheEntry[typeof kind])
+      }
       setStudioCacheBySignal((prev) => ({
         ...prev,
         [studioCacheKey]: { ...prev[studioCacheKey], [kind]: payload },
       }))
+    },
+    [studioCacheKey],
+  )
+
+  const forgetStudioResult = useCallback(
+    (kind: keyof StudioCacheEntry) => {
+      if (isUuid(studioCacheKey)) {
+        clearStudioKind(studioCacheKey, kind)
+      }
+      setStudioCacheBySignal((prev) => {
+        const entry = { ...prev[studioCacheKey] }
+        delete entry[kind]
+        return { ...prev, [studioCacheKey]: entry }
+      })
     },
     [studioCacheKey],
   )
@@ -749,15 +874,70 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
   }, [signal?.title])
 
   const sourceSummaryPlain = useMemo(() => {
-    const raw = (bodyText ?? detail?.excerpt ?? '').trim()
+    const stored = detail?.excerpt?.trim()
+    if (stored && !excerptLooksLikeChrome(stored)) {
+      return stored.length <= 320 ? stored : `${stored.slice(0, 319)}…`
+    }
+    const raw = (bodyText ?? stored ?? '').trim()
     if (!raw) return null
-    return sourceExcerptSnippet(raw, displayTitle, 220)
+    return sourceExcerptSnippet(raw, displayTitle, 320)
   }, [bodyText, detail?.excerpt, displayTitle])
 
+  const evidenceStageAutoKey = useMemo(
+    () =>
+      [
+        signalId,
+        showDeckTab ? '1' : '0',
+        showPdfTab ? '1' : '0',
+        hasArchive ? '1' : '0',
+        hasBody ? '1' : '0',
+        documentPreviewPending ? '1' : '0',
+        detail?.body_object_key ?? '',
+        detail?.excerpt ?? '',
+      ].join('\0'),
+    [
+      signalId,
+      showDeckTab,
+      showPdfTab,
+      hasArchive,
+      hasBody,
+      documentPreviewPending,
+      detail?.body_object_key,
+      detail?.excerpt,
+    ],
+  )
+
   useEffect(() => {
-    if (hasArchive) setStageView('archive')
+    if (documentPreviewPending) {
+      if (hasBody) setStageView('markdown')
+      return
+    }
+    if (showDeckTab) setStageView('deckPreview')
+    else if (showPdfTab) setStageView('documentPdf')
+    else if (hasArchive) setStageView('archive')
     else if (detail?.body_object_key || detail?.excerpt) setStageView('markdown')
-  }, [signalId, hasArchive, detail?.body_object_key, detail?.excerpt])
+    else setStageView('assistant')
+  }, [evidenceStageAutoKey])
+
+  useEffect(() => {
+    if (!detail?.document_id) {
+      setCanonicalMd(null)
+      return
+    }
+    let cancelled = false
+    import('@/lib/api/eea-api').then(({ fetchDocumentCanonicalMd }) =>
+      fetchDocumentCanonicalMd(detail.document_id!)
+        .then((text) => {
+          if (!cancelled) setCanonicalMd(text)
+        })
+        .catch(() => {
+          if (!cancelled) setCanonicalMd(null)
+        }),
+    )
+    return () => {
+      cancelled = true
+    }
+  }, [detail?.document_id])
 
   useEffect(() => {
     if (!detail?.body_object_key || !apiId) {
@@ -780,7 +960,11 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
   }, [detail?.body_object_key, apiId])
 
   useEffect(() => {
-    if (!hasArchive || !apiId) {
+    setArchiveFrameLoaded(false)
+  }, [apiId, stageView])
+
+  useEffect(() => {
+    if (!hasBody || !apiId) {
       setFigureByIndex({})
       return
     }
@@ -797,7 +981,18 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
     return () => {
       cancelled = true
     }
-  }, [hasArchive, apiId, signalId])
+  }, [hasBody, apiId, signalId])
+
+  const stageTabOptions: { label: string; value: EvidenceStageView; disabled?: boolean }[] = useMemo(
+    () => [
+      ...(showDeckTab ? [{ label: '幻灯片', value: 'deckPreview' as const }] : []),
+      ...(showPdfTab ? [{ label: 'PDF 预览', value: 'documentPdf' as const }] : []),
+      ...(!showDeckTab && !showPdfTab ? [{ label: '来源留存', value: 'archive' as const, disabled: !hasArchive }] : []),
+      { label: '解析快照', value: 'markdown', disabled: !hasBody },
+      { label: '研究助手', value: 'assistant' },
+    ],
+    [showDeckTab, showPdfTab, hasArchive, hasBody],
+  )
 
   if (isLoading && !signal) {
     return (
@@ -829,12 +1024,6 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
     previewOpen ? 'preview-is-open' : 'preview-is-collapsed',
   ].join(' ')
 
-  const stageTabOptions: { label: string; value: EvidenceStageView; disabled?: boolean }[] = [
-    { label: '来源留存', value: 'archive', disabled: !hasArchive },
-    { label: '解析快照', value: 'markdown', disabled: !hasBody },
-    { label: '研究助手', value: 'assistant' },
-  ]
-
   const onStageTabChange = (value: EvidenceStageView) => {
     if (value === 'assistant') {
       setPreviewOpen(true)
@@ -842,7 +1031,7 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
     setStageView(value)
   }
 
-  const segmentedValue = CORE_STAGE_VIEWS.includes(stageView) ? stageView : undefined
+  const segmentedValue = coreStageViews.includes(stageView) ? stageView : undefined
 
   return (
     <div className={workspaceLayoutClass}>
@@ -921,9 +1110,14 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
                 signalId={apiId}
                 stageCode={detail?.value_chain_stage_code ?? null}
                 typeCode={detail?.signal_type_code ?? null}
+                updatedAt={detail?.updated_at ?? null}
               />
               <Divider />
-              <SignalTagsEditor signalId={apiId} tags={signal.tags} />
+              <SignalTagsEditor
+                signalId={apiId}
+                tags={signal.tags}
+                updatedAt={detail?.updated_at ?? null}
+              />
               <Divider />
               <SignalCorrectionAudit signalId={apiId} />
               <Divider />
@@ -932,6 +1126,7 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
                 themeId={detail?.tech_theme_id ?? detail?.theme?.id ?? null}
                 themeName={detail?.theme?.working_name ?? null}
                 isDocumentSource={isDocumentSource}
+                updatedAt={detail?.updated_at ?? null}
               />
             </>
           ) : null}
@@ -995,15 +1190,37 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
           <EvidenceAudioTransport markdown={markdownSource} articleRef={markdownArticleRef} />
         ) : null}
         <div className="evidence-stage-panel">
+          <div className={`evidence-stage-tab-pane${stageView === 'deckPreview' ? ' is-active' : ''}`}>
+            {documentId && showDeckTab ? (
+              <DocumentDeckPreview documentId={documentId} />
+            ) : (
+              <PlatformEmptyState title="无法预览幻灯片" description="该信号未关联 PPTX 文档。" />
+            )}
+          </div>
+          <div className={`evidence-stage-tab-pane${stageView === 'documentPdf' ? ' is-active' : ''}`}>
+            {documentId && showPdfTab ? (
+              <DocumentPdfViewer documentId={documentId} filename={documentQuery.data?.filename} />
+            ) : (
+              <PlatformEmptyState title="无法预览 PDF" description="该信号未关联可预览的 Office/PDF 文档。" />
+            )}
+          </div>
           <div className={`evidence-stage-tab-pane${stageView === 'archive' ? ' is-active' : ''}`}>
             {hasArchive && apiId ? (
-              <iframe
-                title="HTML 归档回放"
-                className="evidence-archive-frame-full"
-                sandbox=""
-                referrerPolicy="no-referrer"
-                src={signalArchiveUrl(apiId)}
-              />
+              <>
+                {!archiveFrameLoaded ? (
+                  <div className="evidence-archive-frame-loading">
+                    <Spin description="加载归档网页…" />
+                  </div>
+                ) : null}
+                <iframe
+                  title="HTML 归档回放"
+                  className="evidence-archive-frame-full"
+                  sandbox="allow-same-origin"
+                  referrerPolicy="no-referrer"
+                  src={signalArchiveUrl(apiId)}
+                  onLoad={() => setArchiveFrameLoaded(true)}
+                />
+              </>
             ) : (
               <PlatformEmptyState title="暂无 HTML 归档" description="该信号未留存 SingleFile 快照，可查看解析快照或继续用研究助手提问。" />
             )}
@@ -1019,24 +1236,30 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
             <EvidenceStudioPane
               signalId={apiId}
               kind="mindmap"
+              fetchEnabled={stageView === 'mindmap'}
               cached={studioCache.mindmap}
               onLoaded={(payload) => rememberStudioResult('mindmap', payload as StudioMindmapPayload)}
+              onInvalidate={() => forgetStudioResult('mindmap')}
             />
           </div>
           <div className={`evidence-stage-tab-pane${stageView === 'report' ? ' is-active' : ''}`}>
             <EvidenceStudioPane
               signalId={apiId}
               kind="report"
+              fetchEnabled={stageView === 'report'}
               cached={studioCache.report}
               onLoaded={(payload) => rememberStudioResult('report', payload as string)}
+              onInvalidate={() => forgetStudioResult('report')}
             />
           </div>
           <div className={`evidence-stage-tab-pane${stageView === 'infographic' ? ' is-active' : ''}`}>
             <EvidenceStudioPane
               signalId={apiId}
               kind="infographic"
+              fetchEnabled={stageView === 'infographic'}
               cached={studioCache.infographic}
               onLoaded={(payload) => rememberStudioResult('infographic', payload as StudioInfographicPayload)}
+              onInvalidate={() => forgetStudioResult('infographic')}
             />
           </div>
           <div
@@ -1156,7 +1379,15 @@ export function UtilityView({ page, onNavigate, signalId }: { page: keyof typeof
     )
   }
   if (page === 'settings') return <PlatformSettingsPage config={config} />
-  if (isReport || page === 'notifications' || page === 'search') {
+  if (page === 'notifications') {
+    return (
+      <>
+        <PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} />
+        <NotificationsCenter />
+      </>
+    )
+  }
+  if (isReport || page === 'search') {
     return (
       <>
         <PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} />
@@ -1174,7 +1405,7 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
   const { message: messageApi } = AntApp.useApp()
   const [collapsed, setCollapsed] = useState(() => initialView === 'singal')
   const [isMobile, setIsMobile] = useState(false)
-  const [layoutReady, setLayoutReady] = useState(false)
+  const [layoutReady, setLayoutReady] = useState(true)
   const [activeMenu, setActiveMenu] = useState(initialView)
   const [activeSignalId, setActiveSignalId] = useState(signalId)
   const [signalPreview, setSignalPreview] = useState<Signal | null>(null)
@@ -1184,27 +1415,44 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
   const routeKeys = useMemo(() => new Set([...ALL_VIEW_KEYS, 'overview']), [])
   const overviewQuery = useOverviewStats()
   const overview = overviewQuery.data
+  const { showOverviewBanner } = usePlatformNotifications()
   const refCodesQuery = useRefCodeMaps()
+  const signalsQuery = useSignalsListFiltered({ query, stageChip: stage })
   const {
     rows: cachedSignals,
-    isLoading: signalsQueryLoading,
+    isFetching: signalsFetching,
     isError: signalsQueryError,
     refetch: refetchSignals,
-  } = useSignalsListFiltered({ query, stageChip: stage })
+  } = signalsQuery
   const themeQuery = useThemeRows()
   const themeRows = themeQuery.rows
-  const signalsLoading = signalsQueryLoading || (!refCodesQuery.isSuccess && !refCodesQuery.isError)
+  const refCodesBootstrapping = !refCodesQuery.isSuccess && !refCodesQuery.isError
   const signalsError = signalsQueryError || refCodesQuery.isError
-  const themesLoading = themeQuery.isLoading || (!refCodesQuery.isSuccess && !refCodesQuery.isError)
   const themesError = themeQuery.isError || refCodesQuery.isError
+  const overviewSurface = querySurfaceState(overviewQuery)
+  const themeSurface = querySurfaceState({
+    ...themeQuery,
+    isPending: themeQuery.isPending || refCodesBootstrapping,
+    isFetching: themeQuery.isFetching || refCodesQuery.isFetching,
+  })
+  const funnelSurface = querySurfaceState(overviewQuery)
+  const signalsTableLoading = refCodesBootstrapping || signalsFetching
   const { rows: demandRows } = useDemandRows()
   const { rows: landingRows } = useLandingRows()
+
+  const funnelSteps = useMemo(() => {
+    if (!overviewQuery.isSuccess || !overview) return []
+    if (overview.strategy_funnel) return strategyFunnelToFunnelSteps(overview.strategy_funnel)
+    return overviewToFunnelSteps(overview)
+  }, [overview, overviewQuery.isSuccess])
 
   const traceMetrics = useMemo(
     () => (overviewQuery.isSuccess && overview ? overviewToTraceMetrics(overview) : []),
     [overview, overviewQuery.isSuccess],
   )
   const overviewThemes = themeRows
+
+  useEeaDataSync(activeMenu)
 
   useEffect(() => {
     setLivePlatformSearchData({
@@ -1219,7 +1467,8 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
     const mq = window.matchMedia('(max-width: 760px)')
     setIsMobile(mq.matches)
     const requestedView = initialView
-    const nextView = requestedView in utilityPages || mainMenuItems?.some((item) => item && 'key' in item && item.key === requestedView) ? requestedView : 'overview'
+    const nextView =
+      requestedView in utilityPages || isMainMenuRoute(requestedView) ? requestedView : 'overview'
     setActiveMenu(nextView)
     setCollapsed(mq.matches || nextView === 'singal')
     setLayoutReady(true)
@@ -1288,7 +1537,8 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
     const trend = params.get('trend')
     if (trend) setQuery(`第 ${trend.replace(/^w/, '')} 周`)
   }, [activeMenu])
-  const [isDark, setIsDark] = useState(false)
+  const { scheme: colorScheme, toggleExplicit: toggleColorScheme } = useShellColorScheme()
+  const overviewSignalPagination = useSignalTablePagination()
 
   const filteredSignals = cachedSignals
 
@@ -1297,10 +1547,11 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
     onTitleClick: (record) => navigate(`singal/${record.key}`),
   })
 
-  const primaryMenuSelectedKeys = useMemo(
-    () => (mainMenuItems?.some((item) => item && 'key' in item && item.key === activeMenu) ? [activeMenu] : []),
-    [activeMenu],
-  )
+  const primaryMenuSelectedKeys = useMemo(() => {
+    if (isMainMenuRoute(activeMenu)) return [activeMenu]
+    if (activeMenu === 'archived') return ['signals']
+    return []
+  }, [activeMenu])
 
   const siderUtilitySelectedKeys = useMemo(() => {
     if (activeMenu === 'knowledge') return ['knowledge']
@@ -1322,17 +1573,18 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
         activeMenu={activeMenu}
         collapsed={collapsed}
         isMobile={isMobile}
-        isDark={isDark}
+        colorScheme={colorScheme}
         layoutReady={layoutReady}
         primaryMenuSelectedKeys={primaryMenuSelectedKeys}
         siderUtilitySelectedKeys={siderUtilitySelectedKeys}
         pageTitleOverride={evidencePageTitle}
         onCollapse={setCollapsed}
         onNavigate={navigate}
-        onToggleDark={() => setIsDark((value) => !value)}
+        onToggleColorScheme={toggleColorScheme}
       >
             {activeMenu !== 'overview' ? (
             <div className={isEvidenceStudio ? 'content-wrap content-wrap-evidence-studio' : 'content-wrap'}>
+              {activeMenu === 'archived' && <ArchivedSignalsView onNavigate={navigate} />}
               {activeMenu === 'signals' && (
                 <SignalsView
                   query={query}
@@ -1387,89 +1639,149 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
                   </Card>
                 </Col>
               </Row>
-              {overviewQuery.isSuccess && overview?.weekly_new ? (
-                <Card
-                  className="panel-card"
-                  title="本周新增"
-                  extra={<Text type="secondary">UTC {formatApiDate(overview.weekly_window_start_utc)} 至 {formatApiDate(overview.as_of_utc)}</Text>}
-                  style={{ marginTop: 16 }}
-                >
-                  <Row gutter={[16, 16]}>
-                    {[
-                      ['信号', overview.weekly_new.signals],
-                      ['主题', overview.weekly_new.tech_themes],
-                      ['需求点', overview.weekly_new.demand_points],
-                      ['车辆功能', overview.weekly_new.vehicle_functions],
-                      ['技术落脚点', overview.weekly_new.landing_points],
-                      ['战略版本', overview.weekly_new.strategic_assessments],
-                      ['文档', overview.weekly_new.documents],
-                    ].map(([label, value]) => (
-                      <Col key={String(label)} xs={12} sm={8} xl={3}>
-                        <Statistic title={String(label)} value={Number(value)} />
-                      </Col>
-                    ))}
-                  </Row>
-                </Card>
+              {overviewQuery.isSuccess && showOverviewBanner && overview?.panorama_import ? (
+                <PanoramaImportBanner batch={overview.panorama_import} />
               ) : null}
               {overviewQuery.isSuccess && overview ? (
-                <Card className="panel-card" title="待处理与失败任务" style={{ marginTop: 16 }}>
-                  <Space wrap>
-                    <Tag color="orange">待复核信号：{overview.signals_pending_review}</Tag>
-                    <Tag color="orange">待复核需求：{overview.demand_points_pending_review ?? 0}</Tag>
-                    <Tag>采集任务进行中：{overview.capture_jobs_open ?? 0}</Tag>
-                    <Tag color={(overview.capture_jobs_failed ?? 0) > 0 ? 'red' : 'default'}>采集失败：{overview.capture_jobs_failed ?? 0}</Tag>
-                    <Tag color={(overview.signals_fetch_failed ?? 0) > 0 ? 'red' : 'default'}>抓取失败信号：{overview.signals_fetch_failed ?? 0}</Tag>
-                    <Tag color={(overview.documents_failed_ingest ?? 0) > 0 ? 'red' : 'default'}>文档解析失败：{overview.documents_failed_ingest ?? 0}</Tag>
-                  </Space>
+                <Card className="panel-card overview-workflow-rail" style={{ marginTop: 16 }}>
+                  <div className="overview-workflow-rail-inner">
+                    <div className="overview-workflow-rail-intro">
+                      <div className="trace-icon" aria-hidden>
+                        <BranchesOutlined />
+                      </div>
+                      <div>
+                        <Title level={5} style={{ margin: 0 }}>
+                          研究工作流
+                        </Title>
+                        <Text type="secondary">信号采集 → 主题归集 → 需求推导 → 战略研判</Text>
+                      </div>
+                    </div>
+                    <div className="overview-workflow-rail-nodes">
+                      {[
+                        { label: '信号', value: overview.signals },
+                        { label: '主题', value: overview.tech_themes },
+                        { label: '需求点', value: overview.demand_points },
+                        { label: '落脚点', value: overview.landing_points },
+                        { label: '战略池', value: overview.funnel_pool },
+                      ].map((node, index) => (
+                        <span key={node.label} className="overview-workflow-rail-node">
+                          {index > 0 ? <ArrowRightOutlined className="overview-workflow-rail-arrow" aria-hidden /> : null}
+                          <span>
+                            {node.label}
+                            <b>{node.value}</b>
+                          </span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
                 </Card>
               ) : null}
-              <Row gutter={[18, 18]} className="main-grid">
+              <Row gutter={[16, 16]} className="main-grid overview-workflow-grid" style={{ marginTop: 16 }} align="stretch">
                 <Col xs={24} lg={15}>
-                  <Card variant="borderless" className="panel-card" title={<div><Title level={4}>技术主题动态</Title><Text type="secondary">频次按未归档主题成员信号数；来源数按规范化 URL 去重，包含归档记录。</Text></div>} extra={<Button type="link" onClick={() => navigate('topics')}>查看全部 <ArrowRightOutlined /></Button>}>
+                  <Card
+                    variant="borderless"
+                    className="panel-card"
+                    title={(
+                      <div>
+                        <Title level={4}>技术主题动态</Title>
+                        <Text type="secondary">跨来源信号聚合与需求点演进；频次按未归档成员信号，来源含归档记录。</Text>
+                      </div>
+                    )}
+                    extra={<Button type="link" onClick={() => navigate('topics')}>查看全部 <ArrowRightOutlined /></Button>}
+                  >
                     {themesError ? (
                       <QueryFailure message="技术主题加载失败，请检查服务连接后重试。" onRetry={() => { void (refCodesQuery.isError ? refCodesQuery.refetch() : themeQuery.refetch()) }} />
-                    ) : themesLoading ? (
-                      <Spin />
-                    ) : overviewThemes.length ? (
-                      <div className="theme-list">
-                        {overviewThemes.map((theme) => (
-                          <div className="theme-row clickable-row" key={theme.id} role="button" tabIndex={0} onClick={() => navigate('topics')} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') navigate('topics') }}>
-                            <div className="theme-icon" style={{ background: `${theme.color}14`, color: theme.color }}><RadarChartOutlined /></div>
-                            <div className="theme-info"><div className="theme-name"><Text strong>{theme.name}</Text></div><Text type="secondary">{theme.count} 条信号 · {theme.sources} 个来源</Text></div>
-                            <ArrowRightOutlined className="row-arrow" />
-                          </div>
-                        ))}
-                      </div>
                     ) : (
-                      <PlatformEmptyState title="暂无技术主题" description="主题将在保存真实信号并完成人工归集后显示。" action={<Button type="link" onClick={() => navigate('topics')}>打开主题工作台</Button>} />
+                      <QuerySurface {...themeSurface} initial={<Spin />}>
+                        {overviewThemes.length ? (
+                          <div className="theme-list">
+                            {overviewThemes.map((theme) => (
+                              <div
+                                className="theme-row clickable-row"
+                                key={theme.id}
+                                role="button"
+                                tabIndex={0}
+                                onClick={() => navigate('topics')}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter' || event.key === ' ') navigate('topics')
+                                }}
+                              >
+                                <div className="theme-icon" style={{ background: `${theme.color}14`, color: theme.color }}>
+                                  <RadarChartOutlined />
+                                </div>
+                                <div className="theme-info">
+                                  <div className="theme-name">
+                                    <Text strong>{theme.name}</Text>
+                                    <Tag color={theme.progress > 75 ? 'blue' : theme.progress > 60 ? 'cyan' : 'orange'}>
+                                      {theme.progress > 75 ? '高热度' : '持续观察'}
+                                    </Tag>
+                                  </div>
+                                  <Text type="secondary">{theme.note}</Text>
+                                  <Progress percent={theme.progress} showInfo={false} strokeColor={theme.color} railColor="#eef2f6" size="small" />
+                                </div>
+                                <div className="theme-count">
+                                  <Text strong>{theme.count}</Text>
+                                  <Text type="secondary">信号</Text>
+                                  <Text className="source-count">{theme.sources} 来源</Text>
+                                </div>
+                                <ArrowRightOutlined className="row-arrow" />
+                              </div>
+                            ))}
+                          </div>
+                        ) : themeSurface.showInitial ? null : (
+                          <PlatformEmptyState
+                            title="暂无技术主题"
+                            description="主题将在保存真实信号并完成人工归集后显示。"
+                            action={<Button type="link" onClick={() => navigate('topics')}>打开主题工作台</Button>}
+                          />
+                        )}
+                      </QuerySurface>
                     )}
                   </Card>
                 </Col>
                 <Col xs={24} lg={9}>
-                  <Card variant="borderless" className="panel-card funnel-card" title={<div><Title level={4}>战略研判</Title><Text type="secondary">按落脚点当前状态独占计数；第 4 步含待定稿与已定稿。</Text></div>} extra={<Button type="text" icon={<MoreOutlined />} aria-label="打开战略研判" onClick={() => navigate('strategy')} />}>
-                    {overviewQuery.isError ? <QueryFailure message="战略研判数据加载失败，请检查服务连接后重试。" onRetry={() => { void overviewQuery.refetch() }} /> : overviewQuery.isLoading ? <Spin /> : (
-                      <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-                        <Statistic title="当前战略版本数" value={overview?.funnel_pool ?? 0} suffix="项" />
-                        {overview?.strategy_funnel ? (
-                          <Space wrap>
-                            <Tag color="blue">扫描 {overview.strategy_funnel.industry_scan}</Tag>
-                            <Tag color="blue">适配 {overview.strategy_funnel.tier1_adaptation}</Tag>
-                            <Tag color="blue">评分 {overview.strategy_funnel.scoring}</Tag>
-                            <Tag color="blue">策略 {overview.strategy_funnel.classification}</Tag>
-                            <Tag color="orange">拒绝 {overview.strategy_funnel.rejected}</Tag>
-                            <Tag>未入池 {overview.strategy_funnel.pool_entry_blocked}</Tag>
-                          </Space>
-                        ) : <Text type="secondary">当前服务尚未提供漏斗阶段计数。</Text>}
-                      </Space>
+                  <Card
+                    variant="borderless"
+                    className="panel-card funnel-card"
+                    title={(
+                      <div>
+                        <Title level={4}>战略研判漏斗</Title>
+                        <Text type="secondary">四步筛选与价值评估；按落脚点当前状态独占计数。</Text>
+                      </div>
+                    )}
+                    extra={<Button type="text" icon={<MoreOutlined />} aria-label="打开战略研判" onClick={() => navigate('strategy')} />}
+                  >
+                    {overviewQuery.isError ? (
+                      <QueryFailure message="战略研判数据加载失败，请检查服务连接后重试。" onRetry={() => { void overviewQuery.refetch() }} />
+                    ) : (
+                      <QuerySurface {...funnelSurface} initial={<Spin />}>
+                        <StrategyFunnelCard onNavigate={navigateTo} steps={funnelSteps} />
+                        <div className="funnel-footer">
+                          <span>
+                            <FundOutlined aria-hidden />
+                            当前战略版本 <strong>{overview?.funnel_pool ?? 0}</strong> 项
+                          </span>
+                          {overview?.strategy_funnel ? (
+                            <Space wrap size={4}>
+                              {(overview.strategy_funnel.rejected ?? 0) > 0 ? (
+                                <Tag color="orange">适配拒绝 {overview.strategy_funnel.rejected}</Tag>
+                              ) : null}
+                              {(overview.strategy_funnel.pool_entry_blocked ?? 0) > 0 ? (
+                                <Tag>未入池 {overview.strategy_funnel.pool_entry_blocked}</Tag>
+                              ) : null}
+                            </Space>
+                          ) : null}
+                        </div>
+                      </QuerySurface>
                     )}
                   </Card>
                 </Col>
               </Row>
-              <Card className="panel-card view-card signals-panel" title="最新信号" extra={<Space wrap><Input allowClear prefix={<SearchOutlined />} placeholder="搜索标题、发布主体或标签" value={query} onChange={(e) => setQuery(e.target.value)} /><Select value={stage} onChange={setStage} options={['全部环节', '创造端', '传递端', '兑现端', '规制端'].map((item) => ({ label: item, value: item }))} suffixIcon={<FilterOutlined />} className="stage-select" /><Button type="link" onClick={() => navigate('signals')}>打开证据库 <ArrowRightOutlined /></Button></Space>}>
+              <Card className="panel-card view-card signals-panel overview-signals-panel" title="最新信号" extra={<Space wrap><Input allowClear prefix={<SearchOutlined />} placeholder="搜索标题、发布主体或标签" value={query} onChange={(e) => setQuery(e.target.value)} /><Select value={stage} onChange={setStage} options={['全部环节', '创造端', '传递端', '兑现端', '规制端'].map((item) => ({ label: item, value: item }))} suffixIcon={<FilterOutlined />} className="stage-select" /><Button type="link" onClick={() => navigate('signals')}>打开证据库 <ArrowRightOutlined /></Button></Space>}>
                 {signalsError ? (
                   <QueryFailure message="最新信号加载失败，请检查服务连接后重试。" onRetry={() => { void (refCodesQuery.isError ? refCodesQuery.refetch() : refetchSignals()) }} />
                 ) : (
-                  <Table rowKey="key" loading={signalsLoading} columns={signalTableColumns} dataSource={filteredSignals} pagination={{ pageSize: 6 }} scroll={{ x: 960 }} locale={signalsTableLocale(() => navigate('newSignal'))} />
+                  <Table rowKey="key" loading={signalsTableLoading} columns={signalTableColumns} dataSource={filteredSignals} pagination={overviewSignalPagination} scroll={{ x: 960 }} locale={signalsTableLocale(() => navigate('newSignal'))} />
                 )}
               </Card>
               <Card
@@ -1483,16 +1795,122 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
                 )}
                 extra={<Button type="primary" icon={<ArrowRightOutlined />} onClick={() => navigate('traceDetail')}>进入追溯视图</Button>}
               >
-                {overviewQuery.isError ? null : overviewQuery.isLoading ? <Spin /> : (
-                <Row gutter={[16, 16]} align="middle">
-                  {traceMetrics.map((metric) => (
-                    <Col key={metric.label} xs={12} sm={6}>
-                      <Statistic title={metric.label} value={metric.value} />
-                    </Col>
-                  ))}
-                </Row>
+                {overviewQuery.isError ? null : (
+                  <QuerySurface {...overviewSurface} initial={<Spin />}>
+                    <Row gutter={[16, 16]} align="middle">
+                      {traceMetrics.map((metric) => (
+                        <Col key={metric.label} xs={12} sm={6}>
+                          <Statistic title={metric.label} value={metric.value} />
+                        </Col>
+                      ))}
+                    </Row>
+                  </QuerySurface>
                 )}
               </Card>
+              <Row gutter={[16, 16]} className="overview-secondary-footer" style={{ marginTop: 16 }}>
+                <Col xs={24} xl={14}>
+                  <Card
+                    className="panel-card overview-secondary-card"
+                    title="本周新增"
+                    extra={(
+                      overview?.weekly_window_start_utc && overview?.as_of_utc ? (
+                        <Text type="secondary">
+                          UTC {formatApiDate(overview.weekly_window_start_utc)} 至 {formatApiDate(overview.as_of_utc)}
+                        </Text>
+                      ) : (
+                        <Text type="secondary">—</Text>
+                      )
+                    )}
+                  >
+                    {overviewQuery.isError ? (
+                      <QueryFailure
+                        message="本周统计加载失败，请检查服务连接后重试。"
+                        onRetry={() => { void overviewQuery.refetch() }}
+                      />
+                    ) : (
+                      <QuerySurface {...overviewSurface} initial={<Spin />}>
+                        {overview?.weekly_new ? (
+                          <Row gutter={[16, 16]}>
+                            {[
+                              ['信号', overview.weekly_new.signals],
+                              ['主题', overview.weekly_new.tech_themes],
+                              ['需求点', overview.weekly_new.demand_points],
+                              ['车辆功能', overview.weekly_new.vehicle_functions],
+                              ['技术落脚点', overview.weekly_new.landing_points],
+                              ['战略版本', overview.weekly_new.strategic_assessments],
+                              ['文档', overview.weekly_new.documents],
+                            ].map(([label, value]) => (
+                              <Col key={String(label)} xs={12} sm={8} md={6} xl={4} xxl={3}>
+                                <Statistic title={String(label)} value={Number(value)} />
+                              </Col>
+                            ))}
+                          </Row>
+                        ) : null}
+                      </QuerySurface>
+                    )}
+                  </Card>
+                </Col>
+                <Col xs={24} xl={10}>
+                  <Card className="panel-card overview-secondary-card" title="待处理与失败任务">
+                    {overviewQuery.isError ? (
+                      <QueryFailure
+                        message="任务统计加载失败，请检查服务连接后重试。"
+                        onRetry={() => { void overviewQuery.refetch() }}
+                      />
+                    ) : (
+                      <QuerySurface {...overviewSurface} initial={<Spin />}>
+                        {overview ? (
+                          <Space wrap>
+                            <Tag
+                              color={overview.signals_pending_review > 0 ? 'orange' : 'default'}
+                              className="overview-ops-tag"
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => navigate('signals')}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') navigate('signals')
+                              }}
+                            >
+                              待复核信号：{overview.signals_pending_review}
+                            </Tag>
+                            <Tag
+                              color={(overview.demand_points_pending_review ?? 0) > 0 ? 'orange' : 'default'}
+                              className="overview-ops-tag"
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => navigate('topics')}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') navigate('topics')
+                              }}
+                            >
+                              待复核需求：{overview.demand_points_pending_review ?? 0}
+                            </Tag>
+                            <Tag className="overview-ops-tag">采集任务进行中：{overview.capture_jobs_open ?? 0}</Tag>
+                            <Tag color={(overview.capture_jobs_failed ?? 0) > 0 ? 'red' : 'default'} className="overview-ops-tag">
+                              采集失败：{overview.capture_jobs_failed ?? 0}
+                            </Tag>
+                            <Tag
+                              color={(overview.signals_fetch_failed ?? 0) > 0 ? 'red' : 'default'}
+                              className="overview-ops-tag"
+                              role="button"
+                              tabIndex={0}
+                              onClick={() => navigate('signals')}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter' || event.key === ' ') navigate('signals')
+                              }}
+                            >
+                              抓取失败信号：{overview.signals_fetch_failed ?? 0}
+                            </Tag>
+                            <Tag color={(overview.documents_failed_ingest ?? 0) > 0 ? 'red' : 'default'} className="overview-ops-tag">
+                              文档解析失败：{overview.documents_failed_ingest ?? 0}
+                            </Tag>
+                          </Space>
+                        ) : null}
+                      </QuerySurface>
+                    )}
+                  </Card>
+                </Col>
+              </Row>
             </div>
             )}
             <SignalQuickPreviewDrawer

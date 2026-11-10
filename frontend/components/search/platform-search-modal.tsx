@@ -98,7 +98,7 @@ export function PlatformSearchModal({ open, onClose, onNavigate }: PlatformSearc
       closable={false}
       centered
       width={640}
-      destroyOnHidden
+      destroyOnHidden={false}
       keyboard
       mask={{ closable: true }}
       title={null}

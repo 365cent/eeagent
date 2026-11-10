@@ -13,6 +13,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +23,13 @@ import (
 	"eea/capture/internal/singlefile"
 )
 
+// ArchiveMode selects how HTML is produced for a captured URL.
+const (
+	ArchiveModeAuto      = "auto"
+	ArchiveModeExtension = "extension"
+	ArchiveModeEmbedded  = "embedded"
+)
+
 // Options configures the browser used for captures.
 type Options struct {
 	Engine      string // edge | chrome
@@ -29,6 +37,11 @@ type Options struct {
 	UserDataDir string
 	Headless    bool
 	LaunchWait  time.Duration
+
+	// ArchiveMode: extension (Chrome/Edge SingleFile), embedded (injected core), or auto.
+	ArchiveMode string
+	// SingleFileExtensionPath overrides automatic discovery of the store extension.
+	SingleFileExtensionPath string
 
 	// ReadyWait bounds how long a normal page may take to produce readable
 	// content after load. InteractiveWait is the longer budget for a verification
@@ -55,13 +68,28 @@ type Browser struct {
 	profile string
 	stderr  *tailBuffer
 	owned   bool
+
+	devtoolsHost    string
+	singleFileExtID string
+	extensionPath   string
+	archiveMode     string
+
+	singleFileReloaded bool
+
 	closeMu sync.Mutex
 	closed  bool
 }
 
 // Launch starts the browser with a private profile and connects over CDP.
 func Launch(ctx context.Context, opts Options) (*Browser, error) {
-	exe, err := ResolveBrowser(opts.Engine, opts.BrowserPath)
+	useExtension := opts.ArchiveMode == ArchiveModeExtension || opts.ArchiveMode == ArchiveModeAuto
+	var exe string
+	var err error
+	if useExtension {
+		exe, err = ResolveBrowserForExtension(opts.Engine, opts.BrowserPath)
+	} else {
+		exe, err = ResolveBrowser(opts.Engine, opts.BrowserPath)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -76,6 +104,13 @@ func Launch(ctx context.Context, opts Options) (*Browser, error) {
 	}
 	if opts.MinTextChars <= 0 {
 		opts.MinTextChars = 10
+	}
+	if opts.ArchiveMode == "" {
+		opts.ArchiveMode = ArchiveModeAuto
+	}
+	if useExtension && opts.Headless {
+		// Many news sites block headless loads (chrome-error://); extension mode needs a visible window.
+		opts.Headless = false
 	}
 	profile := opts.UserDataDir
 	if profile == "" {
@@ -98,11 +133,31 @@ func Launch(ctx context.Context, opts Options) (*Browser, error) {
 	// A crash or a killed parent can leave a dead DevToolsActivePort behind.
 	// Reuse a live browser on this profile, otherwise drop the stale file so
 	// the launch below cannot pick up its old port.
-	if conn, ok := attachExisting(ctx, portFile); ok {
-		return &Browser{opts: opts, profile: absProfile, cdp: conn}, nil
+	// Reusing an unknown macOS browser profile is a common source of wedged captures.
+	// Never attach when SingleFile must be command-line loaded — a reused process would lack the extension.
+	if runtime.GOOS != "darwin" && !useExtension {
+		if conn, ok := attachExisting(ctx, portFile); ok {
+			b := &Browser{opts: opts, profile: absProfile, cdp: conn, archiveMode: opts.ArchiveMode}
+			if devtools, ok := devtoolsBaseFromPortFile(portFile); ok {
+				b.devtoolsHost = devtools
+			}
+			return b, nil
+		}
 	}
 	_ = os.Remove(portFile)
 
+	var extensionPath string
+	var errExt error
+	if useExtension {
+		stageDir := filepath.Join(filepath.Dir(absProfile), "extensions", "singlefile")
+		extensionPath, errExt = PrepareSingleFileExtension(stageDir, opts.Engine, opts.SingleFileExtensionPath)
+		if errExt == nil && extensionPath != "" {
+			extensionPath, errExt = filepath.Abs(extensionPath)
+		}
+	}
+	if opts.ArchiveMode == ArchiveModeExtension && errExt != nil {
+		return nil, fmt.Errorf("singlefile extension: %w", errExt)
+	}
 	args := []string{
 		"--remote-debugging-port=0",
 		"--remote-allow-origins=*",
@@ -111,6 +166,13 @@ func Launch(ctx context.Context, opts Options) (*Browser, error) {
 		"--no-default-browser-check",
 		"--disable-features=Translate,MediaRouter",
 		"about:blank",
+	}
+	if extensionPath != "" {
+		args = append(args, "--load-extension="+extensionPath)
+		if !blocksCommandLineExtensionLoad(exe) {
+			args = append(args, "--disable-extensions-except="+extensionPath)
+		}
+		args = append(args, "--exclude-switches=enable-automation")
 	}
 	if opts.Headless {
 		args = append([]string{"--headless=new", "--disable-gpu"}, args...)
@@ -137,6 +199,22 @@ func Launch(ctx context.Context, opts Options) (*Browser, error) {
 		return nil, fmt.Errorf("connect devtools: %w (%s)", err, tail.String())
 	}
 	b.cdp = conn
+	b.devtoolsHost = fmt.Sprintf("http://127.0.0.1:%d", port)
+	b.extensionPath = extensionPath
+	b.archiveMode = opts.ArchiveMode
+	if extensionPath != "" {
+		b.archiveMode = ArchiveModeExtension
+		b.enableTargetDiscovery(ctx)
+		id, err := b.waitForSingleFileExtension(ctx)
+		if err != nil {
+			_ = cmd.Process.Kill()
+			return nil, fmt.Errorf("SingleFile extension did not load in %s (%w); Google Chrome stable blocks --load-extension — use capture_engine edge", filepath.Base(exe), err)
+		}
+		b.singleFileExtID = id
+		b.wakeSingleFileExtension(ctx, b.singleFileExtID)
+	} else if b.archiveMode == ArchiveModeAuto || b.archiveMode == ArchiveModeExtension {
+		b.archiveMode = ArchiveModeEmbedded
+	}
 	return b, nil
 }
 
@@ -175,6 +253,35 @@ func attachExisting(ctx context.Context, portFile string) (*cdp.Browser, bool) {
 	return conn, true
 }
 
+func devtoolsBaseFromPortFile(portFile string) (string, bool) {
+	data, err := os.ReadFile(portFile)
+	if err != nil {
+		return "", false
+	}
+	lines := strings.Split(strings.TrimSpace(string(data)), "\n")
+	if len(lines) < 1 {
+		return "", false
+	}
+	port := strings.TrimSpace(lines[0])
+	if port == "" {
+		return "", false
+	}
+	return fmt.Sprintf("http://127.0.0.1:%s", port), true
+}
+
+func (b *Browser) captureEmbeddedOnPage(ctx context.Context, sess *cdp.Session) (*Archive, error) {
+	if err := inject(ctx, sess); err != nil {
+		return nil, err
+	}
+	archive, err := extract(ctx, sess)
+	if err != nil && isStaleContextError(err) {
+		if injectErr := inject(ctx, sess); injectErr == nil {
+			archive, err = extract(ctx, sess)
+		}
+	}
+	return archive, err
+}
+
 // Close terminates the browser process.
 func (b *Browser) Close() error {
 	b.closeMu.Lock()
@@ -201,6 +308,7 @@ func (b *Browser) Capture(ctx context.Context, url string) (*Archive, error) {
 	if b.closed {
 		return nil, errors.New("browser already closed")
 	}
+	b.singleFileReloaded = false
 	sess, err := b.cdp.NewTarget(ctx, "about:blank")
 	if err != nil {
 		return nil, err
@@ -216,6 +324,12 @@ func (b *Browser) Capture(ctx context.Context, url string) (*Archive, error) {
 	}
 	if err := sess.CallDecode(ctx, "Runtime.enable", nil, nil); err != nil {
 		return nil, err
+	}
+
+	if b.archiveMode == ArchiveModeExtension {
+		if extID, err := b.resolveExtensionID(ctx); err == nil && extID != "" {
+			b.wakeSingleFileExtension(ctx, extID)
+		}
 	}
 
 	loaded, stop := b.cdp.Watch(func(ev cdp.Event) bool {
@@ -239,6 +353,33 @@ func (b *Browser) Capture(ctx context.Context, url string) (*Archive, error) {
 		return nil, err
 	}
 
+	if err := prepareArticleImages(ctx, sess); err != nil {
+		if errors.Is(err, context.DeadlineExceeded) || strings.Contains(err.Error(), "context deadline exceeded") {
+			// Best-effort lazy-load prep; SingleFile can still fetch deferred images.
+		} else {
+			return nil, err
+		}
+	}
+
+	if b.archiveMode == ArchiveModeExtension {
+		state, err := readPageState(ctx, sess)
+		if err != nil {
+			return nil, err
+		}
+		pageURL := state.URL
+		if pageURL == "" {
+			pageURL = url
+		}
+		archive, extErr := b.captureWithSingleFileExtension(ctx, sess, pageURL)
+		if extErr == nil {
+			return archive, nil
+		}
+		if emb, embErr := b.captureEmbeddedOnPage(ctx, sess); embErr == nil {
+			return emb, nil
+		}
+		return nil, extErr
+	}
+
 	if err := inject(ctx, sess); err != nil {
 		return nil, err
 	}
@@ -259,15 +400,21 @@ const stateExpr = `(() => {
   const body = document.body;
   const text = ((body && body.innerText) || "").trim();
   const href = location.href;
-  const hasArticle = !!document.querySelector("#js_content, .rich_media_content, article, main");
+  const hasArticle = !!document.querySelector(
+    "#js_content, .rich_media_content, .article_body, .article_text, .art-con.article_body, article, main"
+  );
   const challengeUrl = /wappoc_appmsgcaptcha|wappoc_appmsg/i.test(href);
   const challengeText = !hasArticle &&
     /(环境异常|完成验证|安全验证|Just a moment|Checking your browser|Enable JavaScript and cookies)/i.test(text);
+  const errorPage = location.protocol === "chrome-error:" ||
+    /chromewebdata/i.test(href) ||
+    !!document.querySelector("#main-message, .interstitial-wrapper, .error-code, .neterror");
   return {
     ready: document.readyState,
     textLen: text.length,
     challenge: challengeUrl || challengeText,
     hasArticle,
+    errorPage,
     url: href
   };
 })()`
@@ -277,6 +424,7 @@ type pageState struct {
 	TextLen    int    `json:"textLen"`
 	Challenge  bool   `json:"challenge"`
 	HasArticle bool   `json:"hasArticle"`
+	ErrorPage  bool   `json:"errorPage"`
 	URL        string `json:"url"`
 }
 
@@ -322,6 +470,11 @@ func (b *Browser) waitForContent(ctx context.Context, sess *cdp.Session) error {
 			return err
 		}
 		switch {
+		case state.ErrorPage:
+			return fmt.Errorf(
+				"page did not load (%s); turn off headless capture, use capture_engine edge, and retry in a visible browser window",
+				state.URL,
+			)
 		case state.Challenge:
 			stable = 0
 			if b.opts.Headless {
@@ -419,8 +572,17 @@ const extractExpr = `(async () => {
   if (!sf || typeof sf.getPageData !== "function") {
     return { error: "singlefile library missing" };
   }
+  if (typeof sf.init === "function") {
+    try { sf.init({ fetch: globalThis.fetch.bind(globalThis) }); } catch (_) {}
+  }
   try {
-    const data = await sf.getPageData({ loadDeferredContent: true });
+    const data = await sf.getPageData({
+      loadDeferredContent: true,
+      blockImages: false,
+      blockScripts: false,
+      blockVideos: false,
+      compressContent: false
+    });
     return {
       url: location.href,
       title: document.title,
@@ -504,20 +666,9 @@ func ResolveBrowser(engine, explicit string) (string, error) {
 	if engine == "" {
 		engine = "edge"
 	}
-	candidates := map[string][]string{
-		"edge": {
-			`C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe`,
-			`C:\Program Files\Microsoft\Edge\Application\msedge.exe`,
-		},
-		"chrome": {
-			`C:\Program Files\Google\Chrome\Application\chrome.exe`,
-			`C:\Program Files (x86)\Google\Chrome\Application\chrome.exe`,
-			filepath.Join(os.Getenv("LOCALAPPDATA"), `Google\Chrome\Application\chrome.exe`),
-		},
-	}
-	names, ok := candidates[engine]
-	if !ok {
-		return "", fmt.Errorf("unknown capture_engine %q (want edge or chrome)", engine)
+	names, err := platformBrowserCandidates(engine)
+	if err != nil {
+		return "", err
 	}
 	for _, c := range names {
 		if c == "" {
