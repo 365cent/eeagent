@@ -47,12 +47,19 @@ os.chdir(ROOT)
 
 worker_proc: subprocess.Popen | None = None
 if not api_only():
-    worker_proc = subprocess.Popen(
-        [sys.executable, "-m", "app.worker"],
-        cwd=ROOT,
-        env=os.environ.copy(),
-    )
-    print("[dev] capture worker started", flush=True)
+    # FastAPI lifespan already runs an embedded capture worker (EEA_CAPTURE_EMBEDDED).
+    # A second subprocess on Windows lacks the selector event-loop policy → psycopg InterfaceError spam.
+    embed_default = os.environ.get("EEA_CAPTURE_EMBEDDED", "1").lower() not in ("0", "false", "no")
+    skip_subprocess = sys.platform == "win32" and embed_default
+    if skip_subprocess:
+        print("[dev] capture worker embedded in API (no subprocess on Windows)", flush=True)
+    else:
+        worker_proc = subprocess.Popen(
+            [sys.executable, "-m", "app.worker"],
+            cwd=ROOT,
+            env=os.environ.copy(),
+        )
+        print("[dev] capture worker subprocess started", flush=True)
 
 
 def _stop_worker() -> None:

@@ -1,3 +1,4 @@
+import asyncio
 import uuid
 from datetime import datetime
 from functools import partial
@@ -886,8 +887,12 @@ async def tag_suggestions(signal_id: uuid.UUID, db: AsyncSession = Depends(get_d
     # W3 (TODO.md 1.3): LLM 优先（正文快照也在场时更准），失败则 jieba；
     # 返回结构不变，仅 source 标注来源
     llm_body = tagging_text or fallback_text[:6000]
-    tags, tag_source, rerank_score = await suggest_tech_tags(s.title, body or tagging_text or fallback_text)
-    llm = await suggest_tags_with_llm(s.title, llm_body[:6000])
+    tag_body = body or tagging_text or fallback_text
+    # LLM tag pick + structured stage/type in parallel so tag-suggestions stays within proxy timeouts.
+    (tags, tag_source, rerank_score), llm = await asyncio.gather(
+        suggest_tech_tags(s.title, tag_body),
+        suggest_tags_with_llm(s.title, llm_body[:6000]),
+    )
     settings = get_settings()
     llm_configured = bool(settings.llm_base_url_normalized)
     from app.services import semantic_api

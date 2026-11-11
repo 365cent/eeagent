@@ -116,6 +116,8 @@ export function useSignalTagSuggestions(signalId: string) {
     queryKey: eeaQueryKeys.tagSuggestions(signalId),
     queryFn: () => fetchSignalTagSuggestions(signalId),
     enabled: Boolean(signalId),
+    staleTime: 120_000,
+    retry: 1,
   })
 }
 
