@@ -11,11 +11,20 @@ import (
 	"time"
 
 	"eea/capture/internal/capture"
-	"eea/capture/internal/httpx"
 	"eea/capture/internal/platform"
 )
 
 const WorkerID = "capture-client"
+
+// API is the server-job capability needed by the import drainer.
+type API interface {
+	ListAwaitingCaptureJobs(context.Context, int) ([]platform.CaptureJobAwaiting, error)
+	ClaimCaptureJob(context.Context, string, string) (*platform.CaptureJobAwaiting, error)
+	ClientReleaseCaptureJob(context.Context, string, string, string) error
+	ClientFailCaptureJob(context.Context, string, string, string) error
+	ClientSubmitCaptureJob(context.Context, string, string, string, []byte, string) (*platform.CaptureJob, error)
+	MaxUploadBytes() int64
+}
 
 type reservedJob struct {
 	id string
@@ -25,8 +34,9 @@ type reservedJob struct {
 func DrainAwaitingJobs(
 	ctx context.Context,
 	out io.Writer,
-	api *platform.Client,
+	api API,
 	engine capture.CaptureEngine,
+	publicHTTP *http.Client,
 	channel string,
 ) (ok, failed int) {
 	jobs, err := api.ListAwaitingCaptureJobs(ctx, 50)
@@ -46,7 +56,7 @@ func DrainAwaitingJobs(
 		if strings.TrimSpace(job.SourceURL) == "" {
 			continue
 		}
-		if err := drainOne(ctx, out, api, engine, channel, job); err != nil {
+		if err := drainOne(ctx, out, api, engine, publicHTTP, channel, job); err != nil {
 			failed++
 		} else {
 			ok++
@@ -58,8 +68,9 @@ func DrainAwaitingJobs(
 func drainOne(
 	ctx context.Context,
 	out io.Writer,
-	api *platform.Client,
+	api API,
 	engine capture.CaptureEngine,
+	publicHTTP *http.Client,
 	channel string,
 	job platform.CaptureJobAwaiting,
 ) (err error) {
@@ -101,7 +112,7 @@ func drainOne(
 		payload     []byte
 	)
 	if platform.IsPDFImportJob(rawURL, "") {
-		payload, err = downloadURL(ctx, rawURL, api)
+		payload, err = downloadURL(ctx, rawURL, api.MaxUploadBytes(), publicHTTP)
 		if err != nil {
 			fmt.Fprintf(out, "FAIL  pdf %s: %v\n", rawURL, err)
 			return err
@@ -138,12 +149,11 @@ func drainOne(
 	return nil
 }
 
-func downloadURL(ctx context.Context, rawURL string, api *platform.Client) ([]byte, error) {
+func downloadURL(ctx context.Context, rawURL string, maxBytes int64, client *http.Client) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, err
 	}
-	client := httpx.OutboundClient(15 * time.Minute)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err
@@ -152,6 +162,6 @@ func downloadURL(ctx context.Context, rawURL string, api *platform.Client) ([]by
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		return nil, fmt.Errorf("HTTP %s", resp.Status)
 	}
-	limited := io.LimitReader(resp.Body, api.MaxUploadBytes())
+	limited := io.LimitReader(resp.Body, maxBytes)
 	return io.ReadAll(limited)
 }

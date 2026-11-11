@@ -5,11 +5,16 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import get_db
+from app.platform.launchdarkly import DEMAND_EXTRACTION, require_feature, track_workflow_success
 from app.models.models import TechTheme
 from app.schemas.schemas import ThemeCreate, ThemeDetail, ThemeMetrics, ThemeOut
 from app.services.tagging import get_or_create_vocab  # noqa: F401 (shared helper)
 
-router = APIRouter(prefix="/themes", tags=["themes"])
+router = APIRouter(
+    prefix="/themes",
+    tags=["themes"],
+    dependencies=[Depends(require_feature(DEMAND_EXTRACTION))],
+)
 
 
 async def _metrics(db: AsyncSession, theme_id: uuid.UUID) -> ThemeMetrics:
@@ -58,6 +63,7 @@ async def create_theme(payload: ThemeCreate, db: AsyncSession = Depends(get_db))
     t = TechTheme(working_name=payload.working_name, value_chain_stage_code=payload.value_chain_stage_code)
     db.add(t)
     await db.commit()
+    track_workflow_success(DEMAND_EXTRACTION)
     d = ThemeDetail.model_validate(t)
     d.metrics = await _metrics(db, t.id)
     d.display_tags = []

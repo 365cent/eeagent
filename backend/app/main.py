@@ -17,6 +17,8 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from app.api.swagger_ui import SWAGGER_UI_HTML
 from app.api.v1 import (
     agent,
+    launchdarkly_onboarding,
+    platform_features,
     capture,
     imports,
     demands,
@@ -36,6 +38,7 @@ from app.api.v1 import (
 )
 from app.core.config import get_settings
 from app.platform.errors import DomainError
+from app.platform.launchdarkly import shutdown_launchdarkly, start_launchdarkly
 
 
 def create_app() -> FastAPI:
@@ -45,23 +48,34 @@ def create_app() -> FastAPI:
     async def lifespan(_app: FastAPI):
         worker_stop = asyncio.Event()
         worker_task: asyncio.Task | None = None
-        embed = settings.app_env != "production" and os.environ.get("EEA_CAPTURE_EMBEDDED", "1").lower() not in (
-            "0",
-            "false",
-            "no",
-        )
-        if embed and os.environ.get("EEA_DEV_API_ONLY", "").lower() not in ("1", "true", "yes"):
-            from app.services.capture_jobs import worker_loop
+        try:
+            await asyncio.to_thread(start_launchdarkly, settings.launchdarkly_sdk_key)
+            embed = settings.app_env != "production" and os.environ.get("EEA_CAPTURE_EMBEDDED", "1").lower() not in (
+                "0",
+                "false",
+                "no",
+            )
+            if embed and os.environ.get("EEA_DEV_API_ONLY", "").lower() not in ("1", "true", "yes"):
+                from app.services.capture_jobs import worker_loop
 
-            worker_task = asyncio.create_task(worker_loop(worker_stop), name="eea-capture-worker")
-        yield
-        if worker_task is not None:
-            worker_stop.set()
-            worker_task.cancel()
+                worker_task = asyncio.create_task(worker_loop(worker_stop), name="eea-capture-worker")
+            yield
+        finally:
             try:
-                await worker_task
-            except asyncio.CancelledError:
-                pass
+                if worker_task is not None:
+                    worker_stop.set()
+                    worker_task.cancel()
+                    try:
+                        await worker_task
+                    except asyncio.CancelledError:
+                        pass
+            finally:
+                from app.db.base import engine
+
+                try:
+                    await engine.dispose()
+                finally:
+                    await asyncio.to_thread(shutdown_launchdarkly)
 
     app = FastAPI(
         title=settings.app_name,
@@ -105,6 +119,8 @@ def create_app() -> FastAPI:
     app.include_router(llm.router, prefix="/api/v1")
     app.include_router(session.router, prefix="/api/v1")
     app.include_router(agent.router, prefix="/api/v1")
+    app.include_router(launchdarkly_onboarding.router, prefix="/api/v1")
+    app.include_router(platform_features.router, prefix="/api/v1")
 
     @app.get("/healthz")
     async def healthz():

@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import PanoramaImportUrl, Signal, TechTheme
 from app.services.refcodes import normalize as normalize_ref_code
+from app.services.tagging_guard import human_corrected_fields
 
 
 async def sync_import_url_signal(
@@ -37,23 +38,24 @@ async def sync_import_url_signal(
                 stage_code = ctx["value_chain_stage_code"]
             if ctx.get("signal_type_code"):
                 signal_type = ctx["signal_type_code"]
-    if stage_code:
+    protected = await human_corrected_fields(db, signal_id)
+    if stage_code and "value_chain_stage_code" not in protected:
         signal.value_chain_stage_code = normalize_ref_code(
             "value_chain_stage", stage_code
         ) or stage_code
-    if signal_type:
+    if signal_type and "signal_type_code" not in protected:
         signal.signal_type_code = normalize_ref_code("signal_type", signal_type) or signal_type
-    if row.channel_code:
-        channel = normalize_ref_code("channel", row.channel_code)
-        if channel:
-            signal.channel_code = channel
-
     stage_label = ""
     for ctx in row.contexts or []:
         if isinstance(ctx, dict) and ctx.get("value_chain_stage_label"):
             stage_label = str(ctx["value_chain_stage_label"])
             break
-    if stage_label and signal.value_chain_stage_code:
+    if (
+        stage_label
+        and signal.value_chain_stage_code
+        and "tech_theme_id" not in protected
+        and "value_chain_stage_code" not in protected
+    ):
         theme = await _get_or_create_stage_theme(db, stage_label, signal.value_chain_stage_code)
         if theme is not None:
             signal.tech_theme_id = theme.id

@@ -78,7 +78,7 @@ async def test_concurrent_duplicate_upload_returns_existing_row(client, monkeypa
     competing row with the same digest from a SECOND connection at the exact
     point where the endpoint sits between SELECT and INSERT.
     """
-    import app.api.v1.documents as documents_api
+    import app.domains.evidence.document_pipeline as documents_api
 
     original_save_bytes = documents_api.save_bytes
     raced = {"done": False}

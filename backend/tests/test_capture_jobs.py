@@ -43,7 +43,7 @@ def fake_ingest(monkeypatch):
             figures=[],
         )
 
-    monkeypatch.setattr("app.api.v1.documents.ingest_document", _ingest)
+    monkeypatch.setattr("app.domains.evidence.document_pipeline.ingest_document", _ingest)
     return _ingest
 
 

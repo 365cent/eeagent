@@ -8,7 +8,7 @@
 - New routes: [`config/routes.ts`](config/routes.ts) is the registry; keep URL paths backward compatible (`singal` typo retained).
 - Views live under [`views/`](views/); shell must not import view internals except via the workspace router.
 
-Full skill: [`.agents/skills/ant-design/SKILL.md`](../.agents/skills/ant-design/SKILL.md).
+Full skill: [`node_modules/@ant-design/cli/skills/antd/SKILL.md`](node_modules/@ant-design/cli/skills/antd/SKILL.md) (installed with the locked frontend dependencies).
 
 <!-- BEGIN:nextjs-agent-rules -->
 

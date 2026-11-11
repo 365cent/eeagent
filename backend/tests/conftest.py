@@ -122,7 +122,7 @@ def _acquire_suite_lock() -> None:
         pytest.exit(
             f"eea_test 已被其它 pytest 会话占用 ({_TEST_LOCK_PATH})。\n"
             "  快检（无 PostgreSQL、无互斥锁）: uv run pytest -m no_db -q\n"
-            "  指定切片: ./scripts/pytest_slices.sh capture\n"
+            "  指定切片: ./scripts/pytest_slices.sh capture | platform\n"
             "  等待占用结束，或设置 EEA_PYTEST_LOCK=block 在本进程阻塞等锁。",
             returncode=2,
         )

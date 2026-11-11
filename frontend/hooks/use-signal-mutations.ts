@@ -8,13 +8,13 @@ import {
   putSignalTheme,
 } from '@/lib/api/eea-api'
 import type { SignalUpdatePayload, TagAssignmentPayload, ThemeAssignmentPayload } from '@/lib/api/types'
-import { eeaQueryKeys } from '@/hooks/use-eea-queries'
+import { eeaQueryKeys } from '@/lib/query/eea-query-keys'
 
 export function useSignalMutations(signalId: string | undefined, expectedUpdatedAt?: string | null) {
   const queryClient = useQueryClient()
 
   const invalidate = async () => {
-    await queryClient.invalidateQueries({ queryKey: ['eea', 'signals'] })
+    await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.signalsRoot })
     await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.overview })
     if (signalId) {
       await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.signal(signalId) })

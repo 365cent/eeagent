@@ -519,6 +519,7 @@ dependencies = [
     { name = "html2text" },
     { name = "httpx" },
     { name = "jieba" },
+    { name = "launchdarkly-server-sdk" },
     { name = "markitdown", extra = ["all"] },
     { name = "openpyxl" },
     { name = "psycopg", extra = ["binary"] },
@@ -545,6 +546,7 @@ requires-dist = [
     { name = "html2text", specifier = ">=2024.2.26" },
     { name = "httpx", specifier = ">=0.28.1" },
     { name = "jieba", specifier = ">=0.42.1" },
+    { name = "launchdarkly-server-sdk", specifier = ">=9.20.0" },
     { name = "markitdown", extras = ["all"], specifier = ">=0.1.9" },
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "psycopg", extras = ["binary"], specifier = ">=3.3.6" },
@@ -1081,6 +1083,34 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/60/72/394036294ac3226216f73bfa4b14df920eb5baf7fb80fa7e0a0d7ef442a6/jiter-0.18.0-graalpy312-graalpy250_312_native-macosx_11_0_arm64.whl", hash = "sha256:44d0d719cd7845e66b01a0cf346ec9882073e710a05e89a5b6d87be47a9dc69c", size = 277797, upload-time = "2026-10-23T13:51:09.324Z" },
     { url = "https://files.pythonhosted.org/packages/ce/80/f0dadedaa9a109f31e8978c7db355593916968d5956f382188a3f8c0888c/jiter-0.18.0-graalpy312-graalpy250_312_native-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4d1d2dc4d930ebc225f488b6b3790acebb2e51b3a165a4a42cc1d05bb927f83e", size = 300192, upload-time = "2026-10-23T13:51:10.551Z" },
     { url = "https://files.pythonhosted.org/packages/93/51/e57dbc6c264ec6557a677189755fe4525d83439237418e3ae59771ac1cde/jiter-0.18.0-graalpy312-graalpy250_312_native-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:ebb0c346b6c5d9c033fe9e9b6ed6a1ff6dac0288fe681c3434dde6eb9c264fa1", size = 301141, upload-time = "2026-10-23T13:51:11.882Z" },
+]
+
+[[package]]
+name = "launchdarkly-eventsource"
+version = "1.7.4"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/ac/6c/60862f8143c8185e953410b30125ff37ce4720fac2042771ca00f115f840/launchdarkly_eventsource-1.7.4.tar.gz", hash = "sha256:0a608da152a53bd05f5b4a2486828f21d48cd25a56986e36a8e47a8e9975e309", size = 46060, upload-time = "2026-10-19T15:27:17.989Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8c/e3/6dae165ff56bba3ad4fc76b2aa8c4606c577d2e33a9053dc147b03b045b6/launchdarkly_eventsource-1.7.4-py3-none-any.whl", hash = "sha256:42bbaee1741675199be193d99229ecb710a94089e74fc68b8c4edb90cddbdc5e", size = 29560, upload-time = "2026-10-19T15:27:16.988Z" },
+]
+
+[[package]]
+name = "launchdarkly-server-sdk"
+version = "9.20.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "certifi" },
+    { name = "launchdarkly-eventsource" },
+    { name = "pyrfc3339" },
+    { name = "semver" },
+    { name = "urllib3" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/43/25/a4adb6175210350c948a56a4dd42dd529deb973cdf12b1cf51b7c05784bb/launchdarkly_server_sdk-9.20.0.tar.gz", hash = "sha256:a7b4a94117222b9ea9dc13c1abc58c4c8917ee09d78f96a64385e3d4ad9d3d5d", size = 421077, upload-time = "2026-11-05T22:48:33.643Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/f9/7f/efd84aa91688fb4681b6cb66ce96ebf0c87f046d401d857a16ec6891560b/launchdarkly_server_sdk-9.20.0-py3-none-any.whl", hash = "sha256:dee3911d48bb70a5b3548692e4288c2017ea882bf69892eead1848a7942b26c0", size = 284875, upload-time = "2026-11-05T22:48:32.165Z" },
 ]
 
 [[package]]
@@ -2122,6 +2152,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pyrfc3339"
+version = "2.1.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/80/7a/0e5227aa1c831fdaf579073a0ebb5ca11fc352a43fce8d2639e3ff87ff74/pyrfc3339-2.1.1.tar.gz", hash = "sha256:b144d63819bd4c1ebf9cb57e12f4cba567fcf23d6e8f2f829ba9c7810ea4b951", size = 12921, upload-time = "2026-10-11T01:50:12.384Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/fb/79/2746c2066389dd88ede14491bea64cd9d7dd12e4bda63c5960017913af0d/pyrfc3339-2.1.1-py3-none-any.whl", hash = "sha256:4973172cb8b29c14caca7f76e6a52890d9e59ec2722dd5eb29b7fdd9fda2232f", size = 6511, upload-time = "2026-10-11T01:50:10.962Z" },
+]
+
+[[package]]
 name = "pytest"
 version = "9.1.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2359,6 +2398,15 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/c0/8f/0722ca900cc807c13a6a0c696dacf35430f72e0ec571c4275d2371fca3e9/rich-15.0.0.tar.gz", hash = "sha256:edd07a4824c6b40189fb7ac9bc4c52536e9780fbbfbddf6f1e2502c31b068c36", size = 230680, upload-time = "2026-04-12T08:24:00.75Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/82/3b/64d4899d73f91ba49a8c18a8ff3f0ea8f1c1d75481760df8c68ef5235bf5/rich-15.0.0-py3-none-any.whl", hash = "sha256:33bd4ef74232fb73fe9279a257718407f169c09b78a87ad3d296f548e27de0bb", size = 310654, upload-time = "2026-04-12T08:24:02.83Z" },
+]
+
+[[package]]
+name = "semver"
+version = "3.1.1"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/0e/50/2932d6434608c7d954d0d4f4b71b697260e3b40c802425fc84c1eed12440/semver-3.1.1.tar.gz", hash = "sha256:149b26cabada6f63212f97e94505d21578cb1d280cf714827f328d5e70765fea", size = 292174, upload-time = "2026-11-09T11:38:46.145Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/57/1d/793b054cbd0a2e0b4694dacc22bad066d6635ce85dd6cdd1f98d95169e9b/semver-3.1.1-py3-none-any.whl", hash = "sha256:c00cf7dac88a352bc6a4a997d6ac0bf95ba835c589bc0c54f7b76f9e2a45123a", size = 18905, upload-time = "2026-11-09T11:38:44.556Z" },
 ]
 
 [[package]]

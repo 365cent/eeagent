@@ -1,1 +1,1 @@
-export { StrategyView } from '@/views/dashboard/workspace'
+export { StrategyView } from './strategy-view'

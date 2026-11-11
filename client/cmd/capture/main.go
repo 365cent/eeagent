@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 
-	"eea/capture/internal/capture"
 	"eea/capture/internal/cli"
 	"eea/capture/internal/config"
 	"eea/capture/internal/ui"
@@ -29,6 +28,5 @@ func main() {
 		fmt.Fprintf(os.Stderr, "config: %v\n", err)
 		os.Exit(1)
 	}
-	_ = capture.EnsureSingleFileExtension(dir, cfg.UserDataDir, cfg.CaptureArchive, cfg.CaptureEngine, &cfg.SingleFileExtensionPath)
 	os.Exit(ui.Run(cfg, dir))
 }

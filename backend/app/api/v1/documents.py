@@ -17,6 +17,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.platform.launchdarkly import EVIDENCE_CAPTURE, require_feature, track_workflow_success
 from app.db.base import get_db
 from app.models.models import Document
 from app.schemas.schemas import DocumentDetail, DocumentRawOut
@@ -48,7 +49,11 @@ from app.services.pptx_deck_preview import (
     pptx_deck_preview_supported,
 )
 
-router = APIRouter(prefix="/documents", tags=["documents"])
+router = APIRouter(
+    prefix="/documents",
+    tags=["documents"],
+    dependencies=[Depends(require_feature(EVIDENCE_CAPTURE))],
+)
 
 def _raw_out(doc: Document) -> DocumentRawOut:
     return document_raw_out(doc)
@@ -113,6 +118,7 @@ async def upload_raw_document(
 
     if doc.ingest_status != "parsed":
         await _ingest(db, doc, data)
+    track_workflow_success(EVIDENCE_CAPTURE)
     return _raw_out(doc)
 
 

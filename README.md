@@ -6,7 +6,7 @@ Foresight / signal intelligence: **FastAPI** backend, **Next.js** UI, **Windows*
 
 ## Setup
 
-**Stack:** Python 3.12 (`uv`), PostgreSQL **16+**, pnpm **12.3.4**, Go **1.24** (client). Copy `backend/.env.example` → `backend/.env` (set `DB_*` and LLM when needed).
+**Stack:** Python 3.12 (`uv`), PostgreSQL **16+**, pnpm **12.3.4**, Go **1.26** (client; see `client/go.mod`). Copy `backend/.env.example` → `backend/.env` (set `DB_*` and LLM when needed).
 
 **Two terminals daily:** `backend` → `uv run python scripts/dev.py` (API + worker); `frontend` → `pnpm dev`.
 

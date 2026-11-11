@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, type ReactNode } from 'react'
+import { LaunchDarklyProvider } from '@/components/launchdarkly/launchdarkly-provider'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { eeaQueryDefaultOptions } from '@/lib/query/eea-query-options'
 
@@ -17,5 +18,9 @@ export function AppProviders({ children }: AppProvidersProps) {
       }),
   )
 
-  return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+  return (
+    <QueryClientProvider client={queryClient}>
+      <LaunchDarklyProvider>{children}</LaunchDarklyProvider>
+    </QueryClientProvider>
+  )
 }

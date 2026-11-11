@@ -18,6 +18,7 @@ Slices:
   agent         Agent workflow + pydantic wiring
   documents     Document ingest & signals from docs
   llm           LLM tags, gateway, usage (mostly mocked)
+  platform      LaunchDarkly workflow release gates (no_db)
   contracts     import-linter + OpenAPI snapshot
 
 Lock (integration only):
@@ -76,6 +77,9 @@ case "$slice" in
       tests/test_llm_status.py \
       tests/test_tech_tag_pipeline.py \
       "$@"
+    ;;
+  platform|flags|workflow)
+    exec "${PYTEST[@]}" -m no_db tests/test_platform_feature_flags.py "$@"
     ;;
   contracts)
     uv run lint-imports

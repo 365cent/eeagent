@@ -32,29 +32,16 @@ import {
 import type { Signal } from '@/types/platform'
 import type { AssessmentOut, ListSignalsParams } from '@/lib/api/types'
 import { buildListSignalsParams } from '@/lib/signal-list-filters'
+import { eeaQueryKeys } from '@/lib/query/eea-query-keys'
 
-export const eeaQueryKeys = {
-  refCodes: ['eea', 'ref-codes'] as const,
-  syncStamp: ['eea', 'sync-stamp'] as const,
-  overview: ['eea', 'overview'] as const,
-  signals: (params?: Record<string, unknown>) => ['eea', 'signals', params ?? {}] as const,
-  signal: (id: string) => ['eea', 'signal', id] as const,
-  themes: ['eea', 'themes'] as const,
-  vocabUsage: ['eea', 'vocab-usage'] as const,
-  vocab: (kind: string) => ['eea', 'vocab', kind] as const,
-  tagSuggestions: (signalId: string) => ['eea', 'tag-suggestions', signalId] as const,
-  audit: (entityId: string) => ['eea', 'audit', entityId] as const,
-  demands: ['eea', 'demands'] as const,
-  landingPoints: ['eea', 'landing-points'] as const,
-  assessments: ['eea', 'assessments'] as const,
-  panorama: ['eea', 'panorama'] as const,
-  trace: (lpId: string) => ['eea', 'trace', lpId] as const,
-}
+// Compatibility export for existing callers while feature hooks move.
+export { eeaQueryKeys } from '@/lib/query/eea-query-keys'
 
-export function useRefCodeMaps() {
+export function useRefCodeMaps(enabled = true) {
   const query = useQuery({
     queryKey: eeaQueryKeys.refCodes,
     queryFn: () => fetchRefCodes(),
+    enabled,
   })
 
   const maps = useMemo<RefCodeMaps>(
@@ -72,12 +59,12 @@ export function useOverviewStats() {
   })
 }
 
-export function useSignalsList(params: ListSignalsParams = { limit: 200 }) {
-  const { maps, isSuccess: codesReady } = useRefCodeMaps()
+export function useSignalsList(params: ListSignalsParams = { limit: 200 }, enabled = true) {
+  const { maps, isSuccess: codesReady } = useRefCodeMaps(enabled)
   const query = useQuery({
     queryKey: eeaQueryKeys.signals(params as Record<string, unknown>),
     queryFn: () => fetchSignals(params),
-    enabled: codesReady,
+    enabled: enabled && codesReady,
     placeholderData: keepPreviousData,
   })
 
@@ -140,12 +127,12 @@ export function useSignalDetail(signalId: string) {
   return { ...query, signal: ui, detail: query.data }
 }
 
-export function useThemeRows() {
-  const { maps, isSuccess: codesReady } = useRefCodeMaps()
+export function useThemeRows(enabled = true) {
+  const { maps, isSuccess: codesReady } = useRefCodeMaps(enabled)
   const query = useQuery({
     queryKey: eeaQueryKeys.themes,
     queryFn: fetchThemes,
-    enabled: codesReady,
+    enabled: enabled && codesReady,
   })
 
   const rows = useMemo<OverviewThemeRow[]>(() => {
@@ -156,12 +143,12 @@ export function useThemeRows() {
   return { ...query, rows }
 }
 
-export function useDemandRows() {
-  const { maps, isSuccess: codesReady } = useRefCodeMaps()
+export function useDemandRows(enabled = true) {
+  const { maps, isSuccess: codesReady } = useRefCodeMaps(enabled)
   const query = useQuery({
     queryKey: eeaQueryKeys.demands,
     queryFn: fetchDemands,
-    enabled: codesReady,
+    enabled: enabled && codesReady,
   })
 
   const rows = useMemo<DemandRow[]>(() => {
@@ -172,15 +159,17 @@ export function useDemandRows() {
   return { ...query, rows }
 }
 
-export function useLandingRows() {
+export function useLandingRows(enabled = true) {
   const assessments = useQuery({
     queryKey: eeaQueryKeys.assessments,
     queryFn: () => fetchAssessments({ current_only: true }),
+    enabled,
   })
 
   const landingQuery = useQuery({
     queryKey: eeaQueryKeys.landingPoints,
     queryFn: () => fetchLandingPoints(),
+    enabled,
   })
 
   const assessmentByLp = useMemo(() => {

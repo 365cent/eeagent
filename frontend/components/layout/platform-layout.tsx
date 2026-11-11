@@ -24,6 +24,7 @@ import { utilityPageTitle } from '@/config/utility-pages'
 import { recordVisit } from '@/lib/api/eea-api'
 import type { NavigateFn } from '@/types/platform'
 import { useClientReady } from '@/hooks/use-client-ready'
+import { LaunchDarklyOnboardingBanner } from '@/components/launchdarkly/onboarding-test-banner'
 import { PlatformLayoutFallback } from '@/components/layout/platform-layout-fallback'
 
 type PlatformLayoutProps = {
@@ -134,6 +135,7 @@ export function PlatformLayout({
             onOpenMobileNav={() => onCollapse(false)}
             onCollapseSider={() => onCollapse(true)}
           />
+          <LaunchDarklyOnboardingBanner />
           <div className="dashboard-page-body">{children}</div>
         </div>
       </AntApp>

@@ -505,7 +505,7 @@ async def test_overview_failed_document_todo_tracks_retryable_ingest_state(clien
     async def fail_ingest(data, filename, mime, **kwargs):
         raise RuntimeError("expected parser failure")
 
-    monkeypatch.setattr("app.api.v1.documents.ingest_document", fail_ingest)
+    monkeypatch.setattr("app.domains.evidence.document_pipeline.ingest_document", fail_ingest)
     uploaded = await client.post(
         "/api/v1/documents/raw",
         files={"file": ("retryable.bin", b"retryable raw bytes", "application/octet-stream")},
@@ -521,7 +521,7 @@ async def test_overview_failed_document_todo_tracks_retryable_ingest_state(clien
             canonical_md="# Parsed after retry\n", markitdown_version="test", figures=[]
         )
 
-    monkeypatch.setattr("app.api.v1.documents.ingest_document", succeed_ingest)
+    monkeypatch.setattr("app.domains.evidence.document_pipeline.ingest_document", succeed_ingest)
     retried = await client.post(f"/api/v1/documents/{document['id']}/ingest")
     assert retried.status_code == 200
     assert retried.json()["ingest_status"] == "parsed"

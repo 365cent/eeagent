@@ -1,1 +1,1 @@
-export { TechnologyView } from '@/views/dashboard/workspace'
+export { TechnologyView } from './technology-view'

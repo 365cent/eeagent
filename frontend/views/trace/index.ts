@@ -1,1 +1,1 @@
-export { TraceView } from '@/views/dashboard/workspace'
+export { TraceView } from './trace-view'

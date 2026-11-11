@@ -5,6 +5,7 @@ import { Alert, Progress, Space, Typography } from 'antd'
 import type { PanoramaImportBatchOut } from '@/lib/api/types'
 import {
   PANORAMA_IMPORT_STATUS_LABEL,
+  PANORAMA_IMPORT_REVIEW_HINT,
   panoramaImportAlertType,
 } from '@/features/evidence/status'
 
@@ -67,6 +68,7 @@ export function PanoramaImportBanner({
               </>
             ) : null}
           </Text>
+          {batch.status === 'completed' ? <Text type="secondary">{PANORAMA_IMPORT_REVIEW_HINT}</Text> : null}
           {batch.error ? <Text type="danger">{batch.error}</Text> : null}
         </Space>
       }

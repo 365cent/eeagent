@@ -6,6 +6,7 @@ import { formatApiDate } from '@/lib/eea-mappers'
 import type { PanoramaImportBatchOut } from '@/lib/api/types'
 import {
   PANORAMA_IMPORT_STATUS_LABEL,
+  PANORAMA_IMPORT_REVIEW_HINT,
   PANORAMA_IMPORT_STATUS_TAG,
   panoramaImportIsActive,
   panoramaImportStatusIconClass,
@@ -96,6 +97,7 @@ export function PanoramaImportNotificationItem({
             </>
           ) : null}
         </Text>
+        {batch.status === 'completed' ? <Text type="secondary">{PANORAMA_IMPORT_REVIEW_HINT}</Text> : null}
         {batch.error ? (
           <Text type="danger" className="notifications-center-error">
             {batch.error}

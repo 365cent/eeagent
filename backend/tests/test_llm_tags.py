@@ -148,6 +148,7 @@ async def test_endpoint_falls_back_to_jieba_when_llm_unavailable(client, monkeyp
     """GET /signals/{id}/tag-suggestions keeps its TagSuggestion shape and
     falls back to jieba when the LLM path yields None."""
     import app.api.v1.signals as signals_api
+    from app.domains.evidence import signal_record
 
     async def none_suggestion(title, body):
         return None
@@ -157,6 +158,8 @@ async def test_endpoint_falls_back_to_jieba_when_llm_unavailable(client, monkeyp
 
     monkeypatch.setattr(signals_api, "suggest_tags_with_llm", none_suggestion)
     monkeypatch.setattr(signals_api, "suggest_tech_tags", jieba_only)
+    monkeypatch.setattr(signal_record, "suggest_tags_with_llm", none_suggestion)
+    monkeypatch.setattr(signal_record, "suggest_tech_tags", jieba_only)
     resp = await client.post(
         "/api/v1/signals",
         json={
@@ -184,6 +187,7 @@ async def test_endpoint_falls_back_to_jieba_when_llm_unavailable(client, monkeyp
 
 async def test_endpoint_uses_llm_when_available(client, monkeypatch):
     import app.api.v1.signals as signals_api
+    from app.domains.evidence import signal_record
 
     async def good(title, body):
         return LLMTagSuggestion(
@@ -195,6 +199,8 @@ async def test_endpoint_uses_llm_when_available(client, monkeypatch):
 
     monkeypatch.setattr(signals_api, "suggest_tags_with_llm", good)
     monkeypatch.setattr(signals_api, "suggest_tech_tags", good_tags)
+    monkeypatch.setattr(signal_record, "suggest_tags_with_llm", good)
+    monkeypatch.setattr(signal_record, "suggest_tech_tags", good_tags)
     resp = await client.post(
         "/api/v1/signals",
         json={

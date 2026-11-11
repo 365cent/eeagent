@@ -1,7 +1,7 @@
 import MiniSearch from 'minisearch'
 import { flattenMainMenuLeafKeys, mainMenuTree } from '@/config/menu'
 import { utilityPages } from '@/config/utility-pages'
-import { getLivePlatformSearchData } from '@/lib/live-platform-data'
+import type { LivePlatformData } from '@/lib/live-platform-data'
 import type { AppRouteOptions } from '@/types/platform'
 
 export type PlatformSearchKind = 'nav' | 'signal' | 'theme' | 'demand' | 'landing' | 'action'
@@ -34,12 +34,11 @@ export function platformSearchKindLabel(kind: PlatformSearchKind): string {
   return kindLabels[kind]
 }
 
-function buildDocuments(): PlatformSearchDocument[] {
-  const live = getLivePlatformSearchData()
-  const signalSource = live?.signals ?? []
-  const themeSource = live?.themes ?? []
-  const demandSource = live?.demands ?? []
-  const landingSource = live?.landings ?? []
+function buildDocuments(live: LivePlatformData): PlatformSearchDocument[] {
+  const signalSource = live.signals
+  const themeSource = live.themes
+  const demandSource = live.demands
+  const landingSource = live.landings
 
   const docs: PlatformSearchDocument[] = []
 
@@ -120,20 +119,10 @@ function buildDocuments(): PlatformSearchDocument[] {
   return docs
 }
 
-let cachedIndex: MiniSearch<PlatformSearchDocument> | null = null
-let cachedDocs: PlatformSearchDocument[] | null = null
+export type PlatformSearchIndex = { index: MiniSearch<PlatformSearchDocument>; docs: PlatformSearchDocument[] }
 
-export function resetPlatformSearchIndex() {
-  cachedIndex = null
-  cachedDocs = null
-}
-
-export function getPlatformSearchIndex(): { index: MiniSearch<PlatformSearchDocument>; docs: PlatformSearchDocument[] } {
-  if (cachedIndex && cachedDocs) {
-    return { index: cachedIndex, docs: cachedDocs }
-  }
-
-  const docs = buildDocuments()
+export function buildPlatformSearchIndex(live: LivePlatformData): PlatformSearchIndex {
+  const docs = buildDocuments(live)
   const index = new MiniSearch<PlatformSearchDocument>({
     fields: ['title', 'subtitle', 'body'],
     storeFields: ['id', 'kind', 'viewKey', 'title', 'subtitle', 'route'],
@@ -145,14 +134,11 @@ export function getPlatformSearchIndex(): { index: MiniSearch<PlatformSearchDocu
   })
 
   index.addAll(docs)
-  cachedIndex = index
-  cachedDocs = docs
   return { index, docs }
 }
 
-export function searchPlatform(query: string, limit = 12): PlatformSearchHit[] {
+export function searchPlatform(query: string, { index, docs }: PlatformSearchIndex, limit = 12): PlatformSearchHit[] {
   const trimmed = query.trim()
-  const { index, docs } = getPlatformSearchIndex()
 
   if (!trimmed) {
     return docs

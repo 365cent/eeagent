@@ -27,6 +27,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.platform.launchdarkly import EVIDENCE_CAPTURE, require_feature, track_workflow_success
 from app.db.base import get_db
 from app.models.models import CaptureJob, Document, Signal
 from app.schemas.schemas import CaptureJobOut, CaptureResult
@@ -37,25 +38,26 @@ from app.services.url_fetch import FetchError, fetch_url
 from app.domains.capture.document_path import _document_path
 from app.domains.capture.submission import _is_html, _submission_fingerprint
 from app.domains.evidence.html_capture import _signal_from_html
+from app.domains.evidence.signal_queries import get_signal_detail
 
 from app.domains.evidence.document_pipeline import document_raw_out as _raw_out
-from app.api.v1.signals import (
-    _linked_demand_points,
-    _load_signal,
-    _to_detail,
-)
 
-router = APIRouter(prefix="/capture", tags=["capture"])
+router = APIRouter(
+    prefix="/capture",
+    tags=["capture"],
+    dependencies=[Depends(require_feature(EVIDENCE_CAPTURE))],
+)
 
 
 async def _signal_detail(db: AsyncSession, signal_id: uuid.UUID):
-    signal = await _load_signal(db, signal_id)
-    detail = _to_detail(signal)
-    detail.linked_demand_points = await _linked_demand_points(db, signal.tech_theme_id)
+    detail = await get_signal_detail(db, signal_id)
+    if detail is None:
+        raise HTTPException(404, "signal not found")
     return detail
 
 
 async def _capture_result(db: AsyncSession, signal: Signal, *, via: str) -> CaptureResult:
+    track_workflow_success(EVIDENCE_CAPTURE)
     document_out = None
     if signal.document_id is not None:
         document = await db.get(Document, signal.document_id)

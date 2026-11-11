@@ -14,12 +14,12 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/rodrigocfd/windigo/co"
 	"github.com/rodrigocfd/windigo/ui"
 	"github.com/rodrigocfd/windigo/win"
 
+	"eea/capture/internal/application"
 	"eea/capture/internal/archive"
 	"eea/capture/internal/capture"
 	"eea/capture/internal/config"
@@ -43,7 +43,7 @@ func Run(cfg config.Config, dir string) int {
 
 	app := newApp(cfg, dir)
 	code := app.wnd.RunAsMain()
-	app.engine.close()
+	app.rt.Close()
 	return code
 }
 
@@ -54,7 +54,7 @@ type appState struct {
 	nullPen win.HPEN
 	fonts   fonts
 	lay     frame
-	engine  *lazyEngine
+	rt      *application.Runtime
 
 	edt            *ui.Edit
 	edtManualURL   *ui.Edit
@@ -105,7 +105,7 @@ func newApp(cfg config.Config, dir string) *appState {
 		cfg:          cfg,
 		dir:          dir,
 		panelNote:    panelNote,
-		engine:       &lazyEngine{opts: engineOptions(cfg)},
+		rt:           application.New(cfg, dir),
 		engineChrome: strings.EqualFold(cfg.CaptureEngine, "chrome"),
 		headlessOn:   cfg.Headless,
 		jobs:         make(map[int]queue.Job),
@@ -441,6 +441,11 @@ func (a *appState) hidePanel(hide bool) {
 }
 
 func (a *appState) savePanel() {
+	if a.queueRunning || a.busy > 0 {
+		a.panelNote = "当前任务尚未结束，请等待后再保存设置"
+		a.invalidate()
+		return
+	}
 	api := strings.TrimRight(strings.TrimSpace(a.edtAPI.Text()), "/")
 	if !strings.HasPrefix(api, "http://") && !strings.HasPrefix(api, "https://") {
 		a.panelNote = "接口地址需以 http:// 或 https:// 开头"
@@ -460,26 +465,25 @@ func (a *appState) savePanel() {
 	if a.engineChrome {
 		engine = "chrome"
 	}
-	engineChanged := a.cfg.CaptureEngine != engine || a.cfg.Headless != a.headlessOn
-	a.cfg.APIBase = api
-	a.cfg.AutoAPI = false
-	a.cfg.MaxParallel = par
-	a.cfg.MaxUploadMB = maxMB
-	a.cfg.TimeoutSec = secs
-	a.cfg.CaptureEngine = engine
-	a.cfg.Headless = a.headlessOn
-	if err := config.Save(a.dir, a.cfg); err != nil {
+	next := a.cfg
+	next.APIBase = api
+	next.AutoAPI = false
+	next.MaxParallel = par
+	next.MaxUploadMB = maxMB
+	next.TimeoutSec = secs
+	next.CaptureEngine = engine
+	next.Headless = a.headlessOn
+	if err := config.Save(a.dir, next); err != nil {
 		a.panelNote = "保存失败：" + err.Error()
 		a.invalidate()
 		return
 	}
-	if engineChanged {
-		a.engine.close()
-		a.engine = &lazyEngine{opts: engineOptions(a.cfg)}
-	}
-	if err := capture.EnsureSingleFileExtension(a.dir, a.cfg.UserDataDir, a.cfg.CaptureArchive, a.cfg.CaptureEngine, &a.cfg.SingleFileExtensionPath); err != nil {
+	if err := capture.EnsureSingleFileExtension(a.dir, next.UserDataDir, next.CaptureArchive, next.CaptureEngine, &next.SingleFileExtensionPath); err != nil {
 		a.panelNote = err.Error()
 	}
+	a.cfg = next
+	a.rt.Close()
+	a.rt = application.New(a.cfg, a.dir)
 	a.closePanel()
 }
 
@@ -499,13 +503,6 @@ func (a *appState) submitText() {
 		a.invalidate()
 		return
 	}
-	if err := capture.EnsureSingleFileExtension(a.dir, a.cfg.UserDataDir, a.cfg.CaptureArchive, a.cfg.CaptureEngine, &a.cfg.SingleFileExtensionPath); err != nil {
-		a.notice = err.Error()
-		a.invalidate()
-		return
-	}
-	a.engine.close()
-	a.engine = &lazyEngine{opts: engineOptions(a.cfg)}
 	a.notice = ""
 	a.edt.SetText("")
 	a.showJobs = true
@@ -802,15 +799,7 @@ func findJob(jobs []queue.Job, id int) queue.Job {
 }
 
 func (a *appState) newQueue() *queue.Queue {
-	api := platform.New(a.cfg.EffectiveAPIBase(), a.cfg.MaxUploadMB)
-	return queue.New(a.engine, api, queue.Options{
-		Workers:       a.cfg.MaxParallel,
-		Retries:       2,
-		Timeout:       time.Duration(a.cfg.TimeoutSec) * time.Second,
-		UploadTimeout: time.Duration(a.cfg.UploadTimeout) * time.Second,
-		StateDir:      config.QueueStateDir(a.dir, a.cfg),
-		OnUpdate:      a.onJob,
-	})
+	return a.rt.NewQueue(0, a.onJob)
 }
 
 func (a *appState) pendingURLs() []string {
@@ -1014,4 +1003,3 @@ func segoeFont(height int, weight co.FW) win.HFONT {
 	}
 	return font
 }
-

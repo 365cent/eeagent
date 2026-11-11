@@ -22,3 +22,7 @@ class ConflictError(DomainError):
 
 class ValidationError(DomainError):
     status_code = 422
+
+
+class FeatureDisabledError(DomainError):
+    status_code = 403

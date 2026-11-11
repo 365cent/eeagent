@@ -19,24 +19,36 @@ import (
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
 
+	"eea/capture/internal/application"
 	"eea/capture/internal/archive"
 	"eea/capture/internal/config"
 	"eea/capture/internal/importdrain"
-	"eea/capture/internal/platform"
 	"eea/capture/internal/queue"
 )
 
 // Run shows the macOS capture window (blocks until closed).
 func Run(cfg config.Config, dir string) int {
-	_ = capture.EnsureSingleFileExtension(dir, cfg.UserDataDir, cfg.CaptureArchive, cfg.CaptureEngine, &cfg.SingleFileExtensionPath)
+	prepErr := capture.EnsureSingleFileExtension(dir, cfg.UserDataDir, cfg.CaptureArchive, cfg.CaptureEngine, &cfg.SingleFileExtensionPath)
 	a := &darwinApp{
-		cfg:    cfg,
-		dir:    dir,
-		engine: &lazyEngine{opts: engineOptions(cfg)},
-		jobs:   make(map[int]queue.Job),
+		cfg:  cfg,
+		dir:  dir,
+		rt:   application.New(cfg, dir),
+		jobs: make(map[int]queue.Job),
+	}
+	if prepErr != nil {
+		a.notice = prepErr.Error()
 	}
 	a.loop()
-	a.engine.close()
+	a.stopDrain()
+	a.drainWG.Wait()
+	a.mu.Lock()
+	q := a.activeQueue
+	a.mu.Unlock()
+	if q != nil {
+		q.Wait()
+		q.Close()
+	}
+	a.rt.Close()
 	if a.exitCode != 0 {
 		return a.exitCode
 	}
@@ -44,10 +56,13 @@ func Run(cfg config.Config, dir string) int {
 }
 
 type darwinApp struct {
-	cfg    config.Config
-	dir    string
-	engine *lazyEngine
-	mu     sync.Mutex
+	cfg          config.Config
+	dir          string
+	rt           *application.Runtime
+	stopDrain    context.CancelFunc
+	drainWG      sync.WaitGroup
+	drainRunning bool
+	mu           sync.Mutex
 
 	fyneApp fyne.App
 	win     fyne.Window
@@ -71,7 +86,7 @@ func (a *darwinApp) loop() {
 	a.win.Resize(fyne.NewSize(500, 420))
 	a.win.SetMaster()
 	a.win.SetOnClosed(func() {
-		if a.queueRunning {
+		if a.isQueueRunning() {
 			a.closeWhenIdle = true
 		}
 	})
@@ -80,7 +95,11 @@ func (a *darwinApp) loop() {
 	a.input.SetPlaceHolder("粘贴 http(s) 链接，每行一条；或将 PDF / Word / Excel、或 SingleFile 保存的 HTML 拖入窗口")
 	a.input.Wrapping = fyne.TextWrapWord
 
-	a.status = widget.NewLabel("就绪")
+	status := "就绪"
+	if a.notice != "" {
+		status = a.notice
+	}
+	a.status = widget.NewLabel(status)
 	a.jobList = widget.NewList(
 		func() int { return len(a.jobOrder) },
 		func() fyne.CanvasObject { return widget.NewLabel("job") },
@@ -128,25 +147,45 @@ func (a *darwinApp) loop() {
 	a.win.CenterOnScreen()
 	a.win.Show()
 	a.win.RequestFocus()
+	drainCtx, cancel := context.WithCancel(context.Background())
+	a.stopDrain = cancel
+	a.drainWG.Add(2)
 	go func() {
-		time.Sleep(300 * time.Millisecond)
-		a.resumeQueue()
+		defer a.drainWG.Done()
+		select {
+		case <-drainCtx.Done():
+			return
+		case <-time.After(300 * time.Millisecond):
+			a.resumeQueue()
+		}
 	}()
-	go a.runServerImportDrain()
+	go func() { defer a.drainWG.Done(); a.runServerImportDrain(drainCtx) }()
 	a.fyneApp.Run()
 }
 
-func (a *darwinApp) runServerImportDrain() {
-	api := platform.New(a.cfg.EffectiveAPIBase(), a.cfg.MaxUploadMB)
+func (a *darwinApp) runServerImportDrain(ctx context.Context) {
 	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
-	for range ticker.C {
-		if a.queueRunning {
-			continue
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			a.mu.Lock()
+			if a.queueRunning || a.drainRunning {
+				a.mu.Unlock()
+				continue
+			}
+			a.drainRunning = true
+			rt := a.rt
+			a.mu.Unlock()
+			jobCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+			importdrain.DrainAwaitingJobs(jobCtx, io.Discard, rt.API, rt.Browser, rt.PublicHTTP, "")
+			cancel()
+			a.mu.Lock()
+			a.drainRunning = false
+			a.mu.Unlock()
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		importdrain.DrainAwaitingJobs(ctx, io.Discard, api, a.engine, "")
-		cancel()
 	}
 }
 
@@ -161,12 +200,35 @@ func (a *darwinApp) setStatus(text string) {
 	a.ui(func() { a.status.SetText(text) })
 }
 
+func (a *darwinApp) beginQueue() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if a.queueRunning || a.drainRunning {
+		return false
+	}
+	a.queueRunning = true
+	return true
+}
+
+func (a *darwinApp) clearQueueReservation() {
+	a.mu.Lock()
+	a.queueRunning = false
+	a.mu.Unlock()
+}
+
+func (a *darwinApp) isQueueRunning() bool {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	return a.queueRunning
+}
+
 func (a *darwinApp) resumeQueue() {
-	if a.queueRunning {
+	if !a.beginQueue() {
 		return
 	}
 	q := a.newQueue()
 	if err := q.Restore(); err != nil {
+		a.clearQueueReservation()
 		a.setStatus("恢复本地任务失败；请检查队列目录")
 		return
 	}
@@ -179,11 +241,13 @@ func (a *darwinApp) resumeQueue() {
 		}
 	}
 	if pending == 0 {
+		a.clearQueueReservation()
 		return
 	}
 	a.setStatus(fmt.Sprintf("恢复 %d 条待处理任务…", pending))
+	a.mu.Lock()
 	a.activeQueue = q
-	a.queueRunning = true
+	a.mu.Unlock()
 	q.Start()
 	go a.waitQueue(q)
 }
@@ -216,7 +280,7 @@ func (a *darwinApp) cancelQueued() {
 }
 
 func (a *darwinApp) submitText() {
-	if a.queueRunning {
+	if a.isQueueRunning() {
 		a.setStatus("当前任务尚未结束，请等待后再提交")
 		return
 	}
@@ -225,22 +289,17 @@ func (a *darwinApp) submitText() {
 		a.setStatus("先粘贴至少一条 http(s) 链接，或拖入文件")
 		return
 	}
-	if err := capture.EnsureSingleFileExtension(a.dir, a.cfg.UserDataDir, a.cfg.CaptureArchive, a.cfg.CaptureEngine, &a.cfg.SingleFileExtensionPath); err != nil {
-		a.setStatus(err.Error())
-		return
-	}
-	a.engine.close()
-	a.engine = &lazyEngine{opts: engineOptions(a.cfg)}
-	a.input.SetText("")
-	a.startBatch(func(q *queue.Queue) {
+	if a.startBatch(func(q *queue.Queue) {
 		for _, u := range urls {
 			q.SubmitURL(u, "")
 		}
-	})
+	}) {
+		a.input.SetText("")
+	}
 }
 
 func (a *darwinApp) submitDropped(files []string) {
-	if a.queueRunning {
+	if a.isQueueRunning() {
 		a.setStatus("当前任务尚未结束，请等待后再提交")
 		return
 	}
@@ -281,19 +340,26 @@ func (a *darwinApp) submitDropped(files []string) {
 	})
 }
 
-func (a *darwinApp) startBatch(submit func(*queue.Queue)) {
+func (a *darwinApp) startBatch(submit func(*queue.Queue)) bool {
+	if !a.beginQueue() {
+		a.setStatus("当前任务尚未结束，请等待后再提交")
+		return false
+	}
 	q := a.newQueue()
 	if err := q.Restore(); err != nil {
+		a.clearQueueReservation()
 		a.setStatus("恢复本地任务失败；请检查本地队列目录")
-		return
+		return false
 	}
 	a.mergeJobs(q.Snapshot())
+	a.mu.Lock()
 	a.activeQueue = q
-	a.queueRunning = true
+	a.mu.Unlock()
 	q.Start()
 	submit(q)
 	a.mergeJobs(q.Snapshot())
 	go a.waitQueue(q)
+	return true
 }
 
 func (a *darwinApp) waitQueue(q *queue.Queue) {
@@ -313,27 +379,14 @@ func (a *darwinApp) waitQueue(q *queue.Queue) {
 }
 
 func (a *darwinApp) newQueue() *queue.Queue {
-	api := platform.New(a.cfg.EffectiveAPIBase(), a.cfg.MaxUploadMB)
-	workers := a.cfg.MaxParallel
-	if workers > 1 {
-		// One shared browser/CDP session on macOS; parallel captures deadlock behind the engine lock.
-		workers = 1
-	}
-	return queue.New(a.engine, api, queue.Options{
-		Workers:       workers,
-		Retries:       2,
-		Timeout:       time.Duration(a.cfg.TimeoutSec) * time.Second,
-		UploadTimeout: time.Duration(a.cfg.UploadTimeout) * time.Second,
-		StateDir:      config.QueueStateDir(a.dir, a.cfg),
-		OnUpdate: func(job queue.Job) {
-			a.mu.Lock()
-			a.jobs[job.ID] = job
-			a.mu.Unlock()
-			a.ui(func() {
-				a.jobList.Refresh()
-				a.refreshJobSummary()
-			})
-		},
+	return a.rt.NewQueue(1, func(job queue.Job) {
+		a.mu.Lock()
+		a.jobs[job.ID] = job
+		a.mu.Unlock()
+		a.ui(func() {
+			a.jobList.Refresh()
+			a.refreshJobSummary()
+		})
 	})
 }
 
@@ -394,7 +447,7 @@ func (a *darwinApp) showSettings() {
 	apiEntry.SetText(a.cfg.EffectiveAPIBase())
 	parEntry := widget.NewEntry()
 	parEntry.SetText(fmt.Sprintf("%d", a.cfg.MaxParallel))
-	headlessCheck := widget.NewCheck("无窗口抓取", func(v bool) { a.cfg.Headless = v })
+	headlessCheck := widget.NewCheck("无窗口抓取", nil)
 	headlessCheck.SetChecked(a.cfg.Headless)
 	items := container.NewVBox(
 		widget.NewLabel("平台 API 根地址"),
@@ -412,16 +465,25 @@ func (a *darwinApp) showSettings() {
 			dialog.ShowError(fmt.Errorf("并发数无效"), a.win)
 			return
 		}
-		a.cfg.APIBase = strings.TrimSpace(apiEntry.Text)
-		a.cfg.AutoAPI = a.cfg.APIBase == ""
-		a.cfg.MaxParallel = par
-		a.cfg.Headless = headlessCheck.Checked
-		if err := config.Save(a.dir, a.cfg); err != nil {
+		a.mu.Lock()
+		if a.queueRunning || a.drainRunning {
+			a.mu.Unlock()
+			dialog.ShowError(fmt.Errorf("当前任务尚未结束，请等待后再保存设置"), a.win)
+			return
+		}
+		defer a.mu.Unlock()
+		next := a.cfg
+		next.APIBase = strings.TrimSpace(apiEntry.Text)
+		next.AutoAPI = next.APIBase == ""
+		next.MaxParallel = par
+		next.Headless = headlessCheck.Checked
+		if err := config.Save(a.dir, next); err != nil {
 			dialog.ShowError(err, a.win)
 			return
 		}
-		a.engine.close()
-		a.engine = &lazyEngine{opts: engineOptions(a.cfg)}
+		a.rt.Close()
+		a.cfg = next
+		a.rt = application.New(a.cfg, a.dir)
 		a.setStatus("设置已保存")
 	}, a.win)
 }
@@ -442,7 +504,7 @@ func (a *darwinApp) showDoctor() {
 	)
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	c := platform.New(a.cfg.EffectiveAPIBase(), a.cfg.MaxUploadMB)
+	c := a.rt.API
 	if err := c.Reachable(ctx); err != nil {
 		lines = append(lines, "backend       unreachable ("+err.Error()+")")
 	} else {

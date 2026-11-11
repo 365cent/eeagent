@@ -80,6 +80,7 @@
 - 来源：WBS 1.2.3、1.3.2；REQ-SIG-01/10/11；统一采集 Retry-After 与不确定结果不重试契约。
 - 入口：[httpx/client.go](internal/httpx/client.go)、[retry/retry.go](internal/retry/retry.go)、[platform/client.go](internal/platform/client.go)、[queue/queue.go](internal/queue/queue.go)、[config/config.go](internal/config/config.go)、[capture/](internal/capture/)、[importdrain/](internal/importdrain/)。
 - 已交付：`internal/httpx` 出站 `http.Client` 工厂（网卡绑定、超时）；`internal/retry` 集中 Retry-After 解析与可重试状态码；`platform` 已部分接入上述包。
+- 2026-11-11 本地结构切片：CLI 与两种 GUI 通过 `internal/application` 为每份配置复用平台 API、浏览器和公网下载客户端，每批使用独立队列；浏览器关闭等待在途采集，失败可重新启动。macOS Go 1.26.4 的可移植包检查和新增 session 测试通过；Windows 仅交叉编译 UI 包，真实 GUI/浏览器未验证。
 - 将仍散落的 `http.Client` 构造统一到 `httpx`；`queue` 与 `platform` 共用 `retry` 策略，保持 CC-02 的 submission_id 幂等与 4xx/不确定 POST 不自动重试语义。
 - `capture.Engine` 仅在 `capture` 包声明；`queue` 依赖 `Uploader` 接口而非 concrete `*platform.Client`；`EnsureSingleFileExtension` 迁出 `config`，消除 `config`→`capture` 反向依赖。
 - 按职责拆分 `platform/client.go`、`ui/app.go`（dto/jobs/documents/probe、GUI 面板），OpenAPI 路径与行为不变。

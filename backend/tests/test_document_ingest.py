@@ -187,7 +187,7 @@ async def test_upload_ingests_and_serves_canonical_markdown(client, monkeypatch)
             vision_model="qwen-test",
         )
 
-    monkeypatch.setattr("app.api.v1.documents.ingest_document", fake_ingest)
+    monkeypatch.setattr("app.domains.evidence.document_pipeline.ingest_document", fake_ingest)
 
     response = await client.post(
         "/api/v1/documents/raw",
@@ -221,7 +221,7 @@ async def test_failed_ingest_keeps_blob_and_can_retry(client, monkeypatch):
     async def boom(data, filename, mime, **kwargs):
         raise RuntimeError("markitdown exploded")
 
-    monkeypatch.setattr("app.api.v1.documents.ingest_document", boom)
+    monkeypatch.setattr("app.domains.evidence.document_pipeline.ingest_document", boom)
     response = await client.post(
         "/api/v1/documents/raw",
         files={"file": ("broken.bin", b"raw-bytes", "application/octet-stream")},
@@ -240,7 +240,7 @@ async def test_failed_ingest_keeps_blob_and_can_retry(client, monkeypatch):
             canonical_md="# 重试成功\n", markitdown_version="0.1.9", figures=[]
         )
 
-    monkeypatch.setattr("app.api.v1.documents.ingest_document", ok)
+    monkeypatch.setattr("app.domains.evidence.document_pipeline.ingest_document", ok)
     retry = await client.post(f"/api/v1/documents/{doc_id}/ingest")
     assert retry.status_code == 200, retry.text
     detail = retry.json()
@@ -341,6 +341,8 @@ def test_max_figures_cap_comes_from_settings(monkeypatch):
 async def test_caption_figure_retries_empty_response(monkeypatch):
     """First call empty (transient gateway fault) → one retry recovers."""
     calls = {"n": 0}
+    settings = doc_ingest.get_settings().model_copy(update={"llm_base_url": "https://example.test"})
+    monkeypatch.setattr(doc_ingest, "get_settings", lambda: settings)
 
     async def fake_caption_once(figure, *, model, settings, base, attempt=1):
         calls["n"] += 1
@@ -354,6 +356,8 @@ async def test_caption_figure_retries_empty_response(monkeypatch):
 
 
 async def test_caption_figure_gives_up_after_retries(monkeypatch):
+    settings = doc_ingest.get_settings().model_copy(update={"llm_base_url": "https://example.test"})
+    monkeypatch.setattr(doc_ingest, "get_settings", lambda: settings)
     async def always_empty(figure, *, model, settings, base, attempt=1):
         return ""
 

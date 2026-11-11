@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.identity import OperatorIdentity, get_operator_identity
 from app.db.base import get_db
+from app.platform.launchdarkly import STRATEGY_FUNNEL, require_feature, track_workflow_success
 from app.models.models import StrategicAssessment
 from app.schemas.schemas import (
     AssessmentCreate,
@@ -15,7 +16,11 @@ from app.schemas.schemas import (
 )
 from app.services.strategy_funnel import finalize_funnel, get_funnel_response, patch_funnel
 
-router = APIRouter(prefix="/strategy", tags=["strategy"])
+router = APIRouter(
+    prefix="/strategy",
+    tags=["strategy"],
+    dependencies=[Depends(require_feature(STRATEGY_FUNNEL))],
+)
 
 
 @router.get("/landing-points/{lp_id}/funnel", response_model=StrategyFunnelOut)
@@ -73,7 +78,9 @@ async def create_assessment(
     actor: OperatorIdentity = Depends(get_operator_identity),
 ):
     """Compatibility finalizer; the payload cannot skip saved funnel gates."""
-    return await finalize_funnel(db, lp_id, actor, legacy_payload=payload)
+    result = await finalize_funnel(db, lp_id, actor, legacy_payload=payload)
+    track_workflow_success(STRATEGY_FUNNEL)
+    return result
 
 
 @router.get("/landing-points/{lp_id}/assessments/history", response_model=list[AssessmentOut])

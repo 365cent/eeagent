@@ -49,6 +49,9 @@ func New(base string, maxUploadMB int) *Client {
 	}
 }
 
+// CloseIdleConnections releases pooled sockets after the owning runtime stops.
+func (c *Client) CloseIdleConnections() { c.http.CloseIdleConnections() }
+
 // Base returns the API root.
 func (c *Client) Base() string { return c.base }
 

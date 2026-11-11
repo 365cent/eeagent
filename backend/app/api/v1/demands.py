@@ -5,6 +5,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import get_db
+from app.platform.launchdarkly import DEMAND_EXTRACTION, require_feature, track_workflow_success
 from app.core.identity import OperatorIdentity, get_operator_identity
 from app.models.models import DemandPoint, TechTheme, VehicleFunction
 from app.schemas.schemas import (
@@ -23,7 +24,11 @@ from app.services.demand_validation import (
     validate_demand_trace,
 )
 
-router = APIRouter(prefix="/demands", tags=["demands"])
+router = APIRouter(
+    prefix="/demands",
+    tags=["demands"],
+    dependencies=[Depends(require_feature(DEMAND_EXTRACTION))],
+)
 
 
 async def _enrich(db: AsyncSession, d: DemandPoint) -> DemandOut:
@@ -73,6 +78,7 @@ async def create_demand(payload: DemandCreate, db: AsyncSession = Depends(get_db
     d = DemandPoint(**values, review_status="pending")
     db.add(d)
     await db.commit()
+    track_workflow_success(DEMAND_EXTRACTION)
     return await _enrich(db, d)
 
 

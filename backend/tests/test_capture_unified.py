@@ -85,7 +85,7 @@ async def test_document_file_upload_creates_derived_signal(client, monkeypatch):
 
         return IngestResult(canonical_md="# 白皮书\n\n48V 智能配电", markitdown_version="0.1.9")
 
-    monkeypatch.setattr("app.api.v1.documents.ingest_document", fake_ingest)
+    monkeypatch.setattr("app.domains.evidence.document_pipeline.ingest_document", fake_ingest)
     before = await _count_signals(client)
     response = await client.post(
         "/api/v1/capture",
@@ -112,7 +112,7 @@ async def test_url_only_fetching_a_document_goes_document_path(client, monkeypat
         assert data == b"%PDF-fake"
         return IngestResult(canonical_md="# 报告\n", markitdown_version="0.1.9")
 
-    monkeypatch.setattr("app.api.v1.documents.ingest_document", fake_ingest)
+    monkeypatch.setattr("app.domains.evidence.document_pipeline.ingest_document", fake_ingest)
 
     async def fake_fetch(url):
         return FetchedPage(

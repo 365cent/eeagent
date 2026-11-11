@@ -13,12 +13,11 @@ from sqlalchemy.orm import selectinload
 from app.core.config import get_settings
 from app.core.identity import OperatorIdentity, get_operator_identity
 from app.db.base import get_db
-from app.models.models import DemandPoint, Document, Signal, SignalTag, TechTheme, Vocab
+from app.platform.launchdarkly import SIGNAL_TAGGING, require_feature, track_workflow_success
+from app.models.models import Document, Signal, SignalTag, TechTheme, Vocab
 from app.schemas.schemas import (
     SignalAssistantMessageIn,
     SignalAssistantMessageOut,
-    SignalBase,
-    ThemeOut,
     SignalCreate,
     SignalDetail,
     SignalFigureOut,
@@ -34,6 +33,7 @@ from app.schemas.schemas import (
 from app.domains.evidence.channel import _infer_channel_code
 from app.domains.evidence.document_pipeline import document_title as _document_title
 from app.domains.evidence.html_capture import _signal_from_html
+from app.domains.evidence.signal_queries import find_signal, get_signal_detail, signal_out as _to_out
 from app.domains.evidence.signal_record import create_signal_record as _create_signal_record
 from app.domains.evidence.theme_match import match_theme as _match_theme
 from app.services.audit import record_correction
@@ -65,7 +65,6 @@ from app.services.studio import (
     parse_studio_payload,
     strip_report_markdown,
 )
-from app.services.signal_duplicate import disambiguate_title_for_url, title_indicates_duplicate_url
 from app.services.tagging import (
     get_or_create_vocab,
     normalize_url,
@@ -91,59 +90,10 @@ def _query_code(domain: str, value: str) -> str:
 
 
 async def _load_signal(db: AsyncSession, sid: uuid.UUID) -> Signal:
-    obj = (
-        await db.execute(
-            select(Signal)
-            # populate_existing: expire_on_commit=False keeps identity-mapped state
-            # across commit, so a reload after an FK/relationship change must
-            # refresh already-loaded attributes (e.g. theme after auto-aggregate).
-            .options(
-                selectinload(Signal.tags).selectinload(SignalTag.vocab),
-                selectinload(Signal.theme),
-                selectinload(Signal.document),
-            )
-            .where(Signal.id == sid)
-            .execution_options(populate_existing=True)
-        )
-    ).scalar_one_or_none()
+    obj = await find_signal(db, sid)
     if obj is None:
         raise HTTPException(404, "signal not found")
     return obj
-
-
-def _to_out(s: Signal) -> SignalOut:
-    out = SignalOut(**SignalBase.model_validate(s).model_dump())
-    out.tags = [st.vocab.name for st in s.tags]
-    out.url_duplicate_renamed = title_indicates_duplicate_url(s.title)
-    return out
-
-
-async def _linked_demand_points(db: AsyncSession, theme_id: uuid.UUID | None) -> list[DemandPoint]:
-    """S1-3 来源栏「关联需求」：demand points sourced from the signal's theme."""
-    if theme_id is None:
-        return []
-    return list(
-        (
-            await db.execute(
-                select(DemandPoint)
-                .where(DemandPoint.source_tech_theme_id == theme_id)
-                .order_by(DemandPoint.created_at)
-            )
-        ).scalars()
-    )
-
-
-def _to_detail(s: Signal) -> SignalDetail:
-    out = SignalDetail(
-        **SignalBase.model_validate(s).model_dump(),
-        body_object_key=s.body_object_key,
-        body_sha256=s.body_sha256,
-        snapshot_html_object_key=s.snapshot_html_object_key,
-        theme=ThemeOut.model_validate(s.theme) if s.theme else None,
-    )
-    out.tags = [st.vocab.name for st in s.tags]
-    out.url_duplicate_renamed = title_indicates_duplicate_url(s.title)
-    return out
 
 
 @router.get("", response_model=list[SignalOut])
@@ -283,9 +233,9 @@ async def capture_signal(
 
 @router.get("/{signal_id}", response_model=SignalDetail)
 async def get_signal(signal_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    s = await _load_signal(db, signal_id)
-    detail = _to_detail(s)
-    detail.linked_demand_points = await _linked_demand_points(db, s.tech_theme_id)
+    detail = await get_signal_detail(db, signal_id)
+    if detail is None:
+        raise HTTPException(404, "signal not found")
     return detail
 
 
@@ -662,6 +612,7 @@ async def set_tags(
     payload: TagAssignment,
     db: AsyncSession = Depends(get_db),
     actor: OperatorIdentity = Depends(get_operator_identity),
+    _feature: None = Depends(require_feature(SIGNAL_TAGGING)),
 ):
     s = await _load_signal(db, signal_id)
     assert_expected_signal_revision(s, payload.expected_updated_at)
@@ -678,6 +629,7 @@ async def set_tags(
     if sorted(tag_names) != old:
         await record_correction(db, "signal", s.id, "tech_tags", old, sorted(tag_names), actor)
     await db.commit()
+    track_workflow_success(SIGNAL_TAGGING)
     return await get_signal(signal_id, db)
 
 
@@ -705,7 +657,11 @@ async def assign_theme(
 
 
 @router.get("/{signal_id}/tag-suggestions", response_model=TagSuggestion)
-async def tag_suggestions(signal_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def tag_suggestions(
+    signal_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _feature: None = Depends(require_feature(SIGNAL_TAGGING)),
+):
     from app.core.config import get_settings
 
     s = await _load_signal(db, signal_id)

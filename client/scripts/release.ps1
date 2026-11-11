@@ -1,7 +1,7 @@
 # Build a Windows release: binary + zip (README/config) + SHA256SUMS.
 # Usage:
 #   powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -Version v0.1.0
-# Requires Go >= 1.24 (windigo uses unicode/utf16.RuneLen).
+# Requires Go >= 1.26 (see go.mod).
 param(
     [string]$Version = "v0.1.0",
     [string]$Go = "go"

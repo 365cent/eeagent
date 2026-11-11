@@ -9,13 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"time"
 
+	"eea/capture/internal/application"
 	"eea/capture/internal/capture"
 	"eea/capture/internal/config"
-	"eea/capture/internal/netinfo"
 	"eea/capture/internal/importdrain"
+	"eea/capture/internal/netinfo"
 	"eea/capture/internal/platform"
 	"eea/capture/internal/queue"
 )
@@ -67,27 +67,6 @@ func (s *stringList) Set(v string) error {
 	return nil
 }
 
-type deferredEngine struct {
-	opts    capture.Options
-	once    sync.Once
-	browser *capture.Browser
-	err     error
-}
-
-func (e *deferredEngine) Capture(ctx context.Context, rawURL string) (*capture.Archive, error) {
-	e.once.Do(func() { e.browser, e.err = capture.Launch(context.Background(), e.opts) })
-	if e.err != nil {
-		return nil, e.err
-	}
-	return e.browser.Capture(ctx, rawURL)
-}
-
-func (e *deferredEngine) Close() {
-	if e.browser != nil {
-		_ = e.browser.Close()
-	}
-}
-
 func runUpload(args []string, out io.Writer) int {
 	fs := flag.NewFlagSet("upload", flag.ContinueOnError)
 	fs.SetOutput(out)
@@ -130,7 +109,6 @@ func runUpload(args []string, out io.Writer) int {
 		cfg.APIBase = strings.TrimRight(*apiBase, "/")
 		cfg.AutoAPI = false
 	}
-	base := cfg.EffectiveAPIBase()
 	if *engine != "" {
 		cfg.CaptureEngine = *engine
 	}
@@ -148,30 +126,15 @@ func runUpload(args []string, out io.Writer) int {
 	if *parallel > 0 {
 		cfg.MaxParallel = *parallel
 	}
-	_ = capture.EnsureSingleFileExtension(dir, cfg.UserDataDir, cfg.CaptureArchive, cfg.CaptureEngine, &cfg.SingleFileExtensionPath)
+	if err := capture.EnsureSingleFileExtension(dir, cfg.UserDataDir, cfg.CaptureArchive, cfg.CaptureEngine, &cfg.SingleFileExtensionPath); err != nil {
+		fmt.Fprintf(out, "singlefile preparation: %v\n", err)
+	}
 
-	api := platform.New(base, cfg.MaxUploadMB)
-
-	engineImpl := &deferredEngine{opts: capture.Options{
-		Engine:                  cfg.CaptureEngine,
-		BrowserPath:             cfg.BrowserPath,
-		UserDataDir:             cfg.UserDataDir,
-		Headless:                cfg.Headless,
-		ArchiveMode:             cfg.CaptureArchive,
-		SingleFileExtensionPath: cfg.SingleFileExtensionPath,
-		ReadyWait:               time.Duration(cfg.ReadyTimeout) * time.Second,
-		InteractiveWait:         time.Duration(cfg.InteractiveTimeout) * time.Second,
-		MinTextChars:            cfg.MinTextChars,
-	}}
-	defer engineImpl.Close()
-
-	q := queue.New(engineImpl, api, queue.Options{
-		Workers:       cfg.MaxParallel,
-		Retries:       2,
-		Timeout:       time.Duration(cfg.TimeoutSec) * time.Second,
-		UploadTimeout: time.Duration(cfg.UploadTimeout) * time.Second,
-		StateDir:      config.QueueStateDir(dir, cfg),
-	})
+	rt := application.New(cfg, dir)
+	defer rt.Close()
+	api := rt.API
+	engineImpl := rt.Browser
+	q := rt.NewQueue(0, nil)
 	if err := q.Restore(); err != nil {
 		fmt.Fprintf(out, "queue restore: %v\n", err)
 		return 1
@@ -186,7 +149,7 @@ func runUpload(args []string, out io.Writer) int {
 	if *drainServer {
 		ctx := context.Background()
 		for round := 0; round < 500; round++ {
-			okN, failN := importdrain.DrainAwaitingJobs(ctx, out, api, engineImpl, *channel)
+			okN, failN := importdrain.DrainAwaitingJobs(ctx, out, api, engineImpl, rt.PublicHTTP, *channel)
 			if okN == 0 && failN == 0 {
 				break
 			}
@@ -293,12 +256,14 @@ func runDoctor(args []string, out io.Writer) int {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	if err := platform.New(base, cfg.MaxUploadMB).Reachable(ctx); err != nil {
+	api := platform.New(base, cfg.MaxUploadMB)
+	defer api.CloseIdleConnections()
+	if err := api.Reachable(ctx); err != nil {
 		fmt.Fprintf(out, "backend       unreachable (%v)\n", err)
 		return 1
 	}
 	fmt.Fprintln(out, "backend       ok")
-	ok, err := platform.New(base, cfg.MaxUploadMB).SupportsCapture(ctx)
+	ok, err := api.SupportsCapture(ctx)
 	if err != nil || !ok {
 		fmt.Fprintln(out, "capture       endpoint missing (backend W2 未实现)")
 		return 1

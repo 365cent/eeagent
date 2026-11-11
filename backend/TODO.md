@@ -14,6 +14,7 @@
 
 - [ ] P0 · 部分实现 · 依赖 OPS-01（生产初始化）、BE-03（身份接入后收紧权限）。
 - 已交付幂等和持久任务首个实现切片；实现与检查证据见[交付记录](../docs/DELIVERY-RECORD.md#be-01--capture-idempotency-and-durable-worker-slice)。BE-01 验收仍未完成。
+- 摄取和结果查询迁入共享 evidence 领域；仍需验证完整的事务边界、失败恢复及各入口行为一致性。
 - 来源：Word §2.1、表A；REQ-SIG-01/02/07/10/11；WBS 1.3.2。
 - 入口：[capture.py](app/api/v1/capture.py)、[signals.py](app/api/v1/signals.py)、[documents.py](app/api/v1/documents.py)、[objectstore.py](app/services/objectstore.py)。
 - 把路由之间互调私有函数改为共享摄取服务，统一空文件、MIME/扩展名、大小限制、渠道识别、来源 URL、文档哈希和异常处理。
@@ -80,6 +81,7 @@
 ## BE-06 需求点推导与复核
 
 - [ ] P0 · 部分实现 · 依赖 BE-02、BE-03；BE-05 为自动建议前置，手工流程可先实现。
+- 全景工作簿导入仅建立待复核需求，不自动填写交叉验证结论或确认；下游功能须经正常人工流程。旧数据可运行 `python -m app.services.panorama_review_report` 输出待人工核查的候选记录；标记仅为启发式，不能证明来源或自动修改历史。
 - 已新增五步逐项引用门控；只接受同一来源主题下已留存信号。确认时再次校验至少两条不同 URL、发布主体和渠道的留存信号，且每条有技术标签、标签组合有差异；仅 taxonomy_admin/platform_admin 可确认。下游功能创建/发布与技术落脚点新增/编辑会重新核验当前证据。修改已确认需求会退回复核并撤销下游发布。FE-05 工作台切片已交付；真实时序与业务交叉验证质量验收仍依赖 DOC-04。
 - 来源：Word §2.3；REQ-DEM-01/04/06/07/09/10/11/12/13/15；WBS 1.3.4。
 - 入口：[demands.py](app/api/v1/demands.py)、[schemas.py](app/schemas/schemas.py)、[test_demands.py](tests/test_demands.py)。
@@ -215,7 +217,7 @@
 - [ ] P0 · 未开始 · 依赖无；与 BE-16 的契约检查互补，不阻塞既有路由交付。
 - 目标：HTTP 仅编排；平台横切能力归 `app/platform`；业务能力逐步迁入 `app/domains/*`；削减 `app.services` → `app.api` 反向依赖。
 - [ ] 约定目录：`app/platform`（配置、DB、身份、对象存储）、`app/domains/<bounded-context>`（用例与实体）、`app/api`（路由与 DTO 映射）；保留 `app/schemas` 直至领域 DTO 收敛。
-- [ ] 运行 `uv run lint-imports`（契约见 [pyproject.toml](pyproject.toml) `[tool.importlinter]` 与 [tests/contracts.ini](tests/contracts.ini)）；启用注释中的 services→api 契约前清理现存 `app.services` 对 `app.api.v1` 的导入。
+- [ ] 保持 `uv run lint-imports` 的 platform→domains/API、services→API、domains→API 契约通过（见 [pyproject.toml](pyproject.toml) 与 [tests/contracts.ini](tests/contracts.ini)），继续消除业务写入和路由私有函数互调。
 - [ ] OpenAPI 路径快照：[tests/test_openapi_snapshot.py](tests/test_openapi_snapshot.py) + [tests/snapshots/openapi_paths.json](tests/snapshots/openapi_paths.json)；路由变更须同步快照（`OPENAPI_UPDATE_SNAPSHOT=1`）。
 - [ ] 迁移顺序建议：`core`/`db`/`models` → `platform`；采集/信号/需求等垂直切片按 WBS 迁入 `domains`；共享摄取逻辑取代 API 私有函数互调（对齐 BE-01）。
 - 验收：import-linter 通过；OpenAPI 快照测试通过；无新增 `platform`→`api`/`domains` 违规；领域迁移切片有对应 pytest 证据。
