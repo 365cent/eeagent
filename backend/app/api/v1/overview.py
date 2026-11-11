@@ -5,7 +5,7 @@ from sqlalchemy import and_, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import get_db
-from app.api.v1.imports import _batch_out
+from app.domains.imports.serialization import panorama_batch_out as _batch_out
 from app.models.models import (
     CaptureJob,
     DemandPoint,

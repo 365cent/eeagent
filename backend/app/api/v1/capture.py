@@ -22,6 +22,10 @@ from functools import partial
 
 from anyio import to_thread
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+
+from app.core.capture_identity import assert_capture_job_access, get_capture_identity
+from app.core.identity import OperatorIdentity
+from app.services.orphan_objects import record_orphan_object, resolve_orphan_object
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -241,6 +245,7 @@ async def create_capture_job(
     channel_code: str | None = Form(None),
     submission_id: uuid.UUID = Form(...),
     db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_capture_identity),
 ):
     """Persist a capture request and return before document parsing begins.
 
@@ -295,6 +300,7 @@ async def create_capture_job(
             raise HTTPException(409, "submission_id was already used for a different capture")
         return await _capture_job_out(db, existing)
 
+    payload_key: str | None = None
     existing_signal = (
         await db.execute(
             select(Signal).where(Signal.capture_submission_id == submission_id)
@@ -313,6 +319,7 @@ async def create_capture_job(
             signal_id=existing_signal.id,
             attempt_count=0,
             finished_at=datetime.now(timezone.utc),
+            owner_subject=actor.subject,
         )
     else:
         payload_key = (
@@ -337,12 +344,19 @@ async def create_capture_job(
             payload_size=len(data),
             via=via,
             status="queued",
+            owner_subject=actor.subject,
         )
     db.add(job)
     try:
         await db.commit()
+        if job.payload_object_key:
+            await resolve_orphan_object(db, job.payload_object_key)
+            await db.commit()
     except IntegrityError:
         await db.rollback()
+        if payload_key:
+            await record_orphan_object(db, payload_key, "capture job commit failed")
+            await db.commit()
         existing = (
             await db.execute(
                 select(CaptureJob).where(CaptureJob.submission_id == submission_id)
@@ -363,8 +377,11 @@ async def list_capture_jobs(
     import_batch_id: uuid.UUID | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_capture_identity),
 ):
     q = select(CaptureJob).order_by(CaptureJob.created_at).limit(limit)
+    if actor.role != "platform_admin":
+        q = q.where(CaptureJob.owner_subject == actor.subject)
     if status:
         q = q.where(CaptureJob.status == status)
     if import_batch_id is not None:
@@ -524,10 +541,15 @@ async def client_submit_capture_job(
 
 
 @router.get("/jobs/{job_id}", response_model=CaptureJobOut)
-async def get_capture_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_capture_job(
+    job_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_capture_identity),
+):
     job = await db.get(CaptureJob, job_id)
     if job is None:
         raise HTTPException(404, "capture job not found")
+    assert_capture_job_access(job.owner_subject, actor)
     return await _capture_job_out(db, job)
 
 
@@ -556,19 +578,27 @@ async def retry_capture_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db
 
 
 @router.post("/jobs/{job_id}/cancel", response_model=CaptureJobOut)
-async def cancel_capture_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def cancel_capture_job(
+    job_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_capture_identity),
+):
     result = await db.execute(
         select(CaptureJob).where(CaptureJob.id == job_id).with_for_update()
     )
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(404, "capture job not found")
-    if job.status != "queued":
-        raise HTTPException(409, f"only queued jobs can be cancelled (status={job.status})")
-    job.status = "cancelled"
-    job.stage = "cancelled"
-    job.error = None
-    job.finished_at = datetime.now(timezone.utc)
+    assert_capture_job_access(job.owner_subject, actor)
+    if job.status == "queued":
+        job.status = "cancelled"
+        job.stage = "cancelled"
+        job.error = None
+        job.finished_at = datetime.now(timezone.utc)
+    elif job.status == "running":
+        job.cancel_requested_at = datetime.now(timezone.utc)
+    else:
+        raise HTTPException(409, f"job cannot be cancelled (status={job.status})")
     await db.commit()
     await db.refresh(job)
     return await _capture_job_out(db, job)

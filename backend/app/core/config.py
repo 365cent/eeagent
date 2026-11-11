@@ -61,6 +61,11 @@ class Settings(BaseSettings):
 
     # LaunchDarkly server-side SDK (Test/Production SDK key from environment settings).
     launchdarkly_sdk_key: str = ""
+    skills_dir: str = ""
+    capture_bearer_tokens: str = Field(
+        default="",
+        description="Comma-separated subject:token pairs for capture client Bearer auth",
+    )
 
     @property
     def database_url(self) -> str:

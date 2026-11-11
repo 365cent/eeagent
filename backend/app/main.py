@@ -31,6 +31,7 @@ from app.api.v1 import (
     session,
     signals,
     standards,
+    reports,
     strategy,
     themes,
     trace,
@@ -121,10 +122,38 @@ def create_app() -> FastAPI:
     app.include_router(agent.router, prefix="/api/v1")
     app.include_router(launchdarkly_onboarding.router, prefix="/api/v1")
     app.include_router(platform_features.router, prefix="/api/v1")
+    app.include_router(reports.router, prefix="/api/v1")
 
     @app.get("/healthz")
     async def healthz():
         return {"status": "ok", "service": settings.app_name}
+
+    @app.get("/readyz")
+    async def readyz():
+        from pathlib import Path
+        from sqlalchemy import text as sql_text
+
+        from app.db.base import SessionLocal
+
+        storage_ok = Path(settings.object_dir).expanduser().resolve()
+        storage_ready = storage_ok.is_dir() and os.access(storage_ok, os.W_OK)
+        db_ready = False
+        async with SessionLocal() as db:
+            try:
+                await db.execute(sql_text("SELECT 1"))
+                db_ready = True
+            except Exception:
+                db_ready = False
+        status = "ready" if db_ready and storage_ready else "not_ready"
+        code = 200 if status == "ready" else 503
+        return JSONResponse(
+            status_code=code,
+            content={
+                "status": status,
+                "database": db_ready,
+                "object_dir": storage_ready,
+            },
+        )
 
     # OpenAPI explorer: Swagger UI loads /openapi.json (deep-linkable #/tag/op).
     # No separate llms.txt or static HTML index — schema is the single contract.

@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select, text
@@ -19,6 +20,7 @@ from app.schemas.schemas import (
 )
 from app.services.audit import record_correction
 from app.services.demand_draft import demand_assistant_reply, propose_demand_draft
+from app.domains.demand.serialization import enrich_demand_out as _enrich
 from app.services.demand_validation import (
     validate_demand_cross_validation,
     validate_demand_trace,
@@ -29,29 +31,6 @@ router = APIRouter(
     tags=["demands"],
     dependencies=[Depends(require_feature(DEMAND_EXTRACTION))],
 )
-
-
-async def _enrich(db: AsyncSession, d: DemandPoint) -> DemandOut:
-    out = DemandOut.model_validate(d)
-    out.function_count = (
-        await db.execute(
-            select(func.count(VehicleFunction.id)).where(VehicleFunction.demand_point_id == d.id)
-        )
-    ).scalar_one()
-    if d.source_tech_theme_id:
-        # REQ-DEM-14: 与 /themes 共用 eea_v_tech_theme_metrics 的同一统计口径
-        # （排除已归档信号，见 migrations/versions/0002_canonical_codes.py）
-        row = (
-            await db.execute(
-                text(
-                    "SELECT signal_frequency, source_count FROM eea_v_tech_theme_metrics WHERE tech_theme_id = :tid"
-                ),
-                {"tid": d.source_tech_theme_id},
-            )
-        ).one_or_none()
-        out.signal_frequency = row.signal_frequency if row else 0
-        out.source_count = row.source_count if row else 0
-    return out
 
 
 @router.get("", response_model=list[DemandOut])
@@ -191,6 +170,9 @@ async def update_demand(
         )
         if cross_validation_error:
             raise HTTPException(422, cross_validation_error)
+    if data.get("review_status") == "confirmed" and d.review_status != "confirmed":
+        d.confirmed_at = datetime.now(timezone.utc)
+        d.confirmed_by_subject = actor.subject
     invalidate_functions = False
     for field, value in data.items():
         old = getattr(d, field)

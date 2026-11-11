@@ -421,6 +421,7 @@ class FunctionCreate(RefCodeValidated):
 
 
 class FunctionUpdate(RefCodeValidated):
+    expected_updated_at: datetime | None = None
     name: str | None = None
     value_chain_stage_code: str | None = None
     forward_trace: dict | None = None
@@ -875,7 +876,7 @@ class TraceChain(BaseModel):
         description="Persisted DemandPoint.cross_validation.conclusion, if present"
     )
     function_published: bool | None = Field(description="Persisted VehicleFunction.published")
-    basis_freshness: Literal["unknown_untracked"] = Field(
+    basis_freshness: Literal["fresh", "stale", "unconfirmed", "unknown_untracked"] = Field(
         description=(
             "Unknown: DemandPoint has no updated_at/confirmed_at baseline, so the API cannot "
             "reliably determine whether the evidence basis changed after review or assessment"

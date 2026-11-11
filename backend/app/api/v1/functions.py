@@ -108,6 +108,9 @@ async def update_function(
     if f is None:
         raise HTTPException(404, "function not found")
     data = payload.model_dump(exclude_unset=True)
+    expected = data.pop("expected_updated_at", None)
+    if expected is not None and f.updated_at and expected < f.updated_at:
+        raise HTTPException(409, "功能记录已被他人更新，请刷新后重试")
     if "forward_trace" in data:
         error = validate_forward_trace(data["forward_trace"])
         if error:

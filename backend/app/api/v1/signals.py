@@ -3,7 +3,7 @@ from datetime import datetime
 from functools import partial
 from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import PlainTextResponse
 from anyio import to_thread
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.exc import IntegrityError
@@ -96,27 +96,18 @@ async def _load_signal(db: AsyncSession, sid: uuid.UUID) -> Signal:
     return obj
 
 
-@router.get("", response_model=list[SignalOut])
-async def list_signals(
-    keyword: str | None = None,
-    value_chain_stage: str | None = None,
-    channel: str | None = None,
-    evidence_status: str | None = None,
-    theme_id: uuid.UUID | None = None,
-    source: str | None = None,  # 来源 (REQ-SIG-04, 图2-1-1 筛选：价值链环节、来源、关键词)
-    include_archived: bool = Query(
-        False,
-        description="When false and evidence_status is unset, archived signals are omitted from the list.",
-    ),
-    limit: int = Query(50, le=200),
-    offset: int = 0,
-    db: AsyncSession = Depends(get_db),
+def _apply_signal_list_filters(
+    q,
+    *,
+    keyword: str | None,
+    value_chain_stage: str | None,
+    channel: str | None,
+    evidence_status: str | None,
+    theme_id: uuid.UUID | None,
+    source: str | None,
+    tag: str | None,
+    include_archived: bool,
 ):
-    q = (
-        select(Signal)
-        .options(selectinload(Signal.tags).selectinload(SignalTag.vocab))
-        .order_by(Signal.created_at.desc())
-    )
     if keyword:
         like = f"%{keyword}%"
         q = q.where(or_(Signal.title.ilike(like), Signal.excerpt.ilike(like), Signal.publisher.ilike(like)))
@@ -132,7 +123,61 @@ async def list_signals(
         q = q.where(Signal.tech_theme_id == theme_id)
     if source:
         q = q.where(Signal.publisher.ilike(f"%{source}%"))
-    rows = (await db.execute(q.limit(limit).offset(offset))).scalars().all()
+    if tag:
+        q = q.join(Signal.tags).join(Vocab).where(Vocab.name.ilike(f"%{tag.strip()}%"))
+    return q
+
+
+@router.get("", response_model=list[SignalOut])
+async def list_signals(
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    keyword: str | None = None,
+    value_chain_stage: str | None = None,
+    channel: str | None = None,
+    evidence_status: str | None = None,
+    theme_id: uuid.UUID | None = None,
+    source: str | None = None,  # 来源 (REQ-SIG-04, 图2-1-1 筛选：价值链环节、来源、关键词)
+    tag: str | None = Query(None, description="Technical tag substring filter"),
+    include_archived: bool = Query(
+        False,
+        description="When false and evidence_status is unset, archived signals are omitted from the list.",
+    ),
+    limit: int = Query(50, le=200),
+    offset: int = 0,
+):
+    q = (
+        select(Signal)
+        .options(selectinload(Signal.tags).selectinload(SignalTag.vocab))
+        .order_by(Signal.created_at.desc())
+    )
+    q = _apply_signal_list_filters(
+        q,
+        keyword=keyword,
+        value_chain_stage=value_chain_stage,
+        channel=channel,
+        evidence_status=evidence_status,
+        theme_id=theme_id,
+        source=source,
+        tag=tag,
+        include_archived=include_archived,
+    )
+    id_q = _apply_signal_list_filters(
+        select(Signal.id),
+        keyword=keyword,
+        value_chain_stage=value_chain_stage,
+        channel=channel,
+        evidence_status=evidence_status,
+        theme_id=theme_id,
+        source=source,
+        tag=tag,
+        include_archived=include_archived,
+    )
+    total = int(
+        (await db.execute(select(func.count()).select_from(id_q.distinct().subquery()))).scalar_one() or 0
+    )
+    rows = (await db.execute(q.limit(limit).offset(offset))).scalars().unique().all()
+    response.headers["X-Total-Count"] = str(total)
     return [_to_out(s) for s in rows]
 
 
@@ -529,6 +574,8 @@ async def auto_aggregate_signal(signal_id: uuid.UUID, db: AsyncSession = Depends
     exists. Manual PUT /{signal_id}/theme stays the audited override path.
     """
     s = await _load_signal(db, signal_id)
+    if s.evidence_status_code == "archived":
+        raise HTTPException(409, "已归档信号不能自动归集")
     if s.document_id is not None:
         # S1-3: document-sourced signals are themed only by the audited manual
         # PUT /theme — automatic aggregation stays off even on demand
@@ -715,3 +762,31 @@ async def tag_suggestions(
     if "signal_type_code" in protected:
         suggestion.signal_type_code = None
     return suggestion
+
+
+@router.post("/{signal_id}/auto-tag", response_model=SignalDetail)
+async def auto_tag_signal(
+    signal_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_operator_identity),
+    _feature: None = Depends(require_feature(SIGNAL_TAGGING)),
+):
+    if actor.role not in {"researcher", "taxonomy_admin", "platform_admin"}:
+        raise HTTPException(403, "当前角色不能写入标签建议")
+    s = await _load_signal(db, signal_id)
+    if s.evidence_status_code == "archived":
+        raise HTTPException(409, "已归档信号不能自动打标")
+    suggestion = await tag_suggestions(signal_id, db)
+    protected = set(suggestion.protected_fields)
+    data = {}
+    if suggestion.value_chain_stage_code and "value_chain_stage_code" not in protected:
+        data["value_chain_stage_code"] = suggestion.value_chain_stage_code
+    if suggestion.signal_type_code and "signal_type_code" not in protected:
+        data["signal_type_code"] = suggestion.signal_type_code
+    if data:
+        payload = SignalUpdate(**data)
+        return await update_signal(signal_id, payload, db, actor)
+    if suggestion.suggested_tags and "tech_tags" not in protected:
+        payload = TagAssignment(tag_names=suggestion.suggested_tags, expected_updated_at=s.updated_at)
+        return await set_tags(signal_id, payload, db, actor)
+    return await get_signal(signal_id, db)

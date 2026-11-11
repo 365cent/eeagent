@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.base import get_db
+from app.domains.standards.counts import substantive_standard_count
 from app.models.models import DemandPoint, RefCode, TechLandingPoint, VehicleFunction
 
 router = APIRouter(tags=["panorama"])
@@ -95,7 +96,7 @@ async def tech_panorama(db: AsyncSession = Depends(get_db)):
                                 id=lp.id,
                                 name=lp.name,
                                 domain_name=lp.domain.name if lp.domain else "",
-                                standard_count=len(lp.standards),
+                                standard_count=substantive_standard_count(lp.standards),
                             )
                             for lp in landing_points
                         ],

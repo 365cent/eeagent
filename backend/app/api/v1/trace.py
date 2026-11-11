@@ -24,8 +24,9 @@ from app.schemas.schemas import (
     TraceDocumentOut,
     TraceSignalOut,
 )
-from app.api.v1.demands import _enrich as demand_enrich
-from app.api.v1.landing_points import _to_out as lp_out
+from app.domains.demand.serialization import enrich_demand_out as demand_enrich
+from app.domains.landing.serialization import landing_point_out as lp_out
+from app.domains.trace.freshness import compute_basis_freshness
 
 router = APIRouter(tags=["trace"])
 
@@ -213,7 +214,7 @@ async def trace_from_landing_point(lp_id: uuid.UUID, db: AsyncSession = Depends(
         demand_review_status=demand.review_status if demand else None,
         demand_cross_validation_conclusion=cross_validation.get("conclusion"),
         function_published=vehicle_function.published if vehicle_function else None,
-        basis_freshness="unknown_untracked",
+        basis_freshness=await compute_basis_freshness(db, demand),
         completeness=TraceCompleteness(
             complete=not missing_stages and not unresolved_evidence_ids and not unresolved_document_ids,
             present_stages=present_stages,

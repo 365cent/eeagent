@@ -22,7 +22,8 @@ Slices:
   contracts     import-linter + OpenAPI snapshot
 
 Lock (integration only):
-  EEA_PYTEST_LOCK=fail   (default) exit immediately if another session holds eea_test
+  EEA_PYTEST_LOCK=takeover (default) steal stale lock file and retry; eea_test is disposable
+  EEA_PYTEST_LOCK=fail     exit immediately if another session holds eea_test (CI strict)
   EEA_PYTEST_LOCK=block    wait for the lock
   EEA_PYTEST_LOCK=skip     no cross-process lock (unsafe with parallel TRUNCATE)
 

@@ -67,6 +67,8 @@ _ADMIN_DSN = (
 _TRUNCATE_SQL = text(
     "TRUNCATE TABLE eea_agent_event, eea_agent_message, eea_agent_patch, eea_agent_run, eea_agent_memory, "
     "eea_agent_session, eea_document_chunk, eea_document_figure, "
+    "eea_chain_report, eea_embedding_cache, eea_signal_source, eea_stored_object_orphan, "
+    "eea_panorama_import_url, eea_panorama_import_batch, "
     "eea_access_log, eea_capture_job, eea_document, eea_signal_tag, eea_signal, eea_correction_audit, "
     "eea_strategic_assessment, eea_strategic_funnel, eea_deployment_standard, eea_tech_landing_point, "
     "eea_vehicle_function, eea_demand_point, eea_tech_theme, eea_vocab, "
@@ -93,12 +95,29 @@ _TEST_LOCK_FILE = None
 
 
 def _lock_mode() -> str:
-    raw = os.environ.get("EEA_PYTEST_LOCK", "fail").strip().lower()
+    """Cross-process exclusivity for ``eea_test`` TRUNCATE isolation.
+
+    Default ``takeover``: eea_test is disposable; a stale or abandoned lock file
+    must not block the next run (unlink and retry). Use ``fail`` in CI when strict
+    mutual exclusion is required.
+    """
+    raw = os.environ.get("EEA_PYTEST_LOCK", "takeover").strip().lower()
     if raw in ("block", "wait"):
         return "block"
     if raw in ("skip", "none", "0"):
         return "skip"
-    return "fail"
+    if raw in ("takeover", "steal", "force"):
+        return "takeover"
+    if raw == "fail":
+        return "fail"
+    return "takeover"
+
+
+def _write_lock_owner(lock_file) -> None:
+    lock_file.seek(0)
+    lock_file.truncate()
+    lock_file.write(f"{os.getpid()}\n")
+    lock_file.flush()
 
 
 def _acquire_suite_lock() -> None:
@@ -107,32 +126,52 @@ def _acquire_suite_lock() -> None:
     if mode == "skip":
         return
     _TEST_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
-    _TEST_LOCK_FILE = open(_TEST_LOCK_PATH, "a+")
-    try:
-        if "msvcrt" in sys.modules:
-            msvcrt.locking(_TEST_LOCK_FILE.fileno(), msvcrt.LK_LOCK, 1)
-        else:  # POSIX
-            flags = fcntl.LOCK_EX
-            if mode == "fail":
-                flags |= fcntl.LOCK_NB
-            fcntl.flock(_TEST_LOCK_FILE.fileno(), flags)
-    except BlockingIOError:
-        _TEST_LOCK_FILE.close()
-        _TEST_LOCK_FILE = None
+    attempts = 3 if mode == "takeover" else 1
+    non_blocking = mode in ("fail", "takeover")
+    last_blocking: BlockingIOError | None = None
+    for attempt in range(attempts):
+        _TEST_LOCK_FILE = open(_TEST_LOCK_PATH, "a+")
+        try:
+            if "msvcrt" in sys.modules:
+                if non_blocking:
+                    msvcrt.locking(_TEST_LOCK_FILE.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    msvcrt.locking(_TEST_LOCK_FILE.fileno(), msvcrt.LK_LOCK, 1)
+            else:  # POSIX
+                flags = fcntl.LOCK_EX
+                if non_blocking:
+                    flags |= fcntl.LOCK_NB
+                fcntl.flock(_TEST_LOCK_FILE.fileno(), flags)
+            _write_lock_owner(_TEST_LOCK_FILE)
+            return
+        except BlockingIOError as exc:
+            last_blocking = exc
+            _TEST_LOCK_FILE.close()
+            _TEST_LOCK_FILE = None
+            if mode == "takeover" and attempt < attempts - 1:
+                try:
+                    _TEST_LOCK_PATH.unlink(missing_ok=True)
+                except OSError:
+                    pass
+                time.sleep(0.05)
+                continue
+            break
+        except OSError as exc:  # pragma: no cover - platform edge cases
+            _TEST_LOCK_FILE.close()
+            _TEST_LOCK_FILE = None
+            pytest.exit(
+                f"eea_test 会话互斥锁获取失败 ({_TEST_LOCK_PATH}): {exc}\n"
+                "B6 门禁要求独占执行：先关掉其它正在跑的 pytest 会话再试。",
+                returncode=1,
+            )
+    if last_blocking is not None:
         pytest.exit(
             f"eea_test 已被其它 pytest 会话占用 ({_TEST_LOCK_PATH})。\n"
             "  快检（无 PostgreSQL、无互斥锁）: uv run pytest -m no_db -q\n"
             "  指定切片: ./scripts/pytest_slices.sh capture | platform\n"
-            "  等待占用结束，或设置 EEA_PYTEST_LOCK=block 在本进程阻塞等锁。",
+            "  默认 EEA_PYTEST_LOCK=takeover 会摘除陈旧锁后重试；并行 TRUNCATE 仍可能死锁。\n"
+            "  等待占用结束: EEA_PYTEST_LOCK=block；严格独占: EEA_PYTEST_LOCK=fail。",
             returncode=2,
-        )
-    except OSError as exc:  # pragma: no cover - platform edge cases
-        _TEST_LOCK_FILE.close()
-        _TEST_LOCK_FILE = None
-        pytest.exit(
-            f"eea_test 会话互斥锁获取失败 ({_TEST_LOCK_PATH}): {exc}\n"
-            "B6 门禁要求独占执行：先关掉其它正在跑的 pytest 会话再试。",
-            returncode=1,
         )
 
 

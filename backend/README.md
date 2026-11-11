@@ -121,7 +121,7 @@ cd backend
 uv run pytest -q
 # 快检：./scripts/pytest_slices.sh unit  或  uv run pytest -m no_db -q
 # 切片：./scripts/pytest_slices.sh capture  （Windows 用 Git Bash/WSL）
-# 默认 EEA_PYTEST_LOCK=fail — 勿并行抢占 eea_test
+# 默认 EEA_PYTEST_LOCK=takeover — 摘陈旧锁后重试；严格独占用 fail，勿并行 TRUNCATE
 ```
 
 macOS/Linux 须先启动本机 PostgreSQL；见根目录 [README.md](../README.md)。

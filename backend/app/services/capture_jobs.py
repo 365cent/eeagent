@@ -141,6 +141,31 @@ async def claim_next_job(worker_id: str) -> uuid.UUID | None:
         return job.id
 
 
+async def _is_cancel_requested(job_id: uuid.UUID) -> bool:
+    async with SessionLocal() as db:
+        job = await db.get(CaptureJob, job_id)
+        return job is not None and job.cancel_requested_at is not None
+
+
+async def _mark_cancelled(job_id: uuid.UUID, worker_id: str) -> None:
+    now = _now()
+    async with SessionLocal() as db:
+        await db.execute(
+            update(CaptureJob)
+            .where(CaptureJob.id == job_id, CaptureJob.worker_id == worker_id)
+            .values(
+                status="cancelled",
+                stage="cancelled",
+                error="Cancelled by operator request.",
+                lease_until=None,
+                worker_id=None,
+                finished_at=now,
+                updated_at=now,
+            )
+        )
+        await db.commit()
+
+
 async def heartbeat(job_id: uuid.UUID, worker_id: str) -> bool:
     """Extend a live worker lease; return false when ownership was lost."""
     lease_until = _now() + timedelta(seconds=max(get_settings().capture_worker_lease_seconds, 60))
@@ -163,6 +188,9 @@ async def _heartbeat_loop(job_id: uuid.UUID, worker_id: str) -> None:
     while True:
         await asyncio.sleep(interval)
         try:
+            if await _is_cancel_requested(job_id):
+                await _mark_cancelled(job_id, worker_id)
+                return
             if not await heartbeat(job_id, worker_id):
                 return
         except Exception as exc:
@@ -245,6 +273,10 @@ async def _execute_capture(job_id: uuid.UUID, worker_id: str) -> None:
     from app.domains.capture.document_path import _document_path
     from app.domains.capture.submission import _is_html
     from app.domains.evidence.html_capture import _signal_from_html
+
+    if await _is_cancel_requested(job_id):
+        await _mark_cancelled(job_id, worker_id)
+        return
 
     async with SessionLocal() as db:
         job = await db.get(CaptureJob, job_id)
