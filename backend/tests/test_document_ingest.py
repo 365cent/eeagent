@@ -342,7 +342,7 @@ async def test_caption_figure_retries_empty_response(monkeypatch):
     """First call empty (transient gateway fault) → one retry recovers."""
     calls = {"n": 0}
 
-    async def fake_caption_once(figure, *, model, settings, base):
+    async def fake_caption_once(figure, *, model, settings, base, attempt=1):
         calls["n"] += 1
         return "" if calls["n"] == 1 else "重试成功的描述"
 
@@ -354,7 +354,7 @@ async def test_caption_figure_retries_empty_response(monkeypatch):
 
 
 async def test_caption_figure_gives_up_after_retries(monkeypatch):
-    async def always_empty(figure, *, model, settings, base):
+    async def always_empty(figure, *, model, settings, base, attempt=1):
         return ""
 
     monkeypatch.setattr(doc_ingest, "_caption_once", always_empty)

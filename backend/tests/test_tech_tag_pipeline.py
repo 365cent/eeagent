@@ -12,7 +12,7 @@ import app.services.tagging as tagging
 from app.services.llm import LLMCandidateTagPick, pick_tech_tags_from_candidates
 from app.services.tagging import suggest_tags, suggest_tech_tags, text_for_tagging
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.no_db]
 
 EDN_BODY = text_for_tagging(
     "蔚来 ET9 架构",

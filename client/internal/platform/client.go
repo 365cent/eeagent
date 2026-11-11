@@ -11,18 +11,17 @@ import (
 	"fmt"
 	"io"
 	"mime/multipart"
-	"net"
 	"net/http"
 	"net/textproto"
 	"net/url"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	"eea/capture/internal/netinfo"
+	"eea/capture/internal/httpx"
+	"eea/capture/internal/retry"
 )
 
 // Client talks to /api/v1 of the EEA backend.
@@ -43,40 +42,11 @@ func New(base string, maxUploadMB int) *Client {
 	if maxUploadMB <= 0 {
 		maxUploadMB = 120
 	}
-	bindIP := netinfo.PrimaryIPv4()
-	dialer := func(ctx context.Context, network, addr string) (net.Conn, error) {
-		host, _, err := net.SplitHostPort(addr)
-		if err != nil {
-			host = addr
-		}
-		if bindIP != "" && !isLoopbackHost(host) {
-			local := &net.Dialer{
-				Timeout:   30 * time.Second,
-				LocalAddr: &net.TCPAddr{IP: net.ParseIP(bindIP)},
-			}
-			return local.DialContext(ctx, network, addr)
-		}
-		return (&net.Dialer{Timeout: 30 * time.Second}).DialContext(ctx, network, addr)
-	}
-	transport := &http.Transport{
-		Proxy:               http.ProxyFromEnvironment,
-		DialContext:         dialer,
-		MaxIdleConnsPerHost: 4,
-		IdleConnTimeout:     90 * time.Second,
-	}
 	return &Client{
 		base:     strings.TrimRight(base, "/"),
-		http:     &http.Client{Transport: transport, Timeout: 15 * time.Minute},
+		http:     httpx.PrimaryClient(""),
 		maxBytes: int64(maxUploadMB) << 20,
 	}
-}
-
-func isLoopbackHost(host string) bool {
-	if strings.EqualFold(host, "localhost") {
-		return true
-	}
-	ip := net.ParseIP(host)
-	return ip != nil && ip.IsLoopback()
 }
 
 // Base returns the API root.
@@ -765,7 +735,7 @@ func (c *Client) doJSON(ctx context.Context, method, path, contentType string, p
 		return &StatusError{
 			Code:       resp.StatusCode,
 			Body:       strings.TrimSpace(string(data)),
-			RetryAfter: parseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
+			RetryAfter: retry.ParseRetryAfter(resp.Header.Get("Retry-After"), time.Now()),
 		}
 	}
 	if out == nil {
@@ -794,33 +764,7 @@ func (e *StatusError) Error() string {
 
 // Retryable reports whether the request may succeed when repeated.
 func (e *StatusError) Retryable() bool {
-	return e.Code == http.StatusTooManyRequests || e.Code >= 500
-}
-
-func parseRetryAfter(value string, now time.Time) time.Duration {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return 0
-	}
-	const maxRetryAfter = 10 * time.Minute
-	if seconds, err := strconv.ParseInt(value, 10, 64); err == nil {
-		if seconds <= 0 {
-			return 0
-		}
-		if seconds > int64(maxRetryAfter/time.Second) {
-			return maxRetryAfter
-		}
-		return time.Duration(seconds) * time.Second
-	}
-	when, err := http.ParseTime(value)
-	if err != nil || !when.After(now) {
-		return 0
-	}
-	delay := when.Sub(now)
-	if delay > maxRetryAfter {
-		return maxRetryAfter
-	}
-	return delay
+	return retry.HTTPStatusRetryable(e.Code)
 }
 
 // mimeFor prefers the real document type over zip sniffing (docx/pptx are

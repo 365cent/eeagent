@@ -21,13 +21,8 @@ from dataclasses import dataclass
 import httpx
 
 from app.core.config import get_settings
+from app.platform.http import DEFAULT_BROWSER_UA, async_http_client
 
-#: Desktop UA: some intranet/new portals serve mobile or empty shells to
-#: unknown agents. Label matches the ones the capture extension sends.
-_DESKTOP_UA = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36"
-)
 FETCH_TIMEOUT = 20.0
 _MAX_REDIRECTS = 5
 
@@ -68,12 +63,13 @@ async def fetch_url(url: str) -> FetchedPage:
         raise FetchError("仅支持 http/https 链接")
     cap = get_settings().doc_raw_upload_max_bytes
     try:
-        async with httpx.AsyncClient(
+        client = async_http_client(
             timeout=FETCH_TIMEOUT,
             follow_redirects=True,
             max_redirects=_MAX_REDIRECTS,
-            headers={"User-Agent": _DESKTOP_UA, "Accept-Language": "zh-CN,zh;q=0.9"},
-        ) as client:
+            headers={"User-Agent": DEFAULT_BROWSER_UA, "Accept-Language": "zh-CN,zh;q=0.9"},
+        )
+        async with client:
             async with client.stream("GET", url) as response:
                 _check_size(response, cap)
                 response.raise_for_status()

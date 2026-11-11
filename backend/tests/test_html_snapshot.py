@@ -6,7 +6,10 @@
 
 from __future__ import annotations
 
+import pytest
 from datetime import datetime, timedelta, timezone
+
+pytestmark = pytest.mark.no_db
 
 from app.services.html_snapshot import (
     HtmlSnapshot,

@@ -4,9 +4,9 @@ Manual checklist after deploy or local `pnpm dev` + backend API on `:8000`.
 
 ## Prerequisites
 
-- Backend: `uv run --directory backend python scripts/dev.py` (do **not** run `bootstrap.py` on cleared DB)
-- Frontend: `cd frontend && pnpm dev`
-- Optional browser automation: run `ego-browser skill` and follow the guide before scripted UI checks
+- Stack up per [README.md](../../README.md) (`bootstrap.py` once, then `uv run python scripts/dev.py` in `backend/`; `pnpm dev` in `frontend/`)
+- On an already-initialized DB, use `dev.py` only — do not re-run `bootstrap.py` unless you intend to migrate/seed again
+- Optional: `ego-browser skill` before scripted UI checks
 
 ## Smoke
 
@@ -46,4 +46,4 @@ pnpm build
 pnpm start
 ```
 
-See [`../../backend/DEPLOY.md`](../../backend/DEPLOY.md) for server paths.
+Production paths: [deploy/README.md](../../deploy/README.md). Legacy portable-host notes: [backend/DEPLOY.md](../../backend/DEPLOY.md).

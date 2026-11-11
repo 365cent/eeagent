@@ -1,6 +1,6 @@
 # Capture Client 实施清单
 
-更新：2026-11-09。生产服务端已选 Linux 内网；本目录仍是研究者 Windows 电脑上的 Go 采集程序。公网与登录浏览器留在用户终端。总顺序见 [项目清单](../TODO.md)，原文映射见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。
+更新：2026-11-11。生产服务端已选 Linux 内网；本目录仍是研究者 Windows 电脑上的 Go 采集程序。公网与登录浏览器留在用户终端。总顺序见 [项目清单](../TODO.md)，原文映射见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。
 
 ## 现状和边界
 
@@ -74,6 +74,17 @@
 - 10 篇网页≥9篇标题正文准确，5 篇微信逐一记录成功/失败；20 条业务样本与服务端信号 ID 对应。
 - 验收：干净业务电脑安装可用、升级/回退不丢队列与配置、发布包 hash 可验证；不在 Linux/macOS 上假称 Windows GUI 测试通过。
 
+## CC-07 客户端分层与 HTTP 复用
+
+- [ ] P1 · 部分实现 · 依赖 CC-02 幂等与任务语义不变；与 [BE-17](../backend/TODO.md#be-17-领域分层与依赖边界) 横切/platform 思路对齐，不阻塞 CC-01…06 功能验收。
+- 来源：WBS 1.2.3、1.3.2；REQ-SIG-01/10/11；统一采集 Retry-After 与不确定结果不重试契约。
+- 入口：[httpx/client.go](internal/httpx/client.go)、[retry/retry.go](internal/retry/retry.go)、[platform/client.go](internal/platform/client.go)、[queue/queue.go](internal/queue/queue.go)、[config/config.go](internal/config/config.go)、[capture/](internal/capture/)、[importdrain/](internal/importdrain/)。
+- 已交付：`internal/httpx` 出站 `http.Client` 工厂（网卡绑定、超时）；`internal/retry` 集中 Retry-After 解析与可重试状态码；`platform` 已部分接入上述包。
+- 将仍散落的 `http.Client` 构造统一到 `httpx`；`queue` 与 `platform` 共用 `retry` 策略，保持 CC-02 的 submission_id 幂等与 4xx/不确定 POST 不自动重试语义。
+- `capture.Engine` 仅在 `capture` 包声明；`queue` 依赖 `Uploader` 接口而非 concrete `*platform.Client`；`EnsureSingleFileExtension` 迁出 `config`，消除 `config`→`capture` 反向依赖。
+- 按职责拆分 `platform/client.go`、`ui/app.go`（dto/jobs/documents/probe、GUI 面板），OpenAPI 路径与行为不变。
+- 验收：macOS `go test -short ./...` 通过；桩服务验证 429/5xx 退避与幂等边界；Windows GUI/CLI 端到端仍记在 CC-04/06，不在本机冒充通过。
+
 ## 旧计划对照
 
-旧客户端 checklist 的实现作为基础保留：主引擎实际为 CDP + Edge/Chrome；离线 HTML/自动寻址/120 MiB/上传超时仍需按新契约回归。旧 B1–B6 属后端 BE-01/02/12/16，旧 B7 二十条链接验收归 CC-06 与 DOC-02/05。
+旧客户端 checklist 的实现作为基础保留：主引擎实际为 CDP + Edge/Chrome；离线 HTML/自动寻址/120 MiB/上传超时仍需按新契约回归。旧 B1–B6 属后端 BE-01/02/12/16，旧 B7 二十条链接验收归 CC-06 与 DOC-02/05。散落 HTTP 客户端与重复 retry 逻辑归 CC-07。

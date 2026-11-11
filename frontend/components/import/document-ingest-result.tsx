@@ -16,6 +16,7 @@ import {
   formatDocumentSize,
   ingestStatusMeta,
 } from '@/lib/document-ingest'
+import { StatusTag } from '@/features/shared/status-tag'
 import {
   fetchDocument,
   fetchDocumentCanonicalMd,
@@ -131,7 +132,7 @@ export function DocumentIngestResult({ doc, filename, onUpdated, onNavigate }: D
         title={
           <Space wrap>
             <span>文档已入库：{displayName}</span>
-            <Tag color={status.color}>{status.label}</Tag>
+            <StatusTag meta={status} />
           </Space>
         }
         description={

@@ -5,14 +5,13 @@ from __future__ import annotations
 import json
 import uuid
 from collections import Counter
-from urllib.parse import urlparse
-
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.models import Signal, SignalTag, TechTheme
+from app.domains.evidence.signal_host import signal_host
 from app.services.demand_agent import DemandAgentDeps, run_demand_agent_chat, signal_to_bot
 from app.services.llm_gateway import (
     LLMNoModelError,
@@ -28,20 +27,6 @@ DEMAND_STEP_META: tuple[tuple[str, str], ...] = (
     ("stakeholder_attribution", "利益相关方归因"),
     ("demand_naming", "需求抽象与命名"),
 )
-
-
-def _signal_host(signal: Signal) -> str:
-    raw = (signal.url_normalized or signal.url or "").strip()
-    if raw:
-        try:
-            href = raw if raw.startswith("http") else f"https://{raw}"
-            return (urlparse(href).hostname or raw).lower()
-        except ValueError:
-            pass
-    pub = (signal.publisher or "").strip()
-    if pub:
-        return pub.lower()
-    return (signal.channel_code or str(signal.id)).lower()
 
 
 def _pick_signals(signals: list[Signal], selected_ids: list[uuid.UUID] | None) -> list[Signal]:
@@ -90,13 +75,13 @@ def _deterministic_draft(theme: TechTheme, signals: list[Signal]) -> dict:
 
     def hosts_for(ids: list[str]) -> set[str]:
         by_id = {str(s.id): s for s in ordered}
-        return {_signal_host(by_id[sid]) for sid in ids if sid in by_id}
+        return {signal_host(by_id[sid]) for sid in ids if sid in by_id}
 
     cross_ids: list[str] = []
     for candidate in ordered:
         if len(cross_ids) >= 2:
             break
-        if cross_ids and _signal_host(candidate) in hosts_for(cross_ids):
+        if cross_ids and signal_host(candidate) in hosts_for(cross_ids):
             continue
         cross_ids.append(str(candidate.id))
     if len(cross_ids) < 2:
@@ -124,7 +109,7 @@ def _deterministic_draft(theme: TechTheme, signals: list[Signal]) -> dict:
     perspectives = []
     for sid in cross_ids:
         sig = next(s for s in ordered if str(s.id) == sid)
-        perspectives.append(f"{sig.publisher or _signal_host(sig)}：{sig.title}")
+        perspectives.append(f"{sig.publisher or signal_host(sig)}：{sig.title}")
 
     return {
         "name": f"{theme.working_name}相关技术需求",
@@ -159,7 +144,7 @@ async def propose_demand_draft(
     from app.services.llm_prompts import DEMAND_DRAFT_SYSTEM, demand_draft_user_message
 
     catalog = "\n".join(
-        f"- {s.id}: {s.title} ({_signal_host(s)})"
+        f"- {s.id}: {s.title} ({signal_host(s)})"
         for s in signals[:30]
     )
     baseline_json = json.dumps(base, ensure_ascii=False)
@@ -177,7 +162,9 @@ async def propose_demand_draft(
         },
     ]
     try:
-        reply, _model = await chat_completion(messages, temperature=0.2)
+        reply, _model = await chat_completion(
+            messages, temperature=0.2, task="demand_draft"
+        )
     except (LLMNotConfiguredError, LLMNoModelError, LLMUpstreamError):
         base["llm_note"] = "LLM 不可用，已返回规则归纳草稿"
         return base

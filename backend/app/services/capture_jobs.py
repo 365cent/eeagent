@@ -17,6 +17,8 @@ from functools import partial
 
 from anyio import to_thread
 from fastapi import HTTPException
+
+from app.platform.errors import DomainError
 from sqlalchemy import and_, or_, select, update
 
 from app.core.config import get_settings
@@ -168,7 +170,7 @@ async def _heartbeat_loop(job_id: uuid.UUID, worker_id: str) -> None:
 
 
 def _failure_text(exc: Exception) -> str:
-    if isinstance(exc, HTTPException):
+    if isinstance(exc, (HTTPException, DomainError)):
         detail = exc.detail
         message = detail if isinstance(detail, str) else str(detail)
     elif isinstance(exc, FetchError):
@@ -196,8 +198,9 @@ async def _mark_failed(job_id: uuid.UUID, worker_id: str, exc: Exception) -> Non
         job = result.scalar_one_or_none()
         if job is None:
             return
+        client_error = isinstance(exc, HTTPException) or isinstance(exc, DomainError)
         permanent = (isinstance(exc, FetchError) and not isinstance(exc, RetryableFetchError)) or (
-            isinstance(exc, HTTPException)
+            client_error
             and 400 <= exc.status_code < 500
             and exc.status_code != 429
         )
@@ -239,8 +242,9 @@ async def _mark_succeeded(job_id: uuid.UUID, worker_id: str, signal_id: uuid.UUI
 
 async def _execute_capture(job_id: uuid.UUID, worker_id: str) -> None:
     # Import the established pipeline lazily to avoid a router/service cycle.
-    from app.api.v1.capture import _document_path, _is_html
-    from app.api.v1.signals import _signal_from_html
+    from app.domains.capture.document_path import _document_path
+    from app.domains.capture.submission import _is_html
+    from app.domains.evidence.html_capture import _signal_from_html
 
     async with SessionLocal() as db:
         job = await db.get(CaptureJob, job_id)
@@ -255,6 +259,7 @@ async def _execute_capture(job_id: uuid.UUID, worker_id: str) -> None:
         channel_code = job.channel_code
         publisher = job.publisher
         source_label = job.source_label
+        import_batch_id = job.import_batch_id
         existing = (
             await db.execute(
                 select(Signal).where(Signal.capture_submission_id == submission_id)
@@ -294,7 +299,7 @@ async def _execute_capture(job_id: uuid.UUID, worker_id: str) -> None:
 
         await _set_stage(job_id, worker_id, "processing")
         # Bulk import batches: skip per-figure vision LLM (96 URLs × many figures would stall the queue).
-        vision_captions = job.import_batch_id is None
+        vision_captions = import_batch_id is None
         if _is_html(mime=mime, filename=filename):
             signal = await _signal_from_html(
                 db,
@@ -322,10 +327,10 @@ async def _execute_capture(job_id: uuid.UUID, worker_id: str) -> None:
             )
         signal_id = signal.id
         await _mark_succeeded(job_id, worker_id, signal_id)
-        if job.import_batch_id is not None:
+        if import_batch_id is not None:
             from app.services.panorama_import_hooks import on_import_capture_job_succeeded
 
-            await on_import_capture_job_succeeded(job.import_batch_id, job_id, signal_id)
+            await on_import_capture_job_succeeded(import_batch_id, job_id, signal_id)
         return
 
 

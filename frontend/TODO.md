@@ -1,6 +1,6 @@
 # Frontend 实施清单
 
-更新：2026-11-09。交付目标：研究者可以使用真实证据走完 Word 七环节并保留每一次人工判断。总顺序见 [项目清单](../TODO.md)，来源见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。
+更新：2026-11-11。交付目标：研究者可以使用真实证据走完 Word 七环节并保留每一次人工判断。总顺序见 [项目清单](../TODO.md)，来源见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。
 
 ## 当前基础和编辑规则
 
@@ -149,6 +149,17 @@
 - 更新走查清单和截图证据；不把原先 checked checkbox 当此次验收。
 - 验收：构建/契约/浏览器测试记录齐全；Linux TLS 同源、SSE、深链接、空库/断网行为通过。
 
+## FE-13 领域特性与 workspace 拆分
+
+- [ ] P1 · 部分实现 · 依赖无；与 [BE-17](../backend/TODO.md#be-17-领域分层与依赖边界) 对齐，不阻塞既有 URL 与主题交付；与 FE-01 workspace 编排目标互补。
+- 来源：WBS 1.2.3、1.3.1/1.3.9；DOC-03 架构同步。
+- 入口：[workspace.tsx](views/dashboard/workspace.tsx)、[routes.ts](config/routes.ts)、[features/](features/)、[eslint.config.mjs](eslint.config.mjs)、[lib/api/eea-api.ts](lib/api/eea-api.ts)、[hooks/use-eea-queries.ts](hooks/use-eea-queries.ts)、[hooks/use-signal-mutations.ts](hooks/use-signal-mutations.ts)。
+- 约定：`features/<domain>/` 承载 api、queries、mutations、columns、status 与领域组件；`views/<route-key>/` 为路由视图；`workspace.tsx` 仅编排 shell 与路由切换，不堆信号表、归档与各环节工作台实现。
+- 已交付首批切片：`features/evidence/status.ts`、`signal-columns.tsx`、`features/shared/status-tag.tsx` 与 `lib/status-registry.ts` 去重全景状态与信号列；[`eslint.config.mjs`](eslint.config.mjs) 限制业务代码直接 `fetch`，须经 `lib/api/client.ts`。
+- 按 bounded context 拆分 evidence、topics、technology、strategy、import、trace、overview；自 `eea-api` 与 hooks 迁出并保持 re-export，消除重复 `useQuery`、状态色板与列定义。
+- 共享 `QuerySurface`、确认操作 helper 与统一 `StatusTag` 注册表；`workspace.tsx` 按 `routes.ts` 键拆到 `views/*`，保留 `singal` 等旧深链接与主题 token。
+- 验收：`pnpm build` 与 scoped `pnpm antd:lint` 通过；各路由键空库/加载/错误可走通；无新增 views 间业务耦合；import/ESLint 规则可纳入 CI。
+
 ## 原任务编号迁移
 
-旧 W3/P1 标签编辑 → FE-03/04；文档信号 → FE-02；追溯遗留 → FE-10；旧 P0 部署 → FE-12 与 OPS；旧 P2 → FE-04/09/11。新增分类只允许开放标签/主题候选，旧“入封闭词表”措辞以来源封闭词表要求纠正。
+旧 W3/P1 标签编辑 → FE-03/04；文档信号 → FE-02；追溯遗留 → FE-10；旧 P0 部署 → FE-12 与 OPS；旧 P2 → FE-04/09/11。FE-01 中 workspace 编排与列拆分归入 FE-13 跟踪。新增分类只允许开放标签/主题候选，旧“入封闭词表”措辞以来源封闭词表要求纠正。

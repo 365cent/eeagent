@@ -20,19 +20,26 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 
 from pydantic import BaseModel, field_validator
 
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.providers.openai import OpenAIProvider
 
 from app.core.config import get_settings
+from app.platform.llm import gateway_openai_provider
 from app.services.llm_gateway import configured_chat_model, resolve_chat_model
 from app.services.llm_prompts import (
     CANDIDATE_TAG_RULES,
     EXCERPT_RULES,
     TAG_SUGGESTION_RULES,
+)
+from app.services.llm_usage import (
+    http_status_of,
+    log_llm_call,
+    usage_from_agent_result,
+    usage_without_result,
 )
 from app.services.refcodes import codes, labels, normalize
 from app.services.tagging import is_low_quality_tag
@@ -99,12 +106,30 @@ def _tag_suggestion_system_prompt() -> str:
     )
 
 
-def _openai_provider() -> OpenAIProvider:
-    settings = get_settings()
-    return OpenAIProvider(
-        base_url=settings.llm_base_url_normalized,
-        api_key=settings.llm_api_key or "not-needed",
+async def _run_logged(agent: Agent, text: str, task: str):
+    requested = str(getattr(getattr(agent, "model", None), "model_name", None) or "")
+    started = time.perf_counter()
+    try:
+        result = await agent.run(text)
+    except Exception as exc:
+        log_llm_call(
+            usage_without_result(
+                task=task,
+                requested_model=requested,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+                http_status=http_status_of(exc),
+            )
+        )
+        raise
+    log_llm_call(
+        usage_from_agent_result(
+            result,
+            task=task,
+            requested_model=requested,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
     )
+    return result
 
 
 async def _chat_model_id() -> str | None:
@@ -126,7 +151,7 @@ async def _build_agent() -> Agent[None, LLMTagSuggestion] | None:
     if not model_id:
         return None
     return Agent(
-        OpenAIChatModel(model_id, provider=_openai_provider()),
+        OpenAIChatModel(model_id, provider=gateway_openai_provider()),
         output_type=LLMTagSuggestion,
         system_prompt=_tag_suggestion_system_prompt(),
         model_settings={"timeout": REQUEST_TIMEOUT_SECONDS},
@@ -154,7 +179,7 @@ async def _build_candidate_pick_agent() -> Agent[None, LLMCandidateTagPick] | No
     if not model_id:
         return None
     return Agent(
-        OpenAIChatModel(model_id, provider=_openai_provider()),
+        OpenAIChatModel(model_id, provider=gateway_openai_provider()),
         output_type=LLMCandidateTagPick,
         system_prompt=CANDIDATE_TAG_RULES,
         model_settings={"timeout": REQUEST_TIMEOUT_SECONDS},
@@ -195,7 +220,7 @@ async def pick_tech_tags_from_candidates(
         agent = await _build_candidate_pick_agent()
         if agent is None:
             return None
-        result = await agent.run(text)
+        result = await _run_logged(agent, text, "candidate_tags")
         chosen = _filter_picked_to_candidates(result.output.tech_tags, pool)
         if chosen:
             return chosen[:cap]
@@ -218,7 +243,7 @@ async def suggest_tags_with_llm(title: str, body: str) -> LLMTagSuggestion | Non
         agent = await _build_agent()
         if agent is None:
             return None
-        result = await agent.run(text)
+        result = await _run_logged(agent, text, "tag_suggestion")
         suggestion = result.output
     except Exception as exc:  # noqa: BLE001 — the suggestion path must never raise
         logger.warning("LLM 标签建议失败，回退 jieba: %s: %s", type(exc).__name__, exc)
@@ -247,7 +272,7 @@ async def _build_excerpt_agent() -> Agent[None, LLMExcerpt] | None:
     if not model_id:
         return None
     return Agent(
-        OpenAIChatModel(model_id, provider=_openai_provider()),
+        OpenAIChatModel(model_id, provider=gateway_openai_provider()),
         output_type=LLMExcerpt,
         system_prompt=EXCERPT_RULES,
         model_settings={"timeout": REQUEST_TIMEOUT_SECONDS},
@@ -265,7 +290,7 @@ async def suggest_excerpt_with_llm(title: str, body: str) -> str | None:
         agent = await _build_excerpt_agent()
         if agent is None:
             return None
-        result = await agent.run(text)
+        result = await _run_logged(agent, text, "excerpt")
         return result.output.excerpt
     except Exception as exc:  # noqa: BLE001
         logger.warning("LLM 摘要失败，回退正文导段: %s: %s", type(exc).__name__, exc)

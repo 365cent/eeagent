@@ -158,7 +158,7 @@ def create_db() -> None:
 
 
 def bootstrap_external_postgres() -> None:
-    """macOS/Linux: use running system Postgres (see docs/DEVELOPMENT-MAC.md)."""
+    """macOS/Linux: use running system Postgres (see repo README.md)."""
     load_dotenv_file()
     ensure_object_dir()
     host = os.environ.get("DB_HOST", "127.0.0.1")

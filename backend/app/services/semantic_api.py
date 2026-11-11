@@ -12,6 +12,7 @@ from typing import Any
 import httpx
 
 from app.core.config import get_settings
+from app.platform.http import open_async_http_client
 
 DEFAULT_TIMEOUT_SECONDS = 30.0
 MAX_BATCH = 16
@@ -95,7 +96,7 @@ async def create_embeddings(
     if len(cleaned) > MAX_BATCH:
         raise ValueError(f"embedding batch exceeds {MAX_BATCH}")
     payload = {"model": settings.embedding_model, "input": cleaned if len(cleaned) > 1 else cleaned[0]}
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with open_async_http_client(timeout=timeout) as client:
         resp = await client.post(url, headers=_headers(), json=payload)
     if resp.status_code >= 400:
         raise SemanticUpstreamError(resp.status_code, resp.text[:400] or resp.reason_phrase)
@@ -134,7 +135,7 @@ async def rerank(
     if not q or not docs:
         return []
     merged: list[tuple[int, float]] = []
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with open_async_http_client(timeout=timeout) as client:
         for offset in range(0, len(docs), MAX_BATCH):
             chunk = docs[offset : offset + MAX_BATCH]
             batch = await _rerank_batch(client, url=url, query=q, documents=chunk, timeout=timeout)

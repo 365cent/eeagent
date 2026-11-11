@@ -40,9 +40,9 @@
 ## DOC-03 架构、数据和接口同步
 
 - [ ] P0 · 随 BE/FE/CC/OPS 实现更新。
-- 持久采集接口、worker 与索引首批同步已交付，证据见[交付记录](DELIVERY-RECORD.md#doc-03--current-capture-route-and-worker-index-slice)。2026-11-09 补充：前端导入与 Go 文件队列默认走 `POST /api/v1/capture/jobs`，`POST /documents/raw` 保留为 legacy；见[交付记录](DELIVERY-RECORD.md#be-01--fe-02--cc-02--durable-document-and-html-ingest-slice)。完整架构图、身份/审计/业务状态仍待更新。
-- 来源：WBS 1.2.2…1.2.6；入口 [figures.md](figures.md)、[平台实施计划](platform-implementation-plan.md)、各 README。
-- 将已落地设计形成当前架构说明：实际 Next.js、嵌入式文档模块、Pydantic AI、Linux 单主机服务和持久对象存储；保留旧技术提案的来源身份。
+- 持久采集接口、worker 与索引首批同步已交付，证据见[交付记录](DELIVERY-RECORD.md#doc-03--current-capture-route-and-worker-index-slice)。2026-11-09 补充：前端导入与 Go 文件队列默认走 `POST /api/v1/capture/jobs`，`POST /documents/raw` 保留为 legacy；见[交付记录](DELIVERY-RECORD.md#be-01--fe-02--cc-02--durable-document-and-html-ingest-slice)。**分层与契约**初稿见 [ARCHITECTURE-LAYERS.md](ARCHITECTURE-LAYERS.md)（对齐 [BE-17](../backend/TODO.md#be-17-领域分层与依赖边界)、[FE-13](../frontend/TODO.md#fe-13-领域特性与-workspace-拆分)、[CC-07](../client/TODO.md#cc-07-客户端分层与-http-复用)）。完整部署拓扑图、身份/审计/业务状态机仍待更新。
+- 来源：WBS 1.2.2…1.2.6；入口 [figures.md](figures.md)、[平台实施计划](platform-implementation-plan.md)、[ARCHITECTURE-LAYERS.md](ARCHITECTURE-LAYERS.md)、各 README。
+- 将已落地设计形成当前架构说明：实际 Next.js、嵌入式文档模块、Pydantic AI、Linux 单主机服务和持久对象存储；保留旧技术提案的来源身份；`app/platform` / `app/domains`、import-linter 与 OpenAPI 路径快照按 ARCHITECTURE-LAYERS 维护。
 - 为摄取/job/身份/审计/复核/funnel/来源/文档/Agent/报告给出请求响应、状态迁移、错误码、幂等/版本和权限说明。
 - 更新数据关系图、迁移顺序、备份边界；契约以 OpenAPI 和真实 schema 为准，不手抄失效类型。
 - 流程图明确机器初判、人工确认、拒绝路径和历史数据处理；保留旧 URL 与 legacy API 兼容策略。

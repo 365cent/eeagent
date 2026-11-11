@@ -1,6 +1,9 @@
 # EEA 平台服务器部署手册（P0-1）
 
-目标（2026-10-29 会议）：本周内把平台部署到内网服务器，脱离开发机，方便后续调整修改。本手册按现有脚本写，**零系统级安装**：PostgreSQL 用便携版自动落在 `backend/.pg/`，不需要服务器管理员权限。
+> **开发机（Windows / macOS / Linux）：** 见仓库根目录 [README.md](../README.md)。  
+> **Linux 内网生产：** 以 [deploy/README.md](../deploy/README.md) 为准，不复用下文便携 PostgreSQL 流程。
+
+目标（2026-10-29 会议）：本周内把平台部署到内网服务器，脱离开发机，方便后续调整修改。本手册按现有脚本写，**零系统级安装（Windows 便携库路径）**：PostgreSQL 用便携版自动落在 `backend/.pg/`，不需要服务器管理员权限。
 
 组件与端口：
 
@@ -23,7 +26,8 @@ copy .env.example .env                    # 填 LLM_BASE_URL / LLM_API_KEY（LLM
 ```
 
 - 企网装包走镜像：`pip install -i https://pypi.tuna.tsinghua.edu.cn/simple <pkg>`（或持久化 `PIP_INDEX_URL`）。
-- Linux 把 `.venv\Scripts\...` 换成 `.venv/bin/...`，其余不变。
+- Linux 上若仍用便携 bootstrap，把 `.venv\Scripts\...` 换成 `.venv/bin/...`；macOS/Linux 日常开发更常用系统 PostgreSQL，见 README.md。`start_api.py` 在外部库模式下不启动便携 `pg_ctl`。
+- Windows 上 `backend/scripts/pytest_slices.sh` 需 **Git Bash** 或 **WSL**，或在 `backend/` 运行 `uv run pytest -q`。
 - 验证：`curl http://127.0.0.1:8000/healthz` → `{"status":"ok",...}`；浏览器开 `http://<服务器IP>:8000/docs`。
 
 ## 2. 前端（一次性）

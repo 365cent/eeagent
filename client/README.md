@@ -4,7 +4,7 @@ EEA 前瞻技术扫描平台的**采集客户端**：在本机可见浏览器里
 
 瘦客户端原则见 [`../docs/platform-implementation-plan.md`](../docs/platform-implementation-plan.md) §7 与 [`TODO.md`](TODO.md)：客户端**不做** HTML→Markdown、不做文档解析、不打包 Chromium、不调用 LLM。
 
-页面采集优先使用 `POST /api/v1/capture/jobs`（`url` + `file` + 稳定 `submission_id`），随后轮询 `GET /api/v1/capture/jobs/{id}`，直到服务端返回成功、失败或取消。OpenAPI 缺少异步任务契约时，回退到同步 `/capture` 或旧 `/signals/capture`，不在 POST 结果不明时改投另一端点。开发机组件检查见 [`../docs/DEVELOPMENT-MAC.md`](../docs/DEVELOPMENT-MAC.md)，Windows 发布验收清单见 [`TODO.md`](TODO.md)。
+页面采集优先使用 `POST /api/v1/capture/jobs`（`url` + `file` + 稳定 `submission_id`），随后轮询 `GET /api/v1/capture/jobs/{id}`，直到服务端返回成功、失败或取消。OpenAPI 缺少异步任务契约时，回退到同步 `/capture` 或旧 `/signals/capture`，不在 POST 结果不明时改投另一端点。开发环境见 [`../README.md`](../README.md)。发布验收见 [`TODO.md`](TODO.md)。
 
 ---
 

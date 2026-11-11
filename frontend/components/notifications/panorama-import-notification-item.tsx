@@ -4,31 +4,14 @@ import { LinkOutlined } from '@ant-design/icons'
 import { Button, Progress, Tag, Typography } from 'antd'
 import { formatApiDate } from '@/lib/eea-mappers'
 import type { PanoramaImportBatchOut } from '@/lib/api/types'
+import {
+  PANORAMA_IMPORT_STATUS_LABEL,
+  PANORAMA_IMPORT_STATUS_TAG,
+  panoramaImportIsActive,
+  panoramaImportStatusIconClass,
+} from '@/features/evidence/status'
 
 const { Text, Title } = Typography
-
-const STATUS_LABEL: Record<PanoramaImportBatchOut['status'], string> = {
-  capturing: '采集中',
-  structuring: '写入全景图',
-  completed: '已完成',
-  failed: '失败',
-}
-
-const STATUS_TAG: Record<
-  PanoramaImportBatchOut['status'],
-  { color: 'processing' | 'success' | 'error' | 'default'; variant?: 'filled' | 'outlined' }
-> = {
-  capturing: { color: 'processing', variant: 'outlined' },
-  structuring: { color: 'processing', variant: 'outlined' },
-  completed: { color: 'default', variant: 'outlined' },
-  failed: { color: 'error', variant: 'outlined' },
-}
-
-function statusIconClass(status: PanoramaImportBatchOut['status']): string {
-  if (status === 'failed') return 'is-failed'
-  if (status === 'completed') return 'is-completed'
-  return 'is-active'
-}
 
 export function PanoramaImportNotificationItem({
   batch,
@@ -44,15 +27,15 @@ export function PanoramaImportNotificationItem({
   const done = Math.max(0, total - pending)
   const percent =
     total > 0 ? Math.round((done / total) * 100) : batch.status === 'completed' ? 100 : 0
-  const active = batch.status === 'capturing' || batch.status === 'structuring'
-  const tag = STATUS_TAG[batch.status]
+  const active = panoramaImportIsActive(batch.status)
+  const tag = PANORAMA_IMPORT_STATUS_TAG[batch.status]
   const when = formatApiDate(batch.structure_finished_at ?? batch.updated_at ?? batch.created_at)
 
   return (
     <li
       className={`notifications-center-row notifications-center-row--panorama${unread ? ' is-unread' : ''}`}
     >
-      <span className={`notifications-center-icon ${statusIconClass(batch.status)}`} aria-hidden>
+      <span className={`notifications-center-icon ${panoramaImportStatusIconClass(batch.status)}`} aria-hidden>
         <LinkOutlined />
       </span>
       <div className="notifications-center-body">
@@ -62,7 +45,7 @@ export function PanoramaImportNotificationItem({
               批量链接采集
             </Title>
             <Tag color={tag.color} variant={tag.variant} className="notifications-center-status-tag">
-              {STATUS_LABEL[batch.status]}
+              {PANORAMA_IMPORT_STATUS_LABEL[batch.status]}
             </Tag>
           </div>
           <Text type="secondary" className="notifications-center-time">

@@ -1,91 +1,74 @@
 # EEA
 
-EEA is a foresight / signal intelligence platform: FastAPI backend, Next.js UI, and an optional Windows capture client for public-web ingestion.
+Foresight / signal intelligence: **FastAPI** backend, **Next.js** UI, **Windows** capture client for public-web ingestion.
 
-From the **repository root**, use **two terminals** for daily dev: **backend** (API + capture worker), then **frontend**. Run the **capture client** when you need uploads from the public web.
+**Production (Linux intranet):** [deploy/README.md](deploy/README.md) — not the portable-Postgres flow below.
 
-Project status and implementation order: [project TODO](TODO.md), [source and requirement index](docs/PROJECT-INDEX.md), [requirement traceability](docs/REQUIREMENTS-TRACEABILITY.md). The development host is macOS; use the [Mac setup and checks](docs/DEVELOPMENT-MAC.md). The PowerShell bootstrap and commands below are Windows development instructions; they are not the Linux production deployment procedure. See [Linux deployment work](deploy/TODO.md).
+## Setup
 
----
+**Stack:** Python 3.12 (`uv`), PostgreSQL **16+**, pnpm **12.3.4**, Go **1.24** (client). Copy `backend/.env.example` → `backend/.env` (set `DB_*` and LLM when needed).
 
-### Backend (API + local Postgres)
+**Two terminals daily:** `backend` → `uv run python scripts/dev.py` (API + worker); `frontend` → `pnpm dev`.
 
-**First time only** (portable DB, migrations, seed):
+| | API / OpenAPI | UI |
+| --- | --- | --- |
+| Local | `http://127.0.0.1:8000/healthz`, `/docs` | `http://localhost:3000` |
+
+### Windows
+
+Portable PostgreSQL in `backend/.pg/` (port **54329**, gitignored).
 
 ```powershell
 cd backend
+copy .env.example .env
+uv sync --locked
 uv run python scripts/bootstrap.py
-```
+uv run python scripts/dev.py
 
-**Every day — pick one:**
-
-| Mode | Command | Stop |
-|------|---------|------|
-| **Foreground** (API + capture worker, logs in terminal) | `uv run python scripts/dev.py` | **Ctrl+C** |
-| **Background** (daemon) | `uv run python scripts/start_api.py` | `uv run python scripts/stop_api.py` |
-
-- API: **http://127.0.0.1:8000** (Swagger: `/docs`, health: `/healthz`)
-- Copy `backend/.env.example` → `backend/.env` and set your LLM gateway; restart the API after changes
-- Stop Postgres only: `uv run python scripts/stop_db.py`
-
----
-
-### Frontend (Next.js UI)
-
-**First time:**
-
-```powershell
-cd frontend
+cd ..\frontend
 pnpm install
-```
-
-**Dev server:**
-
-```powershell
-cd frontend
 pnpm dev
 ```
 
-- App: **http://localhost:3000**
-- The UI derives the API base from the browser host (same machine → port **8000** on that host)
-- Production: `pnpm build` then `pnpm start`
+Background API: `start_api.py` / `stop_api.py`. pytest: Git Bash, WSL, or `uv run pytest -q` in `backend/`.
 
----
+### macOS / Linux (dev)
 
-### Capture client (Go, Windows)
+System PostgreSQL on port **5432** (override in `.env`; code default is 54329).
 
-**First time:**
+```bash
+# macOS: brew install uv postgresql@16 && brew services start postgresql@16
+# Linux: install postgresql-16, enable service
+createuser --createdb eea 2>/dev/null || sudo -u postgres createuser --createdb eea
+psql -d postgres -c "ALTER ROLE eea WITH LOGIN CREATEDB PASSWORD 'eea';"  # or via sudo -u postgres
 
-1. Copy `client/config.example.json` → `client/config.json`
-2. Set `api_base` to **`http://127.0.0.1:8000`** (API root, **not** `/api/v1`), or leave empty with `auto_api: true` for LAN auto-detect
-3. Build (Go ≥ 1.24):
+cd backend
+cp .env.example .env
+export DB_HOST=127.0.0.1 DB_PORT=5432 DB_USER=eea DB_PASSWORD=eea
+uv sync --locked && uv run python scripts/bootstrap.py && uv run python scripts/dev.py
+
+cd frontend
+corepack enable && corepack pnpm install --frozen-lockfile && corepack pnpm dev
+```
+
+Start PostgreSQL before `pytest` (uses DB **`eea_test`** only). Slices: `backend/scripts/pytest_slices.sh` (bash). External DB: pytest does not start Postgres for you.
+
+### Capture client (Windows)
+
+Edge/Chrome required. `client/config.example.json` → `config.json`, `api_base`: `http://127.0.0.1:8000`.
 
 ```powershell
 cd client
 go build -trimpath -ldflags "-s -w -H=windowsgui" -o dist/capture.exe ./cmd/capture
+.\dist\capture.exe doctor
 ```
 
-**Run:**
+Public-web capture is a Windows GUI target; macOS/Linux use API/UI uploads or `go test -short` in `client/internal/...`.
 
-```powershell
-client\dist\capture.exe              # GUI
-client\dist\capture.exe doctor       # browser + backend check
-client\dist\capture.exe upload --url https://example.com
-```
+## Docs
 
-Or from `client/`: `go run ./cmd/capture` (GUI). Requires **Edge or Chrome**; use `headless: false` for WeChat or login flows.
+[TODO.md](TODO.md) · [docs/PROJECT-INDEX.md](docs/PROJECT-INDEX.md) · [docs/REQUIREMENTS-TRACEABILITY.md](docs/REQUIREMENTS-TRACEABILITY.md) · [backend/README.md](backend/README.md) · [frontend/docs/ACCEPTANCE-WALKTHROUGH.md](frontend/docs/ACCEPTANCE-WALKTHROUGH.md)
 
----
+## Do not commit
 
-### Quick checklist
-
-1. Backend: `http://127.0.0.1:8000/healthz`
-2. Frontend: `http://localhost:3000`
-3. Client: `capture.exe doctor` reports a reachable `api_base`
-
----
-
-### Publishing / cloning
-
-- Do **not** commit `backend/.env`, `client/config.json`, browser profiles under `client/data/`, or the downloaded Postgres bundle under `backend/.pg/` (see root `.gitignore`).
-- Planning docs and requirements live under [`docs/`](docs/README.md).
+`backend/.env`, `client/config.json`, `client/data/`, `backend/.pg/` (see `.gitignore`).

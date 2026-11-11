@@ -1,11 +1,8 @@
-"""LLM-friendly docs pages rendered from the app's own OpenAPI schema.
+"""OpenAPI schema walkers and render helpers (library only; not mounted as HTTP).
 
-``GET /llms.txt`` and ``GET /`` (registered in ``app.main.create_app``) are
-generated from ``request.app.openapi()`` plus ``request.base_url`` — the same
-schema ``/openapi.json`` serves. Nothing here holds a route list, a summary,
-a schema name or a field name by hand: every route line in both pages derives
-from the schema walk below, so the docs cannot drift from the code. The
-renderers are pure functions; ``app.main`` caches their output per base URL.
+Production serves Swagger UI at ``/`` and ``/docs`` plus ``GET /openapi.json``.
+These functions remain for tests or future offline doc export from
+``app.openapi()``.
 
 Bullet form (llmstxt.org full-content variant): ``[METHOD /path](absolute
 URL)`` as the required hyperlink, then ``: `` and the route description —
@@ -427,50 +424,89 @@ def render_llms_txt(spec: dict, base_url: str) -> str:
     return "\n".join(lines)
 
 
+def _html_route_item(spec: dict, route: Route, base_url: str) -> str:
+    """One operation as HTML: linked method/path, summary, full inline contract."""
+    url = escape(urljoin(base_url, route.path))
+    label = escape(route_label(route))
+    summary = escape(route.op.get("summary") or route.op.get("operationId") or "")
+    notes = escape(route_notes(spec, route))
+    anchor = escape(f"{route.method}-{route.path.strip('/').replace('/', '-')}")
+    head = f'<a href="{url}"><code>{label}</code></a>'
+    body = f"<p class=\"route-notes\">{notes}</p>" if notes else ""
+    return f'<li id="{anchor}"><p class="route-head">{head} — {summary}</p>{body}</li>'
+
+
+def _html_group_section(spec: dict, name: str, routes: list[Route], base_url: str) -> str:
+    items = "".join(_html_route_item(spec, route, base_url) for route in routes)
+    return f"<h2>{escape(name)}</h2>\n<ul class=\"routes\">\n{items}\n</ul>\n"
+
+
+def _html_optional_section(spec: dict, groups: dict[str, list[Route]], base_url: str) -> str:
+    lines = [
+        f'<li><a href="{escape(urljoin(base_url, path))}"><code>{escape(path)}</code></a>'
+        f" — {escape(desc)}</li>"
+        for path, desc in _OPTIONAL_LINKS
+    ]
+    if "healthz" in groups:
+        for route in groups["healthz"]:
+            lines.append(_html_route_item(spec, route, base_url))
+    return "<h2>Optional</h2>\n<ul class=\"optional\">\n" + "\n".join(lines) + "\n</ul>\n"
+
+
 _HTML = """<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title}</title>
+<meta name="description" content="OpenAPI-derived API reference for LLM agents (llmstxt.org full content).">
+<title>{title} — OpenAPI for LLMs</title>
 <style>
-body {{ font-family: system-ui, sans-serif; line-height: 1.5; max-width: 56rem; margin: 2rem auto; padding: 0 1rem; }}
-h1 {{ margin-bottom: 0.25rem; }}
-h2 {{ margin-top: 2rem; }}
-p {{ margin: 0.5rem 0; }}
-ul {{ margin: 0.25rem 0; padding-left: 1.5rem; }}
-li {{ margin: 0.2rem 0; }}
-code {{ background: #f3f4f6; padding: 0.1rem 0.35rem; border-radius: 4px; }}
+body {{ font-family: ui-sans-serif, system-ui, sans-serif; line-height: 1.55; max-width: 52rem; margin: 2rem auto; padding: 0 1.25rem; color: #111; }}
+h1 {{ margin-bottom: 0.5rem; font-size: 1.75rem; }}
+h2 {{ margin-top: 2rem; font-size: 1.15rem; border-bottom: 1px solid #e5e7eb; padding-bottom: 0.25rem; }}
+blockquote {{ margin: 1rem 0; padding: 0.75rem 1rem; background: #f9fafb; border-left: 4px solid #6b7280; }}
+.meta {{ font-size: 0.95rem; color: #374151; }}
+.meta a {{ color: #1d4ed8; }}
+.routes li, .optional li {{ margin: 1rem 0; list-style: none; }}
+.routes {{ padding-left: 0; }}
+.route-head {{ margin: 0; font-weight: 600; }}
+.route-notes {{ margin: 0.35rem 0 0; font-size: 0.9rem; color: #374151; word-break: break-word; }}
+code {{ background: #f3f4f6; padding: 0.12rem 0.35rem; border-radius: 4px; font-size: 0.88em; }}
 </style>
 </head>
 <body>
 <h1>{title}</h1>
-<p>{summary}</p>
-<p>Docs: <a href="/llms.txt">/llms.txt</a> (LLM-friendly), <a href="/docs">/docs</a> (interactive Swagger UI), <a href="/openapi.json">/openapi.json</a> (machine-readable schema).</p>
-<h2>Routes</h2>
-{groups}
+<blockquote><p>{summary}</p></blockquote>
+<p class="meta">{orientation}</p>
+<p class="meta">Machine surfaces: <a href="/llms.txt">/llms.txt</a> (Markdown),
+<a href="/openapi.json">/openapi.json</a> (OpenAPI 3 schema), <a href="/">/</a> and
+<a href="/docs">/docs</a> (Swagger UI with deep links).</p>
+{sections}
+{optional}
 </body>
 </html>
 """
 
 
 def render_index_html(spec: dict, base_url: str) -> str:
-    """The minimal HTML index at ``/``: API title, the summary paragraph
-    from the same walk, links to /llms.txt, /docs and /openapi.json, and
-    every route grouped with counts. No JS, no external assets."""
+    """HTML index at ``/``: same full-content contract as ``/llms.txt`` (every
+    parameter, body field and response field inlined per operation). No JS,
+    no external assets."""
     title = escape(spec.get("info", {}).get("title", "API"))
+    orientation = escape(orientation_paragraph(spec))
     groups = walk(spec)
-    items = []
+    sections = []
     for name in group_order(spec):
-        routes = groups[name]
-        lines = "".join(
-            f"<li><code>{escape(route_label(route))}</code></li>" for route in routes
-        )
-        items.append(
-            f"<li>{escape(name)} ({len(routes)})<ul>{lines}</ul></li>"
-        )
+        if name == "healthz":
+            continue
+        if name not in groups:
+            continue
+        sections.append(_html_group_section(spec, name, groups[name], base_url))
+    optional = _html_optional_section(spec, groups, base_url)
     return _HTML.format(
         title=title,
         summary=escape(summary_line(spec, base_url)),
-        groups=f"<ul>{''.join(items)}</ul>",
+        orientation=orientation,
+        sections="\n".join(sections),
+        optional=optional,
     )

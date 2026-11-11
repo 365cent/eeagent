@@ -4,8 +4,8 @@ FastAPI + PostgreSQL 后端，实现《平台实施计划》第 3–8 节的推�
 原始信号 → 技术主题 → 需求点 → 车辆功能 → 技术落脚点 → 部署标准 → 战略研判。
 
 - Schema：`docs/platform-implementation-plan.md` §4.1 基线 + 演进迁移（迁移由 Alembic 管理；0003 文档表、0005 访问留痕、0006 信号↔文档关联、0008 持久采集任务、0009 审计前后值、0010 功能卡与五个技术域词项、0011 需求五步证据链、0012 战略漏斗草稿；当前 head 为 0012_strategy_funnel）
-- API 文档（服务启动后）：http://127.0.0.1:8000/docs（交互式 Swagger UI）、http://127.0.0.1:8000/llms.txt（LLM 友好全量文档）、http://127.0.0.1:8000/（极简 HTML 索引）
-- 无需安装任何系统级服务：PostgreSQL 便携版自动下载到 `backend/.pg/`（git 忽略）
+- API 文档（服务启动后）：http://127.0.0.1:8000/ 或 /docs（Swagger UI，deep link）、http://127.0.0.1:8000/openapi.json（OpenAPI schema）
+- 本地库：**Windows** 便携 PostgreSQL（`bootstrap.py` → `backend/.pg/`）；**macOS/Linux** 系统 PostgreSQL — 见根目录 [README.md](../README.md)
 
 ### 内网访问（LAN）
 
@@ -15,26 +15,19 @@ FastAPI + PostgreSQL 后端，实现《平台实施计划》第 3–8 节的推�
 
 体积限制（文档）：`DOC_RAW_UPLOAD_MAX_BYTES` 与 `DOC_INGEST_MAX_BYTES` 默认各 **120 MiB**；超过上传上限返回 413，超过解析上限只存 blob（`ingest_status=skipped`）。
 
-## 首次使用（一条命令）
+## 本地运行
+
+三平台步骤见根目录 **[README.md](../README.md)**。常用命令（在 `backend/`）：
 
 ```bash
-cd backend
-.venv\Scripts\python scriptsootstrap.py
+uv sync --locked
+uv run python scripts/bootstrap.py   # 首次 / 重复安全
+uv run python scripts/dev.py         # 前台 API + worker；Ctrl+C 结束
+# uv run python scripts/start_api.py  # 后台 API → .pg/api.log
+# uv run python scripts/stop_api.py
 ```
 
-自动完成：下载便携 PostgreSQL → initdb → 启动（127.0.0.1:54329，仅本机）→ 建库 → Alembic 迁移 → 初始化封闭参考词表与流程图确认的五个技术域；不生成合成信号或业务决策。
-
-## 日常启动
-
-```bash
-cd backend
-.venv\Scripts\python scripts\dev.py        # 确保 DB 在跑，然后启动 API（前台运行，无 --reload）
-.venv\Scripts\python scripts\start_api.py  # 后台启动 API（可重复执行；确保 DB 在跑，日志 backend/.pg/api.log）
-.venv\Scripts\python scripts\stop_api.py   # 停掉后台 API（仅停 API，数据库保持运行）
-.venv\Scripts\python scripts\stop_db.py    # 停掉本地 PostgreSQL
-```
-
-启动后同一端口同时提供 Web 界面与 API：`/`（极简 HTML 索引）、`/llms.txt`（LLM 友好全量文档）、`/docs`（交互式 Swagger UI）、`/openapi.json`（机器可读 schema）与全部 `/api/v1` 数据路由。
+`bootstrap` 完成迁移与封闭词表种子，不生成合成业务信号。根路径提供 Swagger UI（`/`、`/docs`）与 `/api/v1`。
 
 ## 环境变量（可选）
 
@@ -60,7 +53,7 @@ cd backend
 | strategy | `GET /strategy/assessments`、`POST /strategy/landing-points/{id}/assessments`（版本追加）、`.../history` | REQ-STR-01…07 |
 | trace | `GET /trace/landing-points/{id}`、`GET /audit` | REQ-RULE-02/03 |
 | overview | `GET /overview` | REQ-UI-02 |
-| docs（根路径） | `GET /llms.txt`（LLM 友好全量文档：每个操作内联摘要、参数与请求体/成功响应的**全部字段**——类型/格式/枚举值/取值范围/默认值/必填可选，$ref 字段展开一层，免二次拉取）、`GET /`（极简 HTML 索引：分组路由清单+计数与 `/llms.txt`、`/docs`、`/openapi.json` 三链接，无 JS/外部资源）、`GET /docs`、`GET /openapi.json` | —（前两者由 `/openapi.json` 请求时实时渲染并缓存，无手工路由清单，不会与代码漂移；后两者为 FastAPI 默认端点） |
+| docs（根路径） | `GET /`、`GET /docs`（Swagger UI，`deepLinking`）、`GET /openapi.json` | —（UI 加载 `/openapi.json`；无 `/llms.txt`） |
 
 ### POST /api/v1/capture — 统一采集入口（multipart）
 
@@ -125,10 +118,15 @@ curl -X POST http://127.0.0.1:8000/api/v1/documents/raw \
 
 ```bash
 cd backend
-.venv\Scripts\python -m pytest -q
+uv run pytest -q
+# 快检：./scripts/pytest_slices.sh unit  或  uv run pytest -m no_db -q
+# 切片：./scripts/pytest_slices.sh capture  （Windows 用 Git Bash/WSL）
+# 默认 EEA_PYTEST_LOCK=fail — 勿并行抢占 eea_test
 ```
 
+macOS/Linux 须先启动本机 PostgreSQL；见根目录 [README.md](../README.md)。
+
 - 测试通过 httpx `AsyncClient` + `ASGITransport` 直连 `app.main.app`（FastAPI 官方异步测试模式，anyio pytest 插件）。
-- 测试跑在**专用数据库 `eea_test`** 上（同一 PostgreSQL 实例），绝不触碰存放验收种子数据的 `eea` 库；`tests/conftest.py` 在首次导入 app 前设置 `DB_NAME=eea_test`（settings 经 `lru_cache` 缓存、引擎在导入期创建，覆盖必须先行），库不存在时自动创建并执行 Alembic 迁移，PostgreSQL 未启动时经 `scripts/start_api.py` 拉起。
+- 测试跑在**专用数据库 `eea_test`** 上（同一 PostgreSQL 实例），绝不触碰存放验收种子数据的 `eea` 库；`tests/conftest.py` 在首次导入 app 前设置 `DB_NAME=eea_test`（settings 经 `lru_cache` 缓存、引擎在导入期创建，覆盖必须先行），库不存在时自动创建并执行 Alembic 迁移。外部 PostgreSQL（`use-external-db`）环境下须自行启动数据库；仅 Windows 便携库布局可能在 PG 未就绪时尝试 `start_api.py`。
 - 每个用例前清空全部业务表并仅重播封闭词表种子（`eea_ref_code`），保证确定性与隔离；快照正文写入临时 `OBJECT_DIR`，会话结束自动清理。
-- 用例覆盖需求验收点：封闭词表校验（422 且零写入）、信号采集/筛选/详情/快照正文、标签词表与频次、主题归集与指标口径（排除已归档）、需求点交叉验证/人工复核门控、功能发布门控（正向+反向）、标准 3×3 网格与「明确留空」、战略研判版本链与筛选池准入、追溯链、审计留痕、总览计数，以及迁移产出的精确表/视图清单与存储级约束（部分唯一索引、生成列、复合主键）；另覆盖 LLM 友好文档页（`/llms.txt` 与 `/`）：断言从 `app.openapi()` 重推 H1、分组、每个操作的链接与摘要行，以及请求体/响应 schema 的全部字段名、枚举值与格式，防文档与代码漂移。
+- 用例覆盖需求验收点：封闭词表校验（422 且零写入）、信号采集/筛选/详情/快照正文、标签词表与频次、主题归集与指标口径（排除已归档）、需求点交叉验证/人工复核门控、功能发布门控（正向+反向）、标准 3×3 网格与「明确留空」、战略研判版本链与筛选池准入、追溯链、审计留痕、总览计数，以及迁移产出的精确表/视图清单与存储级约束（部分唯一索引、生成列、复合主键）；另覆盖 OpenAPI 文档面（`/`、`/docs`、`/openapi.json` 与路径快照测试）。

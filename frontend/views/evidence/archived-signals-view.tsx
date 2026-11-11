@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { DeleteOutlined, FileSearchOutlined, ReloadOutlined, RollbackOutlined } from '@ant-design/icons'
-import { App as AntApp, Alert, Breadcrumb, Button, Card, Input, Space, Spin, Table, Tag, Typography } from 'antd'
+import { App as AntApp, Alert, Breadcrumb, Button, Card, Input, Space, Spin, Table, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useQueryClient } from '@tanstack/react-query'
 import { PageHeader } from '@/components/shared/page-header'
@@ -11,6 +11,7 @@ import { deleteSignal, patchSignal } from '@/lib/api/eea-api'
 import { EeaApiError } from '@/lib/api/client'
 import { useSignalTablePagination } from '@/lib/signal-table-pagination'
 import type { Signal } from '@/types/platform'
+import { SignalStatusTag } from '@/features/evidence/signal-columns'
 
 const { Text } = Typography
 
@@ -47,7 +48,7 @@ export function ArchivedSignalsView({ onNavigate }: ArchivedSignalsViewProps) {
       {
         title: '状态',
         dataIndex: 'status',
-        render: (value: string) => <Tag color="orange">{value}</Tag>,
+        render: (value: string) => <SignalStatusTag status={value} />,
       },
       { title: '归档前更新', dataIndex: 'date' },
       {

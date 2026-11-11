@@ -44,10 +44,20 @@ from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy import create_engine, text  # noqa: E402
 
 from app.core.config import get_settings  # noqa: E402
-from app.main import app  # noqa: E402  (also fixes the Windows event-loop policy)
 from app.services.refcodes import REF_CODES  # noqa: E402
 
 SETTINGS = get_settings()  # cached with DB_NAME=eea_test
+
+_APP_IMPORTED = False
+
+
+def _ensure_app_imported() -> None:
+    """Import app.main once (Windows event-loop policy + FastAPI app wiring)."""
+    global _APP_IMPORTED
+    if not _APP_IMPORTED:
+        import app.main  # noqa: F401
+
+        _APP_IMPORTED = True
 
 _ADMIN_DSN = (
     f"host={SETTINGS.db_host} port={SETTINGS.db_port} "
@@ -75,19 +85,47 @@ _SYNC_ENGINE = create_engine(SETTINGS.database_url)
 # lock makes that constraint explicit — a second session blocks until the
 # first finishes (pytest-xdist workers within ONE session are unaffected:
 # the lock is taken once per session in the parent, before workers fork).
+#
+# ``no_db`` tests skip the lock entirely so quick checks can run beside a
+# long integration session (see ``scripts/pytest_slices.sh unit``).
 _TEST_LOCK_PATH = BACKEND_ROOT / ".pg" / "eea_test_suite.lock"
 _TEST_LOCK_FILE = None
 
 
+def _lock_mode() -> str:
+    raw = os.environ.get("EEA_PYTEST_LOCK", "fail").strip().lower()
+    if raw in ("block", "wait"):
+        return "block"
+    if raw in ("skip", "none", "0"):
+        return "skip"
+    return "fail"
+
+
 def _acquire_suite_lock() -> None:
     global _TEST_LOCK_FILE
+    mode = _lock_mode()
+    if mode == "skip":
+        return
     _TEST_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
     _TEST_LOCK_FILE = open(_TEST_LOCK_PATH, "a+")
     try:
         if "msvcrt" in sys.modules:
             msvcrt.locking(_TEST_LOCK_FILE.fileno(), msvcrt.LK_LOCK, 1)
         else:  # POSIX
-            fcntl.flock(_TEST_LOCK_FILE.fileno(), fcntl.LOCK_EX)
+            flags = fcntl.LOCK_EX
+            if mode == "fail":
+                flags |= fcntl.LOCK_NB
+            fcntl.flock(_TEST_LOCK_FILE.fileno(), flags)
+    except BlockingIOError:
+        _TEST_LOCK_FILE.close()
+        _TEST_LOCK_FILE = None
+        pytest.exit(
+            f"eea_test 已被其它 pytest 会话占用 ({_TEST_LOCK_PATH})。\n"
+            "  快检（无 PostgreSQL、无互斥锁）: uv run pytest -m no_db -q\n"
+            "  指定切片: ./scripts/pytest_slices.sh capture\n"
+            "  等待占用结束，或设置 EEA_PYTEST_LOCK=block 在本进程阻塞等锁。",
+            returncode=2,
+        )
     except OSError as exc:  # pragma: no cover - platform edge cases
         _TEST_LOCK_FILE.close()
         _TEST_LOCK_FILE = None
@@ -98,20 +136,64 @@ def _acquire_suite_lock() -> None:
         )
 
 
+def _item_needs_db(item: pytest.Item) -> bool:
+    return item.get_closest_marker("no_db") is None
+
+
+def _session_needs_db(session: pytest.Session) -> bool:
+    return any(_item_needs_db(item) for item in session.items)
+
+
+def pytest_configure(config: pytest.Config) -> None:
+    config.addinivalue_line(
+        "markers",
+        "no_db: pure unit test — no eea_test lock, migrate, or per-test TRUNCATE",
+    )
+    config.addinivalue_line(
+        "markers",
+        "db: integration test using eea_test (default when no_db is absent)",
+    )
+
+
+def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config, items: list) -> None:
+    del config
+    for item in items:
+        if item.get_closest_marker("no_db") is None:
+            item.add_marker(pytest.mark.db)
+
+
 @pytest.fixture(scope="session", autouse=True)
-def _prepared_test_db():
+def _prepared_test_db(request: pytest.FixtureRequest):
     """Create eea_test if absent, migrate it to head (repeat-safe), and hold
     the cross-process session lock for the whole run (B6 独占执行)."""
     global _TEST_LOCK_FILE
+    if not _session_needs_db(request.session):
+        yield
+        shutil.rmtree(_OBJECT_DIR, ignore_errors=True)
+        return
+    _ensure_app_imported()
     _acquire_suite_lock()
     if not _pg_is_up():
-        # documented, repeat-safe stack starter (ensures PostgreSQL, starts API)
+        external_marker = BACKEND_ROOT / ".pg" / "use-external-db"
+        portable_data = BACKEND_ROOT / ".pg" / "data"
+        if external_marker.is_file() and not portable_data.is_dir():
+            raise RuntimeError(
+                "PostgreSQL is not reachable for eea_test. On macOS/Linux, start your "
+                "local PostgreSQL service, confirm DB_HOST/DB_PORT/DB_USER in backend/.env, "
+                "then re-run pytest. See README.md at repo root."
+            )
+        # Portable Windows dev: start bundled PostgreSQL (if needed) and background API
         subprocess.run(
             [sys.executable, str(BACKEND_ROOT / "scripts" / "start_api.py")],
             check=True,
             cwd=str(BACKEND_ROOT),
             timeout=180,
         )
+        if not _pg_is_up():
+            raise RuntimeError(
+                "PostgreSQL still unreachable after scripts/start_api.py; "
+                "check backend/.pg/api.log and DB_* settings."
+            )
     _create_test_db()
     _run_migrations()
     yield
@@ -148,9 +230,13 @@ def _run_migrations() -> None:
 
 
 @pytest.fixture(autouse=True)
-def _clean_database():
+def _clean_database(request: pytest.FixtureRequest):
     """Deterministic isolation: every test starts from empty tables plus the
     closed reference vocabularies — the only fixture data each test needs."""
+    if not _item_needs_db(request.node):
+        yield
+        return
+    _ensure_app_imported()
     with _SYNC_ENGINE.begin() as conn:
         conn.execute(_TRUNCATE_SQL)
         for domain, items in REF_CODES.items():
@@ -187,5 +273,8 @@ def anyio_backend():
 async def client():
     """FastAPI's documented async test pattern: httpx AsyncClient over
     ASGITransport (fastapi.tiangolo.com/advanced/async-tests/)."""
+    _ensure_app_imported()
+    from app.main import app
+
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         yield ac

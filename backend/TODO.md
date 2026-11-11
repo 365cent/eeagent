@@ -179,15 +179,16 @@
 
 ## BE-14 产品内 Agent 与确认写回
 
-- [ ] P1 · 部分实现（已有单信号助手与 Pydantic AI 基础接线）· 依赖 BE-03/04/12/13。
+- [~] P1 · 后端工作流与验收测试已落地（`POST /api/v1/agent/*`、SSE、变更单、记忆）；FE-11 与网关真机签字仍开放 · 依赖 BE-03/04/12/13。
 - 来源：实施计划 §7.2 REQ-AGT-01…06；WBS 1.3.10。
-- 入口：[pydantic_agent.py](app/services/pydantic_agent.py)、[llm_gateway.py](app/services/llm_gateway.py)、现有 assistant 路由。
+- 入口：[agent_workflow.py](app/services/agent_workflow.py)、[agent_runtime.py](app/services/agent_runtime.py)、[api/v1/agent.py](app/api/v1/agent.py)；遗留 [`/signals/{id}/assistant/messages`](app/api/v1/signals.py) 保持兼容。
 - 单一 Pydantic AI 编排；新增 sessions/messages 持久化和 SSE，支持重连、取消、错误结束；使用已安装版本支持的序列化 API。
 - 注册 search_evidence/search_rag/suggest_tags/suggest_theme/propose_patch/apply_confirmed_patch/draft_trace_report；不暴露 shell、任意 SQL 或文件路径。
 - 引用最少到信号或文档 chunk，图块带 figure_index；验证引用真实存在。检索过滤用户可见范围。
 - 变更单保存基准版本、字段差异、理由和待确认状态；确认只应用所展示差异一次，过期需重新生成；拒绝不写业务数据。
 - 用户/项目记忆单独存储、可查看删除，不能把主数据更正自动当私人事实；所有会话与记忆检查归属。
 - 验收：跨用户隔离、取消/重连、伪造引用、重复确认、过期变更、人工字段保护、日志无密钥。
+- **macOS 证据（2026-11-11）**：`uv run pytest -q tests/test_agent_workflow.py tests/test_pydantic_ai_wiring.py` → 18 passed（含 10 步 smoke、SSE、`model_messages_json` 持久化）；可选 `EEA_LLM_INTEGRATION=1 … test_agent_live.py`。
 
 ## BE-15 链路报告
 
@@ -208,6 +209,16 @@
 - 交付代码仓库层面的依赖锁定、启动/配置契约与组件验证证据；不把 macOS 检查描述为 Linux worker 或生产存储验收。
 - Linux 集成、离线 wheel 包、生产升级、备份/恢复及 10,000 条性能报告由 OPS-06 在 BE-16 后统一验收，避免 BE-16 ↔ OPS-02/05 循环依赖。
 - 验收：每条 traceability 用例有组件结果；迁移与接口契约检查齐全，严重缺陷清零；部署和恢复签收记录挂接 OPS-06。
+
+## BE-17 领域分层与依赖边界
+
+- [ ] P0 · 未开始 · 依赖无；与 BE-16 的契约检查互补，不阻塞既有路由交付。
+- 目标：HTTP 仅编排；平台横切能力归 `app/platform`；业务能力逐步迁入 `app/domains/*`；削减 `app.services` → `app.api` 反向依赖。
+- [ ] 约定目录：`app/platform`（配置、DB、身份、对象存储）、`app/domains/<bounded-context>`（用例与实体）、`app/api`（路由与 DTO 映射）；保留 `app/schemas` 直至领域 DTO 收敛。
+- [ ] 运行 `uv run lint-imports`（契约见 [pyproject.toml](pyproject.toml) `[tool.importlinter]` 与 [tests/contracts.ini](tests/contracts.ini)）；启用注释中的 services→api 契约前清理现存 `app.services` 对 `app.api.v1` 的导入。
+- [ ] OpenAPI 路径快照：[tests/test_openapi_snapshot.py](tests/test_openapi_snapshot.py) + [tests/snapshots/openapi_paths.json](tests/snapshots/openapi_paths.json)；路由变更须同步快照（`OPENAPI_UPDATE_SNAPSHOT=1`）。
+- [ ] 迁移顺序建议：`core`/`db`/`models` → `platform`；采集/信号/需求等垂直切片按 WBS 迁入 `domains`；共享摄取逻辑取代 API 私有函数互调（对齐 BE-01）。
+- 验收：import-linter 通过；OpenAPI 快照测试通过；无新增 `platform`→`api`/`domains` 违规；领域迁移切片有对应 pytest 证据。
 
 ## 原任务编号迁移
 

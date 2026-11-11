@@ -34,10 +34,36 @@ packages = ["app"]
 [dependency-groups]
 dev = [
     "anyio>=4.15.1",
+    "import-linter>=2.10",
     "pytest>=9.1.1",
 ]
+
+[tool.importlinter]
+root_package = "app"
+
+[[tool.importlinter.contracts]]
+name = "Platform must not import domains or API"
+type = "forbidden"
+source_modules = ["app.platform"]
+forbidden_modules = ["app.domains", "app.api"]
+
+[[tool.importlinter.contracts]]
+name = "Services must not import API"
+type = "forbidden"
+source_modules = ["app.services"]
+forbidden_modules = ["app.api"]
+
+[[tool.importlinter.contracts]]
+name = "Domains must not import API"
+type = "forbidden"
+source_modules = ["app.domains"]
+forbidden_modules = ["app.api"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-markers = ["live_maas: hits real MaaS when MAAS_API_* is set in .env"]
+markers = [
+    "live_maas: hits real MaaS when MAAS_API_* is set in .env",
+    "no_db: no eea_test lock, migrate, or per-test TRUNCATE",
+    "db: integration test using eea_test (default)",
+]

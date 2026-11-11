@@ -28,7 +28,7 @@ import (
 
 // Run shows the macOS capture window (blocks until closed).
 func Run(cfg config.Config, dir string) int {
-	_ = config.EnsureSingleFileExtension(dir, &cfg)
+	_ = capture.EnsureSingleFileExtension(dir, cfg.UserDataDir, cfg.CaptureArchive, cfg.CaptureEngine, &cfg.SingleFileExtensionPath)
 	a := &darwinApp{
 		cfg:    cfg,
 		dir:    dir,
@@ -225,7 +225,7 @@ func (a *darwinApp) submitText() {
 		a.setStatus("先粘贴至少一条 http(s) 链接，或拖入文件")
 		return
 	}
-	if err := config.EnsureSingleFileExtension(a.dir, &a.cfg); err != nil {
+	if err := capture.EnsureSingleFileExtension(a.dir, a.cfg.UserDataDir, a.cfg.CaptureArchive, a.cfg.CaptureEngine, &a.cfg.SingleFileExtensionPath); err != nil {
 		a.setStatus(err.Error())
 		return
 	}

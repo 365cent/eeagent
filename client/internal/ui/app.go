@@ -21,6 +21,7 @@ import (
 	"github.com/rodrigocfd/windigo/win"
 
 	"eea/capture/internal/archive"
+	"eea/capture/internal/capture"
 	"eea/capture/internal/config"
 	"eea/capture/internal/platform"
 	"eea/capture/internal/queue"
@@ -97,7 +98,7 @@ func newApp(cfg config.Config, dir string) *appState {
 	w := ui.DpiX(460)
 	h := ui.DpiY(308)
 	panelNote := ""
-	if err := config.EnsureSingleFileExtension(dir, &cfg); err != nil {
+	if err := capture.EnsureSingleFileExtension(dir, cfg.UserDataDir, cfg.CaptureArchive, cfg.CaptureEngine, &cfg.SingleFileExtensionPath); err != nil {
 		panelNote = err.Error()
 	}
 	app := &appState{
@@ -476,7 +477,7 @@ func (a *appState) savePanel() {
 		a.engine.close()
 		a.engine = &lazyEngine{opts: engineOptions(a.cfg)}
 	}
-	if err := config.EnsureSingleFileExtension(a.dir, &a.cfg); err != nil {
+	if err := capture.EnsureSingleFileExtension(a.dir, a.cfg.UserDataDir, a.cfg.CaptureArchive, a.cfg.CaptureEngine, &a.cfg.SingleFileExtensionPath); err != nil {
 		a.panelNote = err.Error()
 	}
 	a.closePanel()
@@ -498,7 +499,7 @@ func (a *appState) submitText() {
 		a.invalidate()
 		return
 	}
-	if err := config.EnsureSingleFileExtension(a.dir, &a.cfg); err != nil {
+	if err := capture.EnsureSingleFileExtension(a.dir, a.cfg.UserDataDir, a.cfg.CaptureArchive, a.cfg.CaptureEngine, &a.cfg.SingleFileExtensionPath); err != nil {
 		a.notice = err.Error()
 		a.invalidate()
 		return

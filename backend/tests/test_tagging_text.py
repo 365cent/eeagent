@@ -1,5 +1,9 @@
 """Tagging input: strip markitdown nav URLs before jieba."""
 
+import pytest
+
+pytestmark = pytest.mark.no_db
+
 from app.services.tagging import suggest_tags_from_snapshot, text_for_tagging
 
 

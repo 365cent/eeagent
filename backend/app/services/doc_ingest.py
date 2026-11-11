@@ -25,6 +25,7 @@ import io
 import os
 import re
 import tempfile
+import time
 import zipfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
@@ -34,8 +35,10 @@ import httpx
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings
+from app.platform.http import open_async_http_client
 from app.services.llm_gateway import resolve_vision_model
 from app.services.llm_prompts import VISION_CAPTION_PROMPT as _CAPTION_PROMPT
+from app.services.llm_usage import log_llm_call, usage_from_chat_payload
 
 MAX_FIGURES = 8  # default only; runtime cap comes from settings.max_figures
 MAX_FIGURE_BYTES = 4 * 1024 * 1024
@@ -327,13 +330,17 @@ async def caption_figure(figure: Figure, *, model: str, retries: int = 0) -> str
         if attempt:
             # gateway rate-limits long batches; give it a beat before retrying
             await asyncio.sleep(2.0 * attempt)
-        caption = await _caption_once(figure, model=model, settings=settings, base=base)
+        caption = await _caption_once(
+            figure, model=model, settings=settings, base=base, attempt=attempt + 1
+        )
         if caption:
             return caption
     return ""
 
 
-async def _caption_once(figure: Figure, *, model: str, settings, base: str) -> str:
+async def _caption_once(
+    figure: Figure, *, model: str, settings, base: str, attempt: int = 1
+) -> str:
     encoded = base64.b64encode(figure.data).decode("ascii")
     payload = {
         "model": model,
@@ -355,18 +362,70 @@ async def _caption_once(figure: Figure, *, model: str, settings, base: str) -> s
     headers = {"Content-Type": "application/json"}
     if settings.llm_api_key:
         headers["Authorization"] = f"Bearer {settings.llm_api_key}"
+    started = time.perf_counter()
     try:
-        async with httpx.AsyncClient(timeout=VISION_TIMEOUT) as client:
+        async with open_async_http_client(timeout=VISION_TIMEOUT) as client:
             response = await client.post(
                 f"{base}/chat/completions", headers=headers, json=payload
             )
     except httpx.HTTPError:
+        log_llm_call(
+            usage_from_chat_payload(
+                None,
+                task="vision_caption",
+                requested_model=model,
+                served_model="",
+                model_attempt=1,
+                caller_attempt=attempt,
+                fallback=attempt > 1,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+                model_requests=None,
+            )
+        )
         return ""
-    if response.status_code >= 400:
-        return ""
+    latency_ms = int((time.perf_counter() - started) * 1000)
+    data: object = None
     try:
-        content = response.json()["choices"][0]["message"]["content"]
+        data = response.json()
+    except ValueError:
+        data = None
+    usage = data.get("usage") if isinstance(data, dict) and isinstance(data.get("usage"), dict) else None
+    served = ""
+    if isinstance(data, dict) and isinstance(data.get("model"), str):
+        served = data["model"]
+    if response.status_code >= 400:
+        log_llm_call(
+            usage_from_chat_payload(
+                usage,
+                task="vision_caption",
+                requested_model=model,
+                served_model=served or model,
+                model_attempt=1,
+                caller_attempt=attempt,
+                fallback=attempt > 1,
+                latency_ms=latency_ms,
+                http_status=response.status_code,
+                model_requests=1 if usage else None,
+            )
+        )
+        return ""
+    log_llm_call(
+        usage_from_chat_payload(
+            usage,
+            task="vision_caption",
+            requested_model=model,
+            served_model=served or model,
+            model_attempt=1,
+            caller_attempt=attempt,
+            fallback=attempt > 1,
+            latency_ms=latency_ms,
+        )
+    )
+    try:
+        content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError):
+        return ""
+    if not isinstance(content, str):
         return ""
     return content.strip().replace("\n", " ")[:300]
 

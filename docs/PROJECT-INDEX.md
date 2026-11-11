@@ -12,7 +12,7 @@
 6. [会议纪要](meetings/2026-10-29-EEA白皮书agent需求-智能纪要.md)：业务讨论、真实信号/skills 等输入和部署线索；纪要中的旧技术描述须以当前代码核实。
 7. [Docs TODO](TODO.md)：业务输入、文档维护、验收证据、安装手册、发布包和交接。
 8. [业务与环境输入登记表](INPUT-REGISTER.md)：已收到与仍待提供的材料、责任方、版本/许可和受影响验收项。
-9. [macOS 开发与组件验证](DEVELOPMENT-MAC.md)：本机依赖、锁定安装方式及各组件可执行的检查。macOS 检查不代表 Linux 生产或 Windows 客户端验证。
+9. 本地开发：仓库根 [README.md](../README.md)；Linux 生产见 [deploy/README.md](../deploy/README.md)。
 
 ## 来源与参考材料
 

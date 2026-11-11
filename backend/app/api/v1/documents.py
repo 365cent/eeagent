@@ -13,14 +13,20 @@ import mimetypes
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
-from sqlalchemy import func, select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.db.base import get_db
 from app.models.models import Document
 from app.schemas.schemas import DocumentDetail, DocumentRawOut
+from app.domains.evidence.document_pipeline import (
+    doc_limits,
+    document_raw_out,
+    get_or_create_document_by_sha256,
+    ingest_stored_document,
+    mib_label,
+)
 from app.services.doc_ingest import ingest_document, normalize_document_mime
 from app.services.doc_pdf_preview import (
     DocumentPreviewError,
@@ -30,7 +36,7 @@ from app.services.doc_pdf_preview import (
 )
 from starlette.concurrency import run_in_threadpool
 
-from app.services.objectstore import load_bytes, save_bytes, sha256_bytes
+from app.services.objectstore import load_bytes, sha256_bytes
 from app.services.pptx_deck_preview import (
     PptxDeckPreviewError,
     PptxDeckPreviewUnavailableError,
@@ -44,42 +50,8 @@ from app.services.pptx_deck_preview import (
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
-EXCERPT_CHARS = 600
-
-
-def _doc_limits() -> tuple[int, int]:
-    """(max raw upload bytes, max MarkItDown parse bytes)."""
-    s = get_settings()
-    return s.doc_raw_upload_max_bytes, s.doc_ingest_max_bytes
-
-
-def _mib_label(byte_count: int) -> str:
-    mib = byte_count / (1024 * 1024)
-    return f"{mib:.0f} MiB" if mib == int(mib) else f"{mib:.1f} MiB"
-
-
-def _excerpt(doc: Document) -> str | None:
-    if not doc.canonical_md_object_key:
-        return None
-    data = load_bytes(doc.canonical_md_object_key)
-    if data is None:
-        return None
-    return data.decode("utf-8", errors="replace")[:EXCERPT_CHARS]
-
-
 def _raw_out(doc: Document) -> DocumentRawOut:
-    return DocumentRawOut(
-        id=doc.id,
-        sha256=doc.sha256,
-        mime=doc.mime,
-        size=doc.size,
-        filename=doc.filename,
-        ingest_status=doc.ingest_status or "stored",
-        markitdown_version=doc.markitdown_version,
-        vision_model=doc.vision_model,
-        figure_count=doc.figure_count or 0,
-        canonical_md_excerpt=_excerpt(doc),
-    )
+    return document_raw_out(doc)
 
 
 def _detail(doc: Document) -> DocumentDetail:
@@ -99,37 +71,7 @@ async def _ingest(
     *,
     vision_captions: bool = True,
 ) -> None:
-    _, max_parse = _doc_limits()
-    if len(data) > max_parse:
-        doc.ingest_status = "skipped"
-        doc.ingest_error = (
-            f"文件 {len(data)} 字节超过解析上限 {max_parse}（{_mib_label(max_parse)}），仅保留原始 blob"
-        )
-        doc.ingested_at = func.now()
-        await db.commit()
-        await db.refresh(doc)
-        return
-    try:
-        result = await ingest_document(
-            data,
-            doc.filename,
-            doc.mime,
-            vision_captions=vision_captions,
-        )
-        md_bytes = result.canonical_md.encode("utf-8")
-        doc.canonical_md_object_key = save_bytes(md_bytes, folder="documents", ext="md")
-        doc.canonical_md_sha256 = sha256_bytes(md_bytes)
-        doc.markitdown_version = result.markitdown_version
-        doc.figure_count = result.figure_count
-        doc.vision_model = result.vision_model
-        doc.ingest_status = "parsed"
-        doc.ingest_error = None
-    except Exception as exc:  # noqa: BLE001 - storage succeeded; report parse failure
-        doc.ingest_status = "failed"
-        doc.ingest_error = str(exc)[:500]
-    doc.ingested_at = func.now()
-    await db.commit()
-    await db.refresh(doc)
+    await ingest_stored_document(db, doc, data, vision_captions=vision_captions)
 
 
 async def _load(db: AsyncSession, document_id: uuid.UUID) -> Document:
@@ -150,47 +92,24 @@ async def upload_raw_document(
     Duplicate bytes return the existing row (same id, same canonical artifact);
     an earlier failed/skipped ingest is retried on the next upload.
     """
-    max_upload, _ = _doc_limits()
+    max_upload, _ = doc_limits()
     data = await file.read(max_upload + 1)
     if not data:
         raise HTTPException(422, "file 为空：拒绝存储空文档（REQ-SIG-10 证据留存原则）")
     if len(data) > max_upload:
         raise HTTPException(
             413,
-            f"file 过大：{len(data)} 字节超过上限 {max_upload}（{_mib_label(max_upload)}）",
+            f"file 过大：{len(data)} 字节超过上限 {max_upload}（{mib_label(max_upload)}）",
         )
     digest = sha256_bytes(data)
-    existing = (
-        await db.execute(select(Document).where(Document.sha256 == digest))
-    ).scalar_one_or_none()
-    if existing is not None:
-        doc = existing
-    else:
-        object_key = save_bytes(data, folder="documents", ext="bin")
-        mime = normalize_document_mime(file.filename, file.content_type) or "application/octet-stream"
-        stmt = (
-            pg_insert(Document)
-            .values(
-                sha256=digest,
-                mime=mime,
-                size=len(data),
-                filename=file.filename,
-                object_key=object_key,
-                uploaded_by="local-admin",
-            )
-            .on_conflict_do_nothing(index_elements=["sha256"])
-            .returning(Document)
-        )
-        inserted = (await db.execute(stmt)).scalar_one_or_none()
-        if inserted is None:
-            await db.rollback()
-            doc = (
-                await db.execute(select(Document).where(Document.sha256 == digest))
-            ).scalar_one()
-        else:
-            await db.commit()
-            await db.refresh(inserted)
-            doc = inserted
+    mime = normalize_document_mime(file.filename, file.content_type) or "application/octet-stream"
+    doc = await get_or_create_document_by_sha256(
+        db,
+        digest=digest,
+        data=data,
+        filename=file.filename,
+        mime=mime,
+    )
 
     if doc.ingest_status != "parsed":
         await _ingest(db, doc, data)

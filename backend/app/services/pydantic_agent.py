@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.providers.openai import OpenAIProvider
 
 from app.core.config import get_settings
+from app.platform.llm import build_chat_model
 from app.services.llm_gateway import LLMNotConfiguredError, resolve_chat_model
 
 from app.services.llm_prompts import LEGACY_CHAT_SYSTEM as DEFAULT_SYSTEM_PROMPT
@@ -23,8 +23,7 @@ def build_model(
     model_name: str, *, base_url: str, api_key: str = ""
 ) -> OpenAIChatModel:
     """One chat model bound to the enterprise OpenAI-compatible gateway."""
-    provider = OpenAIProvider(base_url=base_url, api_key=api_key or "not-needed")
-    return OpenAIChatModel(model_name, provider=provider)
+    return build_chat_model(model_name, base_url=base_url, api_key=api_key)
 
 
 async def build_agent(

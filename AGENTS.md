@@ -20,7 +20,7 @@ Read this file before making changes. The project root is the implementation and
 ## Development and validation
 
 - The development machine is macOS. Use the project-specific Python, Node/pnpm and Go versions/lockfiles; do not claim a macOS check covers Linux service behavior or Windows GUI/browser behavior.
-- Follow [docs/DEVELOPMENT-MAC.md](docs/DEVELOPMENT-MAC.md) for local setup and component checks. Backend tests require an isolated local PostgreSQL service and use the dedicated `eea_test` database; verify the configured test connection before running anything destructive.
+- Follow the root [README.md](README.md) for local setup on Windows, macOS, and Linux. Backend tests require an isolated local PostgreSQL service and use the dedicated `eea_test` database; verify the configured test connection before running anything destructive.
 - Frontend changes follow the repository's `pnpm build` and `pnpm antd:lint` checks. The Go Windows UI cannot be built or browser-tested as a macOS deliverable; use portable Go unit checks on Mac and a Windows runner for the actual client.
 - For a task, report which checks actually ran, their results, and any environment limitation. Do not describe a planned command or skipped platform check as passed.
 - Keep source documents unchanged. Update plans and traceability when scope or acceptance changes; completed items leave the remaining-work TODO and retain evidence in the delivery record.

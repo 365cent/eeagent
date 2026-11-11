@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"eea/capture/internal/httpx"
 )
 
 // devtoolsTarget is one row from GET /json or /json/list.
@@ -24,7 +26,7 @@ func fetchDevToolsTargets(ctx context.Context, devtoolsHost string) ([]devtoolsT
 	if err != nil {
 		return nil, err
 	}
-	client := &http.Client{Timeout: 5 * time.Second}
+	client := httpx.OutboundClient(5 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

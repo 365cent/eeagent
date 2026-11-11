@@ -20,8 +20,8 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 ### DOC-03 — current capture route and worker index slice
 
-- Updated the backend README, project index, and Mac development guide to identify the async capture route, migration head, worker entry point, and worker service template.
-- Evidence: [project index](PROJECT-INDEX.md), [Mac development guide](DEVELOPMENT-MAC.md), [backend README](../backend/README.md), and [docs TODO acceptance remainder](TODO.md#doc-03-架构数据和接口同步).
+- Updated the backend README, project index, and local development docs (now consolidated in root README) to identify the async capture route, migration head, worker entry point, and worker service template.
+- Evidence: [project index](PROJECT-INDEX.md), [root README](../README.md), [backend README](../backend/README.md), and [docs TODO acceptance remainder](TODO.md#doc-03-架构数据和接口同步).
 - Checks: content and links were reviewed in the workspace; no application test was run. Full architecture, identity, audit, and business-state documentation remains open.
 
 ### FE-01 — API-backed overview and technology slice
@@ -89,7 +89,7 @@ This record keeps evidence for implementation slices removed from the remaining-
 ### DOC-03 — migration and identity documentation sync
 
 - Updated current Alembic head references to `0011`, documented the Mac `eea_test` procedure and local reviewer role, removed the incorrect claim that an IP address is a user identity, and removed the synthetic eFuse chain from the local seed. A test confirms repeat-safe vocabulary seeding without synthetic business records.
-- Evidence: [backend README](../backend/README.md), [Mac development guide](DEVELOPMENT-MAC.md), [root TODO](../TODO.md), and subsystem TODOs.
+- Evidence: [backend README](../backend/README.md), [root README](../README.md), [root TODO](../TODO.md), and subsystem TODOs.
 - Checks: local content and migration-head references reviewed. No Linux documentation validation was run.
 
 ### DOC-02 — external input register slice
@@ -135,6 +135,18 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 - The Windows task view lists individual items, opens their signals, retries eligible failures with their original identity, and cancels queued items before the first attempt. Manual WeChat recovery preserves the original URL and submits pasted text for review. Windows runtime acceptance remains open.
 - The collector subagent stopped before verification. On review, two identical declarations of the recovered-job cancellation test prevented compilation of the queue tests. Removed the duplicate and retained the test case.
-- On macOS with Go 1.24.0, the portable package checks in the [Mac guide](DEVELOPMENT-MAC.md) passed with the test cache disabled. The Windows/amd64 build of `./cmd/capture` also succeeded. Windows GUI, real Edge/Chrome capture, multi-file recovery across application restart and package installation still need a Windows run.
+- On macOS with Go 1.24.0, the portable package checks documented in [README.md](../README.md) passed with the test cache disabled. The Windows/amd64 build of `./cmd/capture` also succeeded. Windows GUI, real Edge/Chrome capture, multi-file recovery across application restart and package installation still need a Windows run.
 - The frontend production build using the installed Next executable and scoped Ant Design lint passed after clarifying the trace recovery action label. The pnpm launcher failed to locate its cached 12.3.4 entry point during the earlier build attempt.
 - Implementation and remaining work are in the [queue](../client/internal/queue/queue.go), [queue tests](../client/internal/queue/queue_test.go), [Windows UI](../client/internal/ui/app.go) and [client TODO](../client/TODO.md#cc-04-gui-和人工恢复).
+
+## 2026-11-11
+
+### BE-14 — Pydantic AI durable agent workflow (backend)
+
+- Single orchestration path via **Pydantic AI 2.63** (`app.services.agent_workflow.build_eea_agent`): typed `AgentDeps`, `AgentTurn`, seven registered tools, `DeferredToolRequests` for `apply_confirmed_patch`, citation ledger validation, and `ModelMessagesTypeAdapter` persistence on `eea_agent_session.model_messages_json`.
+- HTTP: `POST/GET /api/v1/agent/sessions`, messages, SSE (`Last-Event-ID`), run cancel, patch confirm/reject, memories — all gated by `get_operator_identity` (no caller `user_id`/`role`). Legacy `POST /api/v1/signals/{id}/assistant/messages` unchanged.
+- Migration [0013_agent_workflow](../backend/migrations/versions/0013_agent_workflow.py): sessions, runs, messages, SSE events, deferred patches, memory, document chunks/figures for RAG citations.
+- Dynamic instructions: `agent_instructions.build_instruction_addon` (project, page context, operator memory) injected per run; SSE events buffered until turn completion to avoid mid-run session corruption.
+- `draft_trace_report` traverses signal → theme → demand → function → landing → standards/assessment via [agent_trace.py](../backend/app/services/agent_trace.py).
+- Evidence: [agent API](../backend/app/api/v1/agent.py), [runtime](../backend/app/services/agent_runtime.py), [patches](../backend/app/services/agent_patches.py), [tests/test_agent_workflow.py](../backend/tests/test_agent_workflow.py), [tests/test_pydantic_ai_wiring.py](../backend/tests/test_pydantic_ai_wiring.py).
+- Checks (macOS, isolated PostgreSQL `eea_test`): `uv run pytest -q tests/test_agent_workflow.py tests/test_pydantic_ai_wiring.py` → **18 passed** (includes AT-AGT smoke: SSE replay, patch propose/confirm/duplicate/stale/expired/reject, session message JSON persistence, two-actor isolation, gateway unconfigured path). Optional live: `EEA_LLM_INTEGRATION=1 … test_agent_live.py`. Full backend suite not re-signed in this slice when concurrent long pytest jobs were holding the test DB. FE-11 UI, OPS-03 production identity, and Linux gateway SLO remain open.

@@ -2,8 +2,6 @@ import uuid
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from urllib.parse import urlparse
-
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse
 from anyio import to_thread
@@ -33,6 +31,11 @@ from app.schemas.schemas import (
     ThemeAggregatePreview,
     ThemeAssignment,
 )
+from app.domains.evidence.channel import _infer_channel_code
+from app.domains.evidence.document_pipeline import document_title as _document_title
+from app.domains.evidence.html_capture import _signal_from_html
+from app.domains.evidence.signal_record import create_signal_record as _create_signal_record
+from app.domains.evidence.theme_match import match_theme as _match_theme
 from app.services.audit import record_correction
 from app.services.body_excerpt import lead_excerpt_from_markdown, resolve_signal_excerpt
 from app.services.doc_summary import build_document_body_summary, excerpt_from_canonical
@@ -106,19 +109,6 @@ async def _load_signal(db: AsyncSession, sid: uuid.UUID) -> Signal:
     if obj is None:
         raise HTTPException(404, "signal not found")
     return obj
-
-
-async def _theme_display_tags(db: AsyncSession) -> dict[uuid.UUID, set[str]]:
-    rows = (await db.execute(text("SELECT tech_theme_id, tag_name FROM eea_v_tech_theme_display_tags"))).all()
-    theme_tags: dict[uuid.UUID, set[str]] = {}
-    for theme_id, tag_name in rows:
-        theme_tags.setdefault(theme_id, set()).add(tag_name)
-    return theme_tags
-
-
-async def _match_theme(db: AsyncSession, tag_names: set[str]) -> tuple[uuid.UUID | None, str]:
-    """REQ-SIG-08: match the signal's tags against every theme's display tags."""
-    return select_best_theme(await _theme_display_tags(db), tag_names)
 
 
 def _to_out(s: Signal) -> SignalOut:
@@ -196,116 +186,6 @@ async def list_signals(
     return [_to_out(s) for s in rows]
 
 
-async def _create_signal_record(
-    db: AsyncSession,
-    *,
-    title: str,
-    url: str,
-    channel_code: str,
-    evidence_status_code: str,
-    publisher: str | None = None,
-    published_at: datetime | None = None,
-    value_chain_stage_code: str | None = None,
-    signal_type_code: str | None = None,
-    evolution_node_code: str | None = None,
-    source_label: str | None = None,
-    excerpt: str | None = None,
-    body_text: str | None = None,
-    snapshot_html_object_key: str | None = None,
-    document_id: uuid.UUID | None = None,
-    capture_submission_id: uuid.UUID | None = None,
-    capture_submission_sha256: str | None = None,
-) -> Signal:
-    """Shared post-ingest pipeline for both ingestion paths (B3/B5): persist
-    the signal row, persist the body snapshot when one is present, pre-tag
-    (REQ-TAG-05) and auto-aggregate (REQ-SIG-08), and commit.
-
-    The JSON path (REQ-SIG-11) and the capture path (TODO.md B3 step 3) feed
-    the same function so the post-creation logic cannot drift apart.
-
-    S1-3 document sources (document_id set): tags come only from the LLM
-    suggestion — no jieba fallback — and automatic theme aggregation is
-    skipped (tech_theme_id stays null until a manual PUT /theme); a whole
-    deck poured into jieba otherwise re-creates the demo-theme
-    misattribution (backend/TODO.md W4.1).
-    """
-    stage_explicit = value_chain_stage_code
-    signal_type_explicit = signal_type_code
-    # REQ-TAG-04: 平台按标题与证据快照初判价值链环节（人工可纠偏）
-    snapshot_for_rules = text_for_tagging(title, body_text)
-    if value_chain_stage_code is None:
-        value_chain_stage_code = judge_stage(title, snapshot_for_rules)
-    url_norm = normalize_url(url)
-    title, _dup_renamed = await disambiguate_title_for_url(db, title, url_norm)
-    sig = Signal(
-        title=title,
-        url=url,
-        url_normalized=url_norm,
-        channel_code=channel_code,
-        publisher=publisher,
-        published_at=published_at,
-        value_chain_stage_code=value_chain_stage_code,
-        signal_type_code=signal_type_code,
-        evolution_node_code=evolution_node_code,
-        evidence_status_code=evidence_status_code,
-        source_label=source_label,
-        excerpt=excerpt,
-        body_object_key=save_body(body_text) if body_text else None,
-        body_sha256=sha256_text(body_text) if body_text else None,
-        captured_at=func.now() if body_text else None,
-        snapshot_html_object_key=snapshot_html_object_key,
-        document_id=document_id,
-        capture_submission_id=capture_submission_id,
-        capture_submission_sha256=capture_submission_sha256,
-    )
-    db.add(sig)
-    try:
-        await db.flush()
-    except IntegrityError:
-        await db.rollback()
-        if capture_submission_id is None:
-            raise
-        existing = (
-            await db.execute(
-                select(Signal).where(Signal.capture_submission_id == capture_submission_id)
-            )
-        ).scalar_one_or_none()
-        if existing is None:
-            raise
-        if existing.capture_submission_sha256 != capture_submission_sha256:
-            raise HTTPException(409, "submission_id was already used for a different capture")
-        return existing
-    # REQ-TAG-05: jieba recall → rerank → LLM 精选；环节/类型仍可由 LLM 结构化建议。
-    tag_names: list[str] = []
-    if body_text:
-        tagging_text = text_for_tagging(title, body_text)
-        llm_body = tagging_text or (body_text or "")[:6000]
-        llm_suggestion = await suggest_tags_with_llm(title, llm_body)
-        if llm_suggestion is not None:
-            if stage_explicit is None and llm_suggestion.value_chain_stage_code:
-                sig.value_chain_stage_code = value_chain_stage_code = llm_suggestion.value_chain_stage_code
-            if signal_type_explicit is None and llm_suggestion.signal_type_code:
-                sig.signal_type_code = llm_suggestion.signal_type_code
-        if document_id is None:
-            tag_names, _, _ = await suggest_tech_tags(title, body_text)
-        for name in tag_names:
-            v = await get_or_create_vocab(db, "tech_tag", name)
-            db.add(SignalTag(signal_id=sig.id, vocab_id=v.id))
-        if document_id is None:
-            # REQ-SIG-08: 抓取后自动预标，并按标签向上归集（人工 PUT /theme 仍可纠偏）
-            theme_id, _ = await _match_theme(db, set(tag_names))
-            if theme_id is not None:
-                sig.tech_theme_id = theme_id
-    await db.commit()
-    return sig
-
-
-def _document_title(document: Document) -> str:
-    if document.filename:
-        return Path(document.filename).stem or document.filename
-    return f"文档 {document.sha256[:8]}"
-
-
 def _document_summary_body(document: Document) -> str:
     """S1-3 正文策略：文档来源信号默认写入摘要（文件名 + 标题 + 讲稿摘录），
     不把整份 canonical Markdown 灌入 body_text。"""
@@ -375,61 +255,6 @@ async def create_signal(payload: SignalCreate, db: AsyncSession = Depends(get_db
         document_id=document.id if document is not None else None,
     )
     return await get_signal(sig.id, db)
-
-
-def _infer_channel_code(url: str) -> str:
-    """Capture default channel (TODO.md B3): the weixin mp host maps to
-    wechat_mp, every other origin to web — the two closed-vocab channels."""
-    return "wechat_mp" if urlparse(url).netloc.lower() == "mp.weixin.qq.com" else "web"
-
-
-async def _signal_from_html(
-    db: AsyncSession,
-    *,
-    url: str,
-    data: bytes,
-    channel_code: str | None = None,
-    html_label: str = "archive_html",
-    capture_submission_id: uuid.UUID | None = None,
-    capture_submission_sha256: str | None = None,
-    figure_vision_captions: bool = True,
-) -> Signal:
-    """HTML bytes → signal: snapshot parse, object-store archive, shared
-    post-ingest pipeline. Feeds POST /signals/capture (extension upload) and
-    the unified POST /capture (uploaded html file or server-fetched page)."""
-    if not data:
-        raise HTTPException(422, f"{html_label} 文件为空")
-    if channel_code is None:
-        channel_code = _infer_channel_code(url)
-    else:
-        channel_code = _query_code("channel", channel_code)
-    # parse_html_snapshot is synchronous, CPU-heavy parsing (bs4 + MarkItDown
-    # over the article fragment; multi-MB SingleFile pages can take ~0.5s). Run it in
-    # a worker thread so one large capture cannot stall the event loop (and
-    # with it every concurrent request).
-    snap = await to_thread.run_sync(partial(parse_html_snapshot, page_url=url), data)
-    snap = await enrich_snapshot_figures(snap, vision_captions=figure_vision_captions)
-    if not snap.body_md:
-        # 有正文时不得在未落盘情况下标「已留存」的反面：无正文的页面不落行
-        raise HTTPException(422, "无法从 archive_html 抽出正文（body_md 为空），未创建信号")
-    # 1. 存 HTML → snapshot_html_object_key（TODO.md B3 处理顺序）
-    html_key = save_bytes(data, folder="signals", ext="html")
-    excerpt = await resolve_signal_excerpt(snap.title or url, snap.body_md)
-    # 2+3. html_snapshot 正文 + 共用创建后逻辑（judge_stage/suggest_tags/归集）
-    return await _create_signal_record(
-        db,
-        title=snap.title or url,
-        url=url,
-        channel_code=channel_code,
-        evidence_status_code="retained",
-        publisher=snap.publisher,
-        published_at=snap.published_at,
-        excerpt=excerpt,
-        body_text=snap.body_md,
-        snapshot_html_object_key=html_key,
-        capture_submission_id=capture_submission_id,
-        capture_submission_sha256=capture_submission_sha256,
-    )
 
 
 @router.post("/capture", response_model=SignalDetail, status_code=201)
@@ -611,7 +436,10 @@ async def signal_assistant_message(
 
     try:
         reply, model = await chat_completion(
-            messages, temperature=0.25, max_tokens=900
+            messages,
+            temperature=0.25,
+            max_tokens=900,
+            task="evidence_assistant",
         )
     except LLMNotConfiguredError as exc:
         raise HTTPException(
@@ -665,6 +493,8 @@ async def signal_studio(
                     temperature=0.2,
                     max_tokens=1600,
                     max_model_attempts=3,
+                    task=f"studio.{payload.kind}",
+                    caller_attempt=attempt + 1,
                 )
         except LLMNotConfiguredError as exc:
             raise HTTPException(

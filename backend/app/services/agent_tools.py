@@ -216,22 +216,8 @@ async def apply_confirmed_patch_tool(
 async def draft_trace_report_tool(
     ctx: RunContext[AgentDeps], payload: DraftTraceReportRequest
 ) -> DraftTraceReportResult:
-    signal = await _load_signal_detail(ctx.deps.db, payload.signal_id)
-    citation = ctx.deps.ledger.register(
-        make_signal_citation(signal_id=signal.id, title=signal.title, summary=signal.excerpt or signal.title)
-    )
-    theme_line = "未关联主题"
-    if signal.tech_theme_id:
-        theme = await ctx.deps.db.get(TechTheme, signal.tech_theme_id)
-        if theme:
-            theme_line = theme.working_name
-    tags = ", ".join(st.vocab.name for st in signal.tags) or "—"
-    markdown = (
-        f"# 信号链路摘要\n\n"
-        f"- 信号：{signal.title} ({signal.id})\n"
-        f"- 主题：{theme_line}\n"
-        f"- 环节：{signal.value_chain_stage_code or '—'}\n"
-        f"- 标签：{tags}\n\n"
-        f"## 局限\n\n仅包含当前已关联且可核验的信号节点；未展开需求点/功能/落脚点除非后端链路已持久化。"
-    )
-    return DraftTraceReportResult(markdown=markdown, citations=[citation])
+    from app.services.agent_trace import build_signal_trace_markdown
+
+    markdown, citations = await build_signal_trace_markdown(ctx.deps.db, payload.signal_id)
+    registered = [ctx.deps.ledger.register(c) for c in citations]
+    return DraftTraceReportResult(markdown=markdown, citations=registered)

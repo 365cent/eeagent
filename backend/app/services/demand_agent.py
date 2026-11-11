@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import time
 import uuid
 from dataclasses import dataclass
 
@@ -16,9 +17,8 @@ from pydantic_ai.messages import (
     UserPromptPart,
 )
 
-from urllib.parse import urlparse
-
 from app.models.models import Signal
+from app.domains.evidence.signal_host import signal_host
 from app.services.pydantic_agent import build_model
 from app.core.config import get_settings
 from app.services.llm_gateway import (
@@ -29,21 +29,13 @@ from app.services.llm_gateway import (
     resolve_chat_model,
     upstream_from_pydantic_ai,
 )
+from app.services.llm_usage import (
+    http_status_of,
+    log_llm_call,
+    usage_from_agent_result,
+    usage_without_result,
+)
 from pydantic_ai.exceptions import ModelAPIError
-
-
-def _signal_host(signal: Signal) -> str:
-    raw = (signal.url_normalized or signal.url or "").strip()
-    if raw:
-        try:
-            href = raw if raw.startswith("http") else f"https://{raw}"
-            return (urlparse(href).hostname or raw).lower()
-        except ValueError:
-            pass
-    pub = (signal.publisher or "").strip()
-    if pub:
-        return pub.lower()
-    return (signal.channel_code or str(signal.id)).lower()
 
 
 class SignalBotBrief(BaseModel):
@@ -85,7 +77,7 @@ def signal_to_bot(signal: Signal) -> SignalBotBrief:
     return SignalBotBrief(
         signal_id=signal.id,
         title=title,
-        host=_signal_host(signal),
+        host=signal_host(signal),
         publisher=(signal.publisher or "").strip() or None,
         channel_code=signal.channel_code,
         tags=tags[:12],
@@ -123,10 +115,11 @@ def chat_history_to_messages(history: list[dict[str, str]]) -> list[ModelMessage
 
 
 _demand_agent: Agent[DemandAgentDeps, str] | None = None
+_demand_agent_requested_model: str | None = None
 
 
 async def get_demand_agent() -> Agent[DemandAgentDeps, str]:
-    global _demand_agent
+    global _demand_agent, _demand_agent_requested_model
     if _demand_agent is not None:
         return _demand_agent
 
@@ -135,6 +128,7 @@ async def get_demand_agent() -> Agent[DemandAgentDeps, str]:
     if not base:
         raise LLMNotConfiguredError("LLM_BASE_URL must be set in backend/.env")
     chosen = await resolve_chat_model()
+    _demand_agent_requested_model = chosen
     model = build_model(chosen, base_url=base, api_key=settings.llm_api_key)
 
     agent: Agent[DemandAgentDeps, str] = Agent(
@@ -164,25 +158,60 @@ async def run_demand_agent_chat(
     history: list[dict[str, str]],
 ) -> tuple[str, str]:
     agent = await get_demand_agent()
-    model_name = str(getattr(getattr(agent, "model", None), "model_name", None) or "gateway")
+    model_name = (
+        _demand_agent_requested_model
+        or str(getattr(getattr(agent, "model", None), "model_name", None) or "").strip()
+        or await resolve_chat_model()
+    )
     last_upstream: LLMUpstreamError | None = None
     for attempt in range(2):
+        started = time.perf_counter()
         try:
             result = await agent.run(
                 message.strip(),
                 deps=deps,
                 message_history=chat_history_to_messages(history),
             )
-            return result.output, model_name
-        except LLMUpstreamError:
+        except LLMUpstreamError as exc:
+            log_llm_call(
+                usage_without_result(
+                    task="demand_coordinator",
+                    requested_model=model_name,
+                    caller_attempt=attempt + 1,
+                    fallback=attempt > 0,
+                    latency_ms=int((time.perf_counter() - started) * 1000),
+                    http_status=exc.status,
+                )
+            )
             raise
         except ModelAPIError as exc:
             upstream = upstream_from_pydantic_ai(exc)
+            log_llm_call(
+                usage_without_result(
+                    task="demand_coordinator",
+                    requested_model=model_name,
+                    caller_attempt=attempt + 1,
+                    fallback=attempt > 0,
+                    latency_ms=int((time.perf_counter() - started) * 1000),
+                    http_status=http_status_of(exc),
+                )
+            )
             if attempt == 0 and _upstream_retryable(upstream):
                 last_upstream = upstream
                 await asyncio.sleep(0.6)
                 continue
             raise upstream from exc
+        usage = usage_from_agent_result(
+            result,
+            task="demand_coordinator",
+            requested_model=model_name,
+            caller_attempt=attempt + 1,
+            fallback=attempt > 0,
+            latency_ms=int((time.perf_counter() - started) * 1000),
+        )
+        log_llm_call(usage)
+        served = (usage.served_model or model_name).strip() or model_name
+        return result.output, served
     if last_upstream is not None:
         raise last_upstream
     raise LLMUpstreamError(502, "LLM 请求未完成")

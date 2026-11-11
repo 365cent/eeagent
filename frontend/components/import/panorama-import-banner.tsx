@@ -3,15 +3,12 @@
 import { CloudUploadOutlined } from '@ant-design/icons'
 import { Alert, Progress, Space, Typography } from 'antd'
 import type { PanoramaImportBatchOut } from '@/lib/api/types'
+import {
+  PANORAMA_IMPORT_STATUS_LABEL,
+  panoramaImportAlertType,
+} from '@/features/evidence/status'
 
 const { Text } = Typography
-
-const STATUS_LABEL: Record<PanoramaImportBatchOut['status'], string> = {
-  capturing: '采集中',
-  structuring: '写入全景图',
-  completed: '已完成',
-  failed: '失败',
-}
 
 export function PanoramaImportBanner({
   batch,
@@ -25,14 +22,14 @@ export function PanoramaImportBanner({
   const pending = batch.capture_jobs_pending || 0
   const done = Math.max(0, total - pending)
   const percent = total > 0 ? Math.round((done / total) * 100) : batch.status === 'completed' ? 100 : 0
-  const type = batch.status === 'failed' ? 'error' : batch.status === 'completed' ? 'success' : 'info'
+  const type = panoramaImportAlertType(batch.status)
 
   return (
     <Alert
       type={type}
       showIcon
       icon={<CloudUploadOutlined />}
-      title={`批量链接采集 · ${STATUS_LABEL[batch.status]}`}
+      title={`批量链接采集 · ${PANORAMA_IMPORT_STATUS_LABEL[batch.status]}`}
       description={
         <Space orientation="vertical" size={8} style={{ width: '100%' }}>
           <Text type="secondary">

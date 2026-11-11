@@ -11,7 +11,6 @@
 | [INPUT-REGISTER.md](./INPUT-REGISTER.md) | 已收到与待提供的业务和环境输入、来源责任、版本许可及受影响验收项。 |
 | [REQUIREMENTS-TRACEABILITY.md](./REQUIREMENTS-TRACEABILITY.md) | 75 条 REQ 对应的来源、WBS、实施任务与待验收 AT 编号。 |
 | [ACCEPTANCE-EXECUTION-RECORD-TEMPLATE.md](./ACCEPTANCE-EXECUTION-RECORD-TEMPLATE.md) | 每个 AT/目标环境执行记录的空白模板；初始状态为未运行，区分 Mac、Windows、Linux 与真实业务验收。 |
-| [DEVELOPMENT-MAC.md](./DEVELOPMENT-MAC.md) | macOS 开发环境、锁文件安装与 Backend/Frontend/Go 组件检查命令。 |
 | [platform-implementation-plan.md](./platform-implementation-plan.md) | 业务需求、推导规则、数据/页面方案和 Agent 提案。 |
 | [agents.md](./agents.md) | LLM 网关、分任务提示词（含建议改写）、模型选型与评估方案（无 live API 证据）。 |
 | [enterprise-ui-study.md](./enterprise-ui-study.md) | 闭源前瞻平台 UI/交互对照研究。 |

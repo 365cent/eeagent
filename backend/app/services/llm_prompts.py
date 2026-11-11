@@ -5,6 +5,9 @@ Do not embed provider model IDs here — routing stays in llm_gateway / env conf
 
 from __future__ import annotations
 
+# Bump when prompt text in this module changes. Usage logs group by this value.
+PROMPT_REVISION = "1"
+
 
 def evidence_assistant_system(context: str) -> str:
     """Legacy POST /signals/{id}/assistant/messages."""

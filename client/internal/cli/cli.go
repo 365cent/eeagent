@@ -148,7 +148,7 @@ func runUpload(args []string, out io.Writer) int {
 	if *parallel > 0 {
 		cfg.MaxParallel = *parallel
 	}
-	_ = config.EnsureSingleFileExtension(dir, &cfg)
+	_ = capture.EnsureSingleFileExtension(dir, cfg.UserDataDir, cfg.CaptureArchive, cfg.CaptureEngine, &cfg.SingleFileExtensionPath)
 
 	api := platform.New(base, cfg.MaxUploadMB)
 

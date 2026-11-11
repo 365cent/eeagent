@@ -11,15 +11,11 @@ import (
 	"time"
 
 	"eea/capture/internal/capture"
+	"eea/capture/internal/httpx"
 	"eea/capture/internal/platform"
 )
 
 const WorkerID = "capture-client"
-
-// CaptureEngine captures a live page into an HTML archive.
-type CaptureEngine interface {
-	Capture(ctx context.Context, rawURL string) (*capture.Archive, error)
-}
 
 type reservedJob struct {
 	id string
@@ -30,7 +26,7 @@ func DrainAwaitingJobs(
 	ctx context.Context,
 	out io.Writer,
 	api *platform.Client,
-	engine CaptureEngine,
+	engine capture.CaptureEngine,
 	channel string,
 ) (ok, failed int) {
 	jobs, err := api.ListAwaitingCaptureJobs(ctx, 50)
@@ -63,7 +59,7 @@ func drainOne(
 	ctx context.Context,
 	out io.Writer,
 	api *platform.Client,
-	engine CaptureEngine,
+	engine capture.CaptureEngine,
 	channel string,
 	job platform.CaptureJobAwaiting,
 ) (err error) {
@@ -147,7 +143,7 @@ func downloadURL(ctx context.Context, rawURL string, api *platform.Client) ([]by
 	if err != nil {
 		return nil, err
 	}
-	client := &http.Client{Timeout: 15 * time.Minute}
+	client := httpx.OutboundClient(15 * time.Minute)
 	resp, err := client.Do(req)
 	if err != nil {
 		return nil, err

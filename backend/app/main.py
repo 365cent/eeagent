@@ -12,9 +12,9 @@ if sys.platform == "win32":
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
-from app.api.llms_docs import render_index_html, render_llms_txt
+from app.api.swagger_ui import SWAGGER_UI_HTML
 from app.api.v1 import (
     agent,
     capture,
@@ -35,6 +35,7 @@ from app.api.v1 import (
     vocab,
 )
 from app.core.config import get_settings
+from app.platform.errors import DomainError
 
 
 def create_app() -> FastAPI:
@@ -62,7 +63,20 @@ def create_app() -> FastAPI:
             except asyncio.CancelledError:
                 pass
 
-    app = FastAPI(title=settings.app_name, version="0.1.0", lifespan=lifespan)
+    app = FastAPI(
+        title=settings.app_name,
+        version="0.1.0",
+        lifespan=lifespan,
+        docs_url=None,
+        redoc_url=None,
+    )
+    # Swagger UI 4.5 (bundled at /) only accepts openapi: 3.0.x — FastAPI defaults to 3.1.0.
+    app.openapi_version = "3.0.2"
+
+    @app.exception_handler(DomainError)
+    async def domain_error_handler(_request: Request, exc: DomainError) -> JSONResponse:
+        return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=settings.origins,
@@ -96,37 +110,12 @@ def create_app() -> FastAPI:
     async def healthz():
         return {"status": "ok", "service": settings.app_name}
 
-    # LLM-friendly docs, generated from the app's own OpenAPI schema: the
-    # handlers read request.app.openapi() (memoized by FastAPI) and
-    # request.base_url, so every route line derives from the schema walk in
-    # app/api/llms_docs.py — there is no hand-maintained route list. Both
-    # routes stay out of the schema (include_in_schema=False) so /docs and
-    # /openapi.json keep serving exactly the /api/v1 surface, and the
-    # rendered pages are cached per base URL, not rebuilt on every request.
-    _docs_cache: dict[str, dict] = {}
-
-    def _rendered_docs(request: Request) -> dict:
-        spec = request.app.openapi()
-        base_url = str(request.base_url)
-        cached = _docs_cache.get(base_url)
-        if cached is None or cached["spec"] is not spec:
-            cached = {
-                "spec": spec,
-                "llms_txt": render_llms_txt(spec, base_url),
-                "index_html": render_index_html(spec, base_url),
-            }
-            _docs_cache[base_url] = cached
-        return cached
-
-    @app.get("/llms.txt", include_in_schema=False)
-    async def llms_txt(request: Request) -> Response:
-        return Response(
-            content=_rendered_docs(request)["llms_txt"], media_type="text/markdown"
-        )
-
+    # OpenAPI explorer: Swagger UI loads /openapi.json (deep-linkable #/tag/op).
+    # No separate llms.txt or static HTML index — schema is the single contract.
     @app.get("/", include_in_schema=False)
-    async def index(request: Request) -> HTMLResponse:
-        return HTMLResponse(content=_rendered_docs(request)["index_html"])
+    @app.get("/docs", include_in_schema=False)
+    async def swagger_ui() -> HTMLResponse:
+        return HTMLResponse(content=SWAGGER_UI_HTML)
 
     return app
 
