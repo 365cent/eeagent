@@ -10,10 +10,11 @@ Run:
 
 from __future__ import annotations
 
+from contextlib import asynccontextmanager
+from pathlib import Path
+
 import httpx
 import pytest
-
-from pathlib import Path
 
 from app.core.config import get_settings
 from app.services import semantic_api
@@ -45,6 +46,9 @@ async def test_document_chunks_embedding_parsed(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
+        async def aclose(self):
+            return None
+
         async def post(self, url, headers=None, json=None):
             seen.append({"url": url, "json": json})
             if url.endswith("/embeddings"):
@@ -55,10 +59,14 @@ async def test_document_chunks_embedding_parsed(monkeypatch):
                 )
             raise AssertionError(url)
 
+    @asynccontextmanager
+    async def fake_open(**_kwargs):
+        yield FakeClient()
+
     monkeypatch.setenv("MAAS_API_BASE_URL", "https://maas.example.com/v2")
     monkeypatch.setenv("MAAS_API_KEY", "test-key")
     get_settings.cache_clear()
-    monkeypatch.setattr(semantic_api.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(semantic_api, "open_async_http_client", fake_open)
 
     chunks = [SAMPLE_DOCUMENT[i : i + 200] for i in range(0, len(SAMPLE_DOCUMENT), 200)]
     vectors = await semantic_api.create_embeddings(chunks)
@@ -80,6 +88,9 @@ async def test_rerank_batches_more_than_sixteen_candidates(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
+        async def aclose(self):
+            return None
+
         async def post(self, url, headers=None, json=None):
             if url.endswith("/rerank"):
                 docs = json["documents"]
@@ -95,10 +106,14 @@ async def test_rerank_batches_more_than_sixteen_candidates(monkeypatch):
                 )
             raise AssertionError(url)
 
+    @asynccontextmanager
+    async def fake_open(**_kwargs):
+        yield FakeClient()
+
     monkeypatch.setenv("MAAS_API_BASE_URL", "https://maas.example.com/v2")
     monkeypatch.setenv("MAAS_API_KEY", "test-key")
     get_settings.cache_clear()
-    monkeypatch.setattr(semantic_api.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(semantic_api, "open_async_http_client", fake_open)
 
     docs = [f"tag-{i}" for i in range(20)]
     scores = await semantic_api.rerank("query", docs)
@@ -117,6 +132,9 @@ async def test_keyword_rerank_orders_jieba_candidates(monkeypatch):
         async def __aexit__(self, *args):
             return None
 
+        async def aclose(self):
+            return None
+
         async def post(self, url, headers=None, json=None):
             if url.endswith("/rerank"):
                 docs = json["documents"]
@@ -131,10 +149,14 @@ async def test_keyword_rerank_orders_jieba_candidates(monkeypatch):
                 )
             raise AssertionError(url)
 
+    @asynccontextmanager
+    async def fake_open(**_kwargs):
+        yield FakeClient()
+
     monkeypatch.setenv("MAAS_API_BASE_URL", "https://maas.example.com/v2")
     monkeypatch.setenv("MAAS_API_KEY", "test-key")
     get_settings.cache_clear()
-    monkeypatch.setattr(semantic_api.httpx, "AsyncClient", FakeClient)
+    monkeypatch.setattr(semantic_api, "open_async_http_client", fake_open)
 
     candidates = suggest_tags(SAMPLE_DOCUMENT, limit=8)
     assert candidates

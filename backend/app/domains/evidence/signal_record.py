@@ -14,6 +14,7 @@ from app.services.judgment import judge_stage
 from app.services.llm import suggest_tags_with_llm
 from app.services.objectstore import save_body
 from app.services.signal_duplicate import disambiguate_title_for_url
+from app.services.signal_sources import ensure_primary_source
 from app.services.tagging import (
     get_or_create_vocab,
     normalize_url,
@@ -110,5 +111,6 @@ async def create_signal_record(
             theme_id, _ = await match_theme(db, set(tag_names))
             if theme_id is not None:
                 sig.tech_theme_id = theme_id
+    await ensure_primary_source(db, sig)
     await db.commit()
     return sig

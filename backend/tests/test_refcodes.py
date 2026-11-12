@@ -15,7 +15,7 @@ EXPECTED = {
         "creation_supply": ("创造端（供应链）", "供应链（创造端）"),
         "delivery_oem": ("传递端（主机厂）", None),
         "realization_consumer": ("兑现端（消费者）", None),
-        "regulation_standard": ("规制端（行业标准/规定）", None),
+        "regulation_standard": ("规制端（行业标准/规定）", "规则端（行业标准/规定）"),
     },
     "signal_type": {
         "strategy": ("战略", None),

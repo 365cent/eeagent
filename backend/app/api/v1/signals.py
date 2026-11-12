@@ -3,7 +3,7 @@ from datetime import datetime
 from functools import partial
 from pathlib import Path
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse
 from anyio import to_thread
 from sqlalchemy import func, or_, select, text
 from sqlalchemy.exc import IntegrityError
@@ -25,7 +25,10 @@ from app.schemas.schemas import (
     SignalStudioIn,
     SignalUpdate,
     TagAssignment,
+    TagCandidateDetail,
     TagSuggestion,
+    SignalSourceCreate,
+    SignalSourceOut,
     ThemeAggregateCandidate,
     ThemeAggregatePreview,
     ThemeAssignment,
@@ -35,7 +38,7 @@ from app.domains.evidence.document_pipeline import document_title as _document_t
 from app.domains.evidence.html_capture import _signal_from_html
 from app.domains.evidence.signal_queries import find_signal, get_signal_detail, signal_out as _to_out
 from app.domains.evidence.signal_record import create_signal_record as _create_signal_record
-from app.domains.evidence.theme_match import match_theme as _match_theme
+from app.domains.evidence.theme_match import match_theme as _match_theme, theme_display_tags
 from app.services.audit import record_correction
 from app.services.body_excerpt import lead_excerpt_from_markdown, resolve_signal_excerpt
 from app.services.doc_summary import build_document_body_summary, excerpt_from_canonical
@@ -46,6 +49,7 @@ from app.services.html_snapshot import (
     prepare_archive_replay_html,
 )
 from app.services.judgment import judge_signal_type, judge_stage, rank_theme_overlaps, select_best_theme
+from app.services.signal_sources import add_supplementary_url, list_sources
 from app.services.tagging_guard import assert_expected_signal_revision, human_corrected_fields
 from app.services.llm import suggest_tags_with_llm
 from app.services.llm_gateway import (
@@ -542,7 +546,7 @@ async def theme_aggregate_preview(signal_id: uuid.UUID, db: AsyncSession = Depen
             reason="文档来源信号不参与自动归集，请人工指定主题",
         )
     tag_names = {st.vocab.name for st in s.tags}
-    theme_tags = await _theme_display_tags(db)
+    theme_tags = await theme_display_tags(db)
     ranked = rank_theme_overlaps(theme_tags, tag_names)
     names: dict[uuid.UUID, str] = {}
     if ranked:
@@ -746,8 +750,20 @@ async def tag_suggestions(
         degraded_reason = "标签精选模型暂不可用，已使用精排/词频结果。"
     elif not llm_configured and not semantic_api.semantic_configured():
         degraded_reason = "对话模型与语义服务未配置，已使用词频建议。"
+    if tag_source == "llm-rerank-refine":
+        degraded_reason = None
+    snippet = (tagging_text or fallback_text or "")[:160] or None
+    details = [
+        TagCandidateDetail(
+            name=name,
+            rerank_score=rerank_score if index == 0 else None,
+            evidence_snippet=snippet,
+        )
+        for index, name in enumerate(tags)
+    ]
     suggestion = TagSuggestion(
         suggested_tags=tags,
+        details=details,
         value_chain_stage_code=stage,
         signal_type_code=sig_type,
         source=tag_source,
@@ -762,6 +778,31 @@ async def tag_suggestions(
     if "signal_type_code" in protected:
         suggestion.signal_type_code = None
     return suggestion
+
+
+@router.get("/{signal_id}/sources", response_model=list[SignalSourceOut])
+async def get_signal_sources(signal_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    await _load_signal(db, signal_id)
+    rows = await list_sources(db, signal_id)
+    return [SignalSourceOut.model_validate(row) for row in rows]
+
+
+@router.post("/{signal_id}/sources", response_model=SignalSourceOut, status_code=201)
+async def post_signal_source(
+    signal_id: uuid.UUID,
+    payload: SignalSourceCreate,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_operator_identity),
+):
+    if actor.role not in {"researcher", "taxonomy_admin", "platform_admin"}:
+        raise HTTPException(403, "当前角色不能添加来源 URL")
+    signal = await _load_signal(db, signal_id)
+    if signal.evidence_status_code == "archived":
+        raise HTTPException(409, "已归档信号不能新增来源")
+    row = await add_supplementary_url(db, signal, payload.url, provenance=payload.provenance)
+    await db.commit()
+    await db.refresh(row)
+    return SignalSourceOut.model_validate(row)
 
 
 @router.post("/{signal_id}/auto-tag", response_model=SignalDetail)

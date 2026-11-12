@@ -443,7 +443,12 @@ async def test_demand_list_offers_no_merge_and_no_priority_sort(client):
     await create_confirmed_demand(client)
     spec = (await client.get("/openapi.json")).json()
     demand_paths = [p for p in spec["paths"] if "demands" in p]
-    assert set(demand_paths) == {"/api/v1/demands", "/api/v1/demands/{demand_id}"}
+    assert set(demand_paths) == {
+        "/api/v1/demands",
+        "/api/v1/demands/assistant/draft",
+        "/api/v1/demands/assistant/messages",
+        "/api/v1/demands/{demand_id}",
+    }
     for path in demand_paths:
         assert set(spec["paths"][path]) <= {"get", "post", "patch"}
     rows = (await client.get("/api/v1/demands")).json()

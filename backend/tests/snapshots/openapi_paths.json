@@ -58,6 +58,7 @@
   "/api/v1/signals/{signal_id}/auto-tag",
   "/api/v1/signals/{signal_id}/body",
   "/api/v1/signals/{signal_id}/figures",
+  "/api/v1/signals/{signal_id}/sources",
   "/api/v1/signals/{signal_id}/studio",
   "/api/v1/signals/{signal_id}/tag-suggestions",
   "/api/v1/signals/{signal_id}/tags",
