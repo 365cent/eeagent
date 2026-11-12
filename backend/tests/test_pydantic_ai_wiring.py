@@ -21,7 +21,7 @@ from app.services.agent_workflow import (
     registered_tool_names,
 )
 
-pytestmark = [pytest.mark.anyio, pytest.mark.no_db]
+pytestmark = pytest.mark.anyio
 
 
 @pytest.fixture
@@ -29,6 +29,7 @@ def ledger() -> CitationLedger:
     return CitationLedger()
 
 
+@pytest.mark.no_db
 async def test_agent_allowlist_and_output_types():
     agent = await build_eea_agent(model=TestModel())
     names = registered_tool_names(agent)
@@ -36,6 +37,7 @@ async def test_agent_allowlist_and_output_types():
     assert agent._output_toolset is not None  # noqa: SLF001
 
 
+@pytest.mark.no_db
 async def test_message_history_round_trip():
     agent = Agent(TestModel(), output_type=str)
     result = await agent.run("hello")
@@ -44,6 +46,7 @@ async def test_message_history_round_trip():
     assert len(restored) >= 2
 
 
+@pytest.mark.no_db
 async def test_propose_patch_rejects_forged_citations():
     from app.services.agent_citations import assert_citations_usable
     from app.services.agent_contract import CitationLedger
@@ -53,6 +56,7 @@ async def test_propose_patch_rejects_forged_citations():
         assert_citations_usable(ledger, ["sig:00000000-0000-0000-0000-000000000001"])
 
 
+@pytest.mark.no_db
 async def test_figure_citation_carries_index():
     import uuid
 
@@ -103,6 +107,7 @@ async def test_dynamic_instructions_include_project_and_memory():
         assert "智能配电" in text
 
 
+@pytest.mark.no_db
 async def test_run_agent_turn_wires_event_stream_handler():
     """event_stream_handler must be passed when event_sink is set (not gated on stream_function)."""
     from types import SimpleNamespace
@@ -139,6 +144,7 @@ async def test_run_agent_turn_wires_event_stream_handler():
     assert captured.get("handler") is not None
 
 
+@pytest.mark.no_db
 async def test_ledger_rejects_unknown_and_needs_review_citations():
     from app.services.agent_citations import make_figure_citation
 
