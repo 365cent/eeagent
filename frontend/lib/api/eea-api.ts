@@ -671,6 +671,13 @@ export function postAgentSessionMessage(sessionId: string, message: string) {
   })
 }
 
+export function cancelAgentRun(sessionId: string, runId: string) {
+  return eeaFetch<{ run_id: string; status: string }>(
+    `/agent/sessions/${encodeURIComponent(sessionId)}/runs/${encodeURIComponent(runId)}/cancel`,
+    { method: 'POST' },
+  )
+}
+
 export function confirmAgentPatch(sessionId: string, patchId: string) {
   return eeaFetch<{ patch_id: string; status: string; message: string }>(
     `/agent/sessions/${encodeURIComponent(sessionId)}/patches/${encodeURIComponent(patchId)}/confirm`,

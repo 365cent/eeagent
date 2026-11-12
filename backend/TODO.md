@@ -194,7 +194,7 @@
 
 ## BE-15 链路报告
 
-- [ ] P1 · 部分实现（已有信号 studio 报告）· 依赖 BE-11、BE-12、BE-14。
+- [~] P1 · Markdown + ReportLab PDF 已落地（`chain_report.py` / `chain_report_pdf.py`，`GET …/download?format=pdf`）；黄金集与 Linux 字体容器验收仍开放 · 依赖 BE-11、BE-12、BE-14。
 - 来源：WBS 1.3.12；REQ-RULE-03、REQ-AGT-03；Word 表1/A/B/C。
 - 按需求点或落脚点生成 Markdown 与 PDF，包含原始证据、方法推导、审查结论、技术角色、空标准格、战略理由/版本、引用和局限。
 - 生成可留存/下载的报告任务与元数据，标明生成时间、使用数据版本和模型；无 LLM 时仍可导出确定性链路摘要。

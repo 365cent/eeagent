@@ -177,6 +177,14 @@ This record keeps evidence for implementation slices removed from the remaining-
 - **FE-10/11/12**: PDF chain report download; multi-session agent UI with patches/memories + legacy fallback; hide unconfigured LaunchDarkly banner; remove `@vercel/analytics`.
 - **Repo**: Apache-2.0 `LICENSE`, `THIRD_PARTY_NOTICES.md`; removed meetings PDF bundle and enterprise UI screenshot study from public tree (retained `docs/reference/*.docx`, `docs/wbs/*.xlsx`).
 - Checks (macOS): `test_chain_reports` **3 passed**; `test_agent_workflow::test_session_messages_and_skills_status` passed; `go test -short ./internal/config ./internal/platform` passed; `pnpm typecheck` + `pnpm build` passed. Linux OPS-06 / Windows CC-06 sign-off remain open.
+- CI (GitHub `main` @ `c662098`): `deploy-compose` **failed** on `docker compose config` because `deploy/.env` was missing before validate (fixed in follow-up: copy `.env.compose.example` before config).
+
+### Release recheck — v0.1.0 post-public (2026-11-12)
+
+- **FE-11**: Evidence assistant wires SSE replay (`agent-events.ts`), run cancel API, and `sessionStorage` session persistence per signal; still no Playwright E2E or in-run live token stream (backend buffers SSE until turn commit).
+- **CI**: `deploy-compose` copies `deploy/.env.compose.example` → `.env` before `docker compose config` + build; validate/build run with `working-directory: deploy`.
+- **Docs**: `platform-implementation-plan.md` no longer links removed `enterprise-ui-study.md`.
+- Checks (macOS, this recheck): `contracts` **1 passed**; `unit` **65 passed**; `pnpm typecheck` **passed**; `integration` slice **in progress** (`pytest -m db`, exclusive `eea_test`).
 
 ### Release readiness wave 4 — Docker Compose Linux deploy (OPS-01/04/05 partial)
 
@@ -193,7 +201,7 @@ This record keeps evidence for implementation slices removed from the remaining-
 - **FE-02/03:** 信号列表读取 `X-Total-Count` 服务端分页、技术标签 `tag` 筛选；标签建议展示 `TagSuggestion.details` 折叠面板。
 - **FE-11（局部）:** 文档入库结果支持图块索引与章节关键词读取/重算（BE-12 API）。
 - **FE-12:** 新增 `pnpm typecheck`；`pnpm build` + `tsc --noEmit` 通过（macOS）。
-- 待续：多会话 Agent SSE、Playwright E2E、FE-13 大规模 view 拆分。
+- 待续：Playwright E2E、FE-13 大规模 view 拆分；Agent UI 已接 SSE 重放与取消 API（非流式 token）。
 
 ## 2026-11-11
 

@@ -1,11 +1,12 @@
 'use client'
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { App as AntApp, Button, Card, Collapse, Descriptions, Input, Space, Spin, Tag, Typography } from 'antd'
 import { isUuid } from '@/lib/api/api-errors'
 import { EeaApiError } from '@/lib/api/client'
 import {
+  cancelAgentRun,
   confirmAgentPatch,
   createAgentSession,
   deleteAgentMemory,
@@ -18,6 +19,11 @@ import {
   postSignalAssistantMessage,
   type AssistantChatTurn,
 } from '@/lib/api/eea-api'
+import {
+  fetchAgentSessionEvents,
+  openAgentSessionEventSource,
+  type AgentSsePayload,
+} from '@/lib/api/agent-events'
 import type { AgentMessageRecord, AgentPatchOut } from '@/lib/api/types'
 import { ChatMarkdown } from '@/components/shared/chat-markdown'
 
@@ -35,8 +41,13 @@ export function EvidenceAssistantChat({ signalId }: EvidenceAssistantChatProps) 
   const [messages, setMessages] = useState<AgentMessageRecord[]>([])
   const [patches, setPatches] = useState<AgentPatchOut[]>([])
   const [legacyTurns, setLegacyTurns] = useState<AssistantChatTurn[]>([])
+  const [activeRunId, setActiveRunId] = useState<string | null>(null)
+  const [streamNote, setStreamNote] = useState<string | null>(null)
+  const lastEventSeqRef = useRef(0)
+  const eventSourceRef = useRef<EventSource | null>(null)
 
   const apiSignalId = signalId && isUuid(signalId) ? signalId : null
+  const sessionStorageKey = apiSignalId ? `eea-agent-session:${apiSignalId}` : null
 
   const skillsQuery = useQuery({
     queryKey: ['eea', 'agent', 'skills-status'],
@@ -48,15 +59,39 @@ export function EvidenceAssistantChat({ signalId }: EvidenceAssistantChatProps) 
     queryFn: listAgentMemories,
   })
 
+  const closeEventSource = useCallback(() => {
+    eventSourceRef.current?.close()
+    eventSourceRef.current = null
+  }, [])
+
+  const noteFromEvent = useCallback((payload: AgentSsePayload) => {
+    if (payload.type === 'turn.started') return '运行已开始…'
+    if (payload.type === 'turn.completed') return '运行已完成'
+    if (payload.type === 'turn.failed') return `运行失败：${payload.error ?? '未知错误'}`
+    if (payload.type === 'turn.cancelled') return '运行已取消'
+    if (payload.type === 'approval.required') return '待确认工具调用'
+    return null
+  }, [])
+
   const ensureSession = useCallback(async () => {
     if (sessionId) return sessionId
+    if (sessionStorageKey && typeof window !== 'undefined') {
+      const stored = window.sessionStorage.getItem(sessionStorageKey)
+      if (stored) {
+        setSessionId(stored)
+        return stored
+      }
+    }
     const created = await createAgentSession({
       title: apiSignalId ? `信号助手 ${apiSignalId.slice(0, 8)}` : '证据助手',
       page_context: apiSignalId ? { signal_id: apiSignalId } : undefined,
     })
     setSessionId(created.id)
+    if (sessionStorageKey && typeof window !== 'undefined') {
+      window.sessionStorage.setItem(sessionStorageKey, created.id)
+    }
     return created.id
-  }, [apiSignalId, sessionId])
+  }, [apiSignalId, sessionId, sessionStorageKey])
 
   const refreshConversation = useCallback(async (sid: string) => {
     const [msgs, pcs] = await Promise.all([listAgentSessionMessages(sid), listAgentSessionPatches(sid)])
@@ -69,6 +104,8 @@ export function EvidenceAssistantChat({ signalId }: EvidenceAssistantChatProps) 
     void refreshConversation(sessionId)
   }, [refreshConversation, sessionId])
 
+  useEffect(() => () => closeEventSource(), [closeEventSource])
+
   const send = useCallback(async () => {
     const text = draft.trim()
     if (!text || busy) return
@@ -78,11 +115,37 @@ export function EvidenceAssistantChat({ signalId }: EvidenceAssistantChatProps) 
     }
     setDraft('')
     setBusy(true)
+    setStreamNote(null)
+    setActiveRunId(null)
     try {
       const sid = await ensureSession()
-      await postAgentSessionMessage(sid, text)
+      closeEventSource()
+      const es = openAgentSessionEventSource(sid, {
+        lastEventId: String(lastEventSeqRef.current),
+        onEvent: (payload, eventId) => {
+          const parsed = Number.parseInt(eventId, 10)
+          if (!Number.isNaN(parsed)) lastEventSeqRef.current = Math.max(lastEventSeqRef.current, parsed)
+          const note = noteFromEvent(payload)
+          if (note) setStreamNote(note)
+          if (payload.run_id && typeof payload.run_id === 'string') setActiveRunId(payload.run_id)
+        },
+      })
+      eventSourceRef.current = es
+      const result = await postAgentSessionMessage(sid, text)
+      setActiveRunId(result.run_id)
+      closeEventSource()
+      const replay = await fetchAgentSessionEvents(sid, String(lastEventSeqRef.current))
+      lastEventSeqRef.current = replay.lastSeq
+      const terminal = replay.payloads.find((p) =>
+        ['turn.completed', 'turn.failed', 'turn.cancelled', 'approval.required'].includes(p.type),
+      )
+      if (terminal) setStreamNote(noteFromEvent(terminal))
       await refreshConversation(sid)
+      if (result.status === 'failed' && result.error) {
+        messageApi.warning(result.error)
+      }
     } catch (agentErr) {
+      closeEventSource()
       const history = [...legacyTurns]
       setLegacyTurns((prev) => [...prev, { role: 'user', content: text }])
       try {
@@ -94,9 +157,31 @@ export function EvidenceAssistantChat({ signalId }: EvidenceAssistantChatProps) 
         setDraft(text)
       }
     } finally {
+      setActiveRunId(null)
       setBusy(false)
     }
-  }, [apiSignalId, busy, draft, ensureSession, legacyTurns, messageApi, refreshConversation])
+  }, [
+    apiSignalId,
+    busy,
+    closeEventSource,
+    draft,
+    ensureSession,
+    legacyTurns,
+    messageApi,
+    noteFromEvent,
+    refreshConversation,
+  ])
+
+  const cancelRun = useCallback(async () => {
+    if (!sessionId || !activeRunId || !busy) return
+    try {
+      await cancelAgentRun(sessionId, activeRunId)
+      setStreamNote('已请求取消运行…')
+    } catch (err) {
+      const detail = err instanceof EeaApiError ? err.message : String(err)
+      messageApi.error(detail || '取消失败')
+    }
+  }, [activeRunId, busy, messageApi, sessionId])
 
   const patchAction = async (patchId: string, action: 'confirm' | 'reject') => {
     if (!sessionId) return
@@ -158,7 +243,12 @@ export function EvidenceAssistantChat({ signalId }: EvidenceAssistantChatProps) 
         ))}
         {busy ? (
           <div className="chat-message assistant">
-            <Spin size="small" /> <Text type="secondary"> 思考中…</Text>
+            <Spin size="small" />{' '}
+            <Text type="secondary"> {streamNote ?? '思考中…'}</Text>
+          </div>
+        ) : streamNote ? (
+          <div className="chat-message assistant">
+            <Text type="secondary">{streamNote}</Text>
           </div>
         ) : null}
       </div>
@@ -228,6 +318,11 @@ export function EvidenceAssistantChat({ signalId }: EvidenceAssistantChatProps) 
           <Button type="primary" loading={busy} disabled={!apiSignalId} onClick={() => void send()}>
             发送
           </Button>
+          {busy && activeRunId ? (
+            <Button danger onClick={() => void cancelRun()}>
+              取消运行
+            </Button>
+          ) : null}
         </Space.Compact>
       </Space>
     </>
