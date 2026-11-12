@@ -17,7 +17,7 @@ type BannerBodyProps = {
 }
 
 function BannerBody({ on, connected }: BannerBodyProps) {
-  const message = on
+  const title = on
     ? 'LaunchDarkly test banner (flag is on)'
     : 'LaunchDarkly test banner (flag is off)'
 
@@ -29,7 +29,7 @@ function BannerBody({ on, connected }: BannerBodyProps) {
       className="launchdarkly-onboarding-banner"
       type={on ? 'success' : 'info'}
       showIcon
-      message={message}
+      title={title}
       action={
         <Button type="link" size="small" href={flagUrl} target="_blank" rel="noopener noreferrer">
           {linkLabel}
