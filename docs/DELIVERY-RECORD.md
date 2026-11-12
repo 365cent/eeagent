@@ -139,6 +139,16 @@ This record keeps evidence for implementation slices removed from the remaining-
 - The frontend production build using the installed Next executable and scoped Ant Design lint passed after clarifying the trace recovery action label. The pnpm launcher failed to locate its cached 12.3.4 entry point during the earlier build attempt.
 - Implementation and remaining work are in the [queue](../client/internal/queue/queue.go), [queue tests](../client/internal/queue/queue_test.go), [Windows UI](../client/internal/ui/app.go) and [client TODO](../client/TODO.md#cc-04-gui-和人工恢复).
 
+## 2026-11-12
+
+### Release readiness wave 0 — foundation migration and CI (partial)
+
+- Migration [0016_release_foundation](../backend/migrations/versions/0016_release_foundation.py): capture `owner_subject` and cooperative `cancel_requested_at`; signal list date fields; demand confirm timestamps; audit provenance columns; `eea_embedding_cache`, `eea_signal_source`, `eea_stored_object_orphan`, `eea_chain_report`.
+- BE-01/03/06/07/08/15 stubs: capture identity and orphan tracking, cooperative cancel hook, `X-Total-Count` + tag filter, demand `confirmed_at`, function stale-save **409**, panorama substantive standard counts, chain report Markdown API (`POST/GET /api/v1/reports`, PDF **501**).
+- Test harness: default `EEA_PYTEST_LOCK=takeover` so stale `.pg/eea_test_suite.lock` does not block disposable `eea_test` runs; slice runner documented in [pytest_slices.sh](../backend/scripts/pytest_slices.sh).
+- Added [.github/workflows/ci.yml](../.github/workflows/ci.yml) (backend slices + frontend build/lint + Go `-short`).
+- Checks (macOS, branch `release/readiness-wave0`): `pytest_slices.sh contracts` **1 passed**; `unit` **66 passed**; `capture` **33 passed** (~7.5 min); OpenAPI snapshot **1 passed** after reports router. Full `integration` slice re-run in progress this session. Linux Actions postgres matrix and wave 2–5 UI/client/deploy acceptance remain open.
+
 ## 2026-11-11
 
 ### BE-14 — Pydantic AI durable agent workflow (backend)

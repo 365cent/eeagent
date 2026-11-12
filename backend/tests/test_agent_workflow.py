@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import uuid
 
 import pytest
 from pydantic_ai.messages import ModelMessage, ModelResponse, ToolCallPart
-from pydantic_ai.models.function import AgentInfo, FunctionModel
+from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 
 from app.core.identity import OperatorIdentity, get_operator_identity
 from app.main import app
@@ -29,10 +30,24 @@ def _stub_agent_turn(messages: list[ModelMessage], info: AgentInfo) -> ModelResp
     )
 
 
+async def _stub_agent_stream(messages: list[ModelMessage], info: AgentInfo):
+    del messages
+    tool_name = info.output_tools[0].name
+    payload = {"answer": "测试回答", "citation_refs": [], "patch_ids": []}
+    yield {
+        0: DeltaToolCall(
+            name=tool_name,
+            json_args=json.dumps(payload, ensure_ascii=False),
+            tool_call_id="tc-0",
+        )
+    }
+
+
 async def _agent_with_test_model():
     from app.services.agent_workflow import build_eea_agent
 
-    return await build_eea_agent(model=FunctionModel(_stub_agent_turn))
+    model = FunctionModel(_stub_agent_turn, stream_function=_stub_agent_stream)
+    return await build_eea_agent(model=model)
 
 
 async def test_session_create_list_and_isolation(client, monkeypatch):

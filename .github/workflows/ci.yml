@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: eea
+          POSTGRES_PASSWORD: eea
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U eea"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      APP_ENV: test
+      DB_HOST: 127.0.0.1
+      DB_PORT: 5432
+      DB_USER: eea
+      DB_PASSWORD: eea
+      CAPTURE_SERVER_FETCH_ENABLED: "true"
+      EEA_PYTEST_LOCK: fail
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.12"
+      - name: Sync backend dependencies
+        working-directory: backend
+        run: uv sync --locked
+      - name: Contracts and unit tests
+        working-directory: backend
+        run: |
+          bash scripts/pytest_slices.sh contracts
+          bash scripts/pytest_slices.sh unit
+      - name: Integration tests (eea_test)
+        working-directory: backend
+        run: bash scripts/pytest_slices.sh integration --tb=short
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.3.4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: frontend/pnpm-lock.yaml
+      - name: Install and build
+        working-directory: frontend
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+      - name: Ant Design lint
+        working-directory: frontend
+        run: pnpm antd:lint
+
+  client-go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: client/go.mod
+          cache-dependency-path: client/go.sum
+      - name: Go unit tests (portable)
+        working-directory: client
+        run: go test -short ./...
