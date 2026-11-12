@@ -10,8 +10,6 @@ from ldclient.config import Config
 
 from app.platform.errors import FeatureDisabledError
 
-ONBOARDING_BACKEND_FLAG_KEY = "launchdarkly-onboarding-backend-banner"
-
 # One flag per EEA Agent Platform workflow stage. Sample records are not flags.
 # Off and on both serve Enabled, so today's behavior stays until a targeting rule serves Disabled.
 PLATFORM_FEATURES: tuple[tuple[str, str], ...] = (
@@ -43,12 +41,7 @@ WORKFLOW_SUCCESS_EVENTS: dict[str, str] = {
 }
 WORKFLOW_FEATURE_DISABLED_EVENT = "eea-workflow-feature-disabled"
 
-ONBOARDING_BACKEND_FLAG_URL = (
-    "https://app.launchdarkly.com/projects/default/flags/"
-    "launchdarkly-onboarding-backend-banner/targeting?env=test"
-)
-
-_onboarding_context = Context.create("eea-backend-onboarding")
+_server_ld_context = Context.create("eea-backend-onboarding")
 
 
 def start_launchdarkly(sdk_key: str | None) -> bool:
@@ -84,7 +77,7 @@ def variation_bool(flag_key: str, *, default: bool = False) -> bool:
         return default
     if not client.is_initialized():
         return default
-    value = client.variation(flag_key, _onboarding_context, default)
+    value = client.variation(flag_key, _server_ld_context, default)
     return value is True
 
 
@@ -96,7 +89,7 @@ def track_metric_event(event_key: str, data: dict[str, object] | None = None) ->
         return
     if not client.is_initialized():
         return
-    client.track(event_key, _onboarding_context, data or {})
+    client.track(event_key, _server_ld_context, data or {})
 
 
 def track_workflow_success(feature_key: str) -> None:

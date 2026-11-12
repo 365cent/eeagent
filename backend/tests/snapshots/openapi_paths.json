@@ -42,7 +42,6 @@
   "/api/v1/landing-points",
   "/api/v1/landing-points/{lp_id}",
   "/api/v1/landing-points/{lp_id}/standards",
-  "/api/v1/launchdarkly/onboarding-banner",
   "/api/v1/llm/status",
   "/api/v1/overview",
   "/api/v1/panorama",

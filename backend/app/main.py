@@ -17,7 +17,6 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from app.api.swagger_ui import SWAGGER_UI_HTML
 from app.api.v1 import (
     agent,
-    launchdarkly_onboarding,
     platform_features,
     capture,
     imports,
@@ -120,7 +119,6 @@ def create_app() -> FastAPI:
     app.include_router(llm.router, prefix="/api/v1")
     app.include_router(session.router, prefix="/api/v1")
     app.include_router(agent.router, prefix="/api/v1")
-    app.include_router(launchdarkly_onboarding.router, prefix="/api/v1")
     app.include_router(platform_features.router, prefix="/api/v1")
     app.include_router(reports.router, prefix="/api/v1")
 
