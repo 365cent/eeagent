@@ -62,15 +62,16 @@ export function useOverviewStats() {
 export function useSignalsList(params: ListSignalsParams = { limit: 200 }, enabled = true) {
   const { maps, isSuccess: codesReady } = useRefCodeMaps(enabled)
   const query = useQuery({
-    queryKey: eeaQueryKeys.signals(params as Record<string, unknown>),
+    queryKey: eeaQueryKeys.signalsPage(params as Record<string, unknown>),
     queryFn: () => fetchSignalsPage(params),
     enabled: enabled && codesReady,
     placeholderData: keepPreviousData,
   })
 
   const rows = useMemo<Signal[]>(() => {
-    if (!query.data) return []
-    return query.data.items.map((row) => mapSignalOut(row, maps))
+    const data = query.data
+    if (!data?.items) return []
+    return data.items.map((row) => mapSignalOut(row, maps))
   }, [query.data, maps])
 
   return { ...query, rows, total: query.data?.total ?? 0, maps }

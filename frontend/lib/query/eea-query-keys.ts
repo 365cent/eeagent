@@ -4,7 +4,11 @@ export const eeaQueryKeys = {
   syncStamp: ['eea', 'sync-stamp'] as const,
   overview: ['eea', 'overview'] as const,
   signalsRoot: ['eea', 'signals'] as const,
+  /** Cached value is `SignalOut[]` from `fetchSignals`. */
   signals: (params?: Record<string, unknown>) => ['eea', 'signals', params ?? {}] as const,
+  signalsPageRoot: ['eea', 'signals-page'] as const,
+  /** Cached value is `SignalsPage` from `fetchSignalsPage`. */
+  signalsPage: (params?: Record<string, unknown>) => ['eea', 'signals-page', params ?? {}] as const,
   signal: (id: string) => ['eea', 'signal', id] as const,
   themes: ['eea', 'themes'] as const,
   vocabUsage: ['eea', 'vocab-usage'] as const,

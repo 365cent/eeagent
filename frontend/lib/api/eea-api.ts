@@ -86,9 +86,10 @@ export function fetchSyncStamp() {
 
 export async function fetchSignalsPage(params: ListSignalsParams = {}): Promise<SignalsPage> {
   const { data, headers } = await eeaFetchWithMeta<SignalOut[]>(`/signals${toQueryString(params)}`)
+  const items = Array.isArray(data) ? data : []
   const raw = headers.get('X-Total-Count')
-  const parsed = raw ? Number.parseInt(raw, 10) : data.length
-  return { items: data, total: Number.isFinite(parsed) ? parsed : data.length }
+  const parsed = raw ? Number.parseInt(raw, 10) : items.length
+  return { items, total: Number.isFinite(parsed) ? parsed : items.length }
 }
 
 export function fetchSignals(params: ListSignalsParams = {}) {

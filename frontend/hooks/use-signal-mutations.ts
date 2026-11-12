@@ -15,6 +15,7 @@ export function useSignalMutations(signalId: string | undefined, expectedUpdated
 
   const invalidate = async () => {
     await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.signalsRoot })
+    await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.signalsPageRoot })
     await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.overview })
     if (signalId) {
       await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.signal(signalId) })
