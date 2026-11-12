@@ -5,6 +5,8 @@ WORKDIR /app
 RUN corepack enable && corepack prepare pnpm@12.3.4 --activate
 
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
+# Match CI/dev when package.json pins pnpm but lockfile has no boot document (pmOnFail=ignore).
+ENV PNPM_CONFIG_PMONFAIL=ignore
 RUN pnpm install --frozen-lockfile
 
 COPY frontend/ .
