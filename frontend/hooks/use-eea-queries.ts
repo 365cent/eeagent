@@ -12,7 +12,7 @@ import {
   fetchRefCodes,
   fetchSignal,
   fetchSignalTagSuggestions,
-  fetchSignals,
+  fetchSignalsPage,
   fetchThemes,
   fetchTraceFromLandingPoint,
   fetchVocab,
@@ -63,23 +63,38 @@ export function useSignalsList(params: ListSignalsParams = { limit: 200 }, enabl
   const { maps, isSuccess: codesReady } = useRefCodeMaps(enabled)
   const query = useQuery({
     queryKey: eeaQueryKeys.signals(params as Record<string, unknown>),
-    queryFn: () => fetchSignals(params),
+    queryFn: () => fetchSignalsPage(params),
     enabled: enabled && codesReady,
     placeholderData: keepPreviousData,
   })
 
   const rows = useMemo<Signal[]>(() => {
     if (!query.data) return []
-    return query.data.map((row) => mapSignalOut(row, maps))
+    return query.data.items.map((row) => mapSignalOut(row, maps))
   }, [query.data, maps])
 
-  return { ...query, rows, maps }
+  return { ...query, rows, total: query.data?.total ?? 0, maps }
 }
 
-export function useSignalsListFiltered(filters: { query?: string; stageChip?: string; themeId?: string }) {
+export function useSignalsListFiltered(filters: {
+  query?: string
+  stageChip?: string
+  themeId?: string
+  tag?: string
+  offset?: number
+  limit?: number
+}) {
   const params = useMemo(
-    () => buildListSignalsParams({ query: filters.query, stageChip: filters.stageChip, themeId: filters.themeId }),
-    [filters.query, filters.stageChip, filters.themeId],
+    () =>
+      buildListSignalsParams({
+        query: filters.query,
+        stageChip: filters.stageChip,
+        themeId: filters.themeId,
+        tag: filters.tag,
+        offset: filters.offset,
+        limit: filters.limit,
+      }),
+    [filters.query, filters.stageChip, filters.themeId, filters.tag, filters.offset, filters.limit],
   )
   return useSignalsList(params)
 }

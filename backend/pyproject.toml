@@ -3,7 +3,7 @@ name = "eea-backend"
 version = "0.1.0"
 description = "EEA 前瞻技术扫描平台后端（FastAPI + PostgreSQL）"
 authors = [
-    { name = "Jianqi Ding", email = "dingjianqi@desaysv.com" }
+    { name = "EEA Contributors" }
 ]
 requires-python = ">=3.12"
 dependencies = [
@@ -25,6 +25,7 @@ dependencies = [
     "python-pptx>=1.0.2",
     "sqlalchemy[asyncio]>=2.1.6",
     "uvicorn[standard]>=0.54.0",
+    "reportlab>=5.1.0",
 ]
 
 [build-system]

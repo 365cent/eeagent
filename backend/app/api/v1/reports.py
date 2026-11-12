@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,8 +42,6 @@ async def post_chain_report(
     db: AsyncSession = Depends(get_db),
     actor: OperatorIdentity = Depends(get_operator_identity),
 ):
-    if body.format == "pdf":
-        raise HTTPException(501, "PDF 导出待安装字体后启用；请先使用 format=md")
     try:
         report = await create_chain_report(
             db,
@@ -86,5 +84,6 @@ async def download_chain_report(
     data = load_bytes(report.object_key)
     if data is None:
         raise HTTPException(404, "report object missing from storage")
-    media = "text/markdown; charset=utf-8" if format == "md" else "application/octet-stream"
-    return PlainTextResponse(content=data.decode("utf-8"), media_type=media)
+    if format == "pdf" or report.format == "pdf":
+        return Response(content=data, media_type="application/pdf")
+    return PlainTextResponse(content=data.decode("utf-8"), media_type="text/markdown; charset=utf-8")

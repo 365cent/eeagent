@@ -2,7 +2,7 @@
 
 更新：2026-11-05。本目录承载部署实施及后续实际配置；已有 API/Next 前台服务单元模板与配置说明，但**尚未交付经 Linux 验证的安装脚本或上线产物**。项目顺序见 [总清单](../TODO.md)，业务验收见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。模板入口：[部署说明](README.md)。
 
-默认单主机方案：Linux、PostgreSQL、API/Next/worker 的 systemd 服务、Nginx TLS 同源入口、独立持久对象目录。生产服务前台运行；数据库和对象目录不得放在版本发布目录内。Worker 命令与模板已补，仍待 Linux 生命周期验证。
+默认单主机方案：**Docker Compose**（`deploy/docker-compose.yml`）— PostgreSQL、迁移任务、API、worker、Next、Nginx；持久卷 `pgdata` 与 `objectstore`。systemd 单元仍作非容器备选；Compose 为 README 主路径。Worker 与 API 共享对象目录；Linux 客户环境验收仍属 OPS-06。
 
 ## OPS-01 环境与数据库初始化
 

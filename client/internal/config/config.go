@@ -33,6 +33,9 @@ type Config struct {
 	// capture_archive: auto | extension | embedded (auto prefers the store extension).
 	CaptureArchive            string `json:"capture_archive"`
 	SingleFileExtensionPath   string `json:"singlefile_extension_path"`
+	CACertPath                string `json:"ca_cert_path"`
+	AuthTokenEnv              string `json:"auth_token_env"`
+	AuthTokenFile             string `json:"auth_token_file"`
 }
 
 // Default returns the settings used when config.json is absent.
@@ -125,9 +128,16 @@ func Load(dir string) (Config, error) {
 
 // EffectiveAPIBase resolves auto mode: an empty or loopback api_base follows
 // the physical LAN address (e.g. http://10.215.8.74:8000) so the client talks
-// to the same host the browser uses.
+// to the same host the browser uses. Explicit https:// or non-loopback bases
+// never fall back to LAN auto-discovery.
 func (c Config) EffectiveAPIBase() string {
 	base := strings.TrimSpace(c.APIBase)
+	if base != "" {
+		lower := strings.ToLower(base)
+		if strings.HasPrefix(lower, "https://") || !isLoopbackURL(base) {
+			return strings.TrimRight(base, "/")
+		}
+	}
 	if c.AutoAPI && (base == "" || isLoopbackURL(base)) {
 		return netinfo.BaseURL(8000)
 	}
@@ -135,6 +145,44 @@ func (c Config) EffectiveAPIBase() string {
 		return "http://127.0.0.1:8000"
 	}
 	return strings.TrimRight(base, "/")
+}
+
+// BearerToken resolves the capture upload credential from env or file (never config.json).
+func (c Config) BearerToken() string {
+	envName := strings.TrimSpace(c.AuthTokenEnv)
+	if envName == "" {
+		envName = "EEA_CAPTURE_TOKEN"
+	}
+	if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
+		return value
+	}
+	path := strings.TrimSpace(c.AuthTokenFile)
+	if path == "" {
+		return ""
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(string(data))
+}
+
+// AuthTokenSource reports where the bearer credential was loaded (redacted).
+func (c Config) AuthTokenSource() string {
+	if c.BearerToken() == "" {
+		return "none"
+	}
+	envName := strings.TrimSpace(c.AuthTokenEnv)
+	if envName == "" {
+		envName = "EEA_CAPTURE_TOKEN"
+	}
+	if strings.TrimSpace(os.Getenv(envName)) != "" {
+		return "env:" + envName
+	}
+	if strings.TrimSpace(c.AuthTokenFile) != "" {
+		return "file"
+	}
+	return "unknown"
 }
 
 func isLoopbackURL(raw string) bool {

@@ -50,6 +50,18 @@ async def _agent_with_test_model():
     return await build_eea_agent(model=model)
 
 
+async def test_session_messages_and_skills_status(client):
+    session = (await client.post("/api/v1/agent/sessions", json={"title": "history"})).json()
+    messages = (await client.get(f"/api/v1/agent/sessions/{session['id']}/messages")).json()
+    assert messages == []
+    patches = (await client.get(f"/api/v1/agent/sessions/{session['id']}/patches")).json()
+    assert patches == []
+
+    skills = (await client.get("/api/v1/agent/skills/status")).json()
+    assert "baseline_mode" in skills
+    assert isinstance(skills["packs"], list)
+
+
 async def test_session_create_list_and_isolation(client, monkeypatch):
     async def other_actor():
         return OperatorIdentity("actor-b", "researcher")

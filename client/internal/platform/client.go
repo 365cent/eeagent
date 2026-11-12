@@ -26,9 +26,10 @@ import (
 
 // Client talks to /api/v1 of the EEA backend.
 type Client struct {
-	base     string
-	http     *http.Client
-	maxBytes int64
+	base        string
+	http        *http.Client
+	maxBytes    int64
+	bearerToken string
 
 	routeMu           sync.Mutex
 	capturePath       string
@@ -39,13 +40,25 @@ type Client struct {
 // sockets are bound to the physical LAN address so uploads leave through the
 // same adapter the browser uses (not VMnet/Hyper-V).
 func New(base string, maxUploadMB int) *Client {
+	return NewWithOptions(base, maxUploadMB, httpx.ClientOptions{}, "")
+}
+
+// NewWithOptions builds a client with custom TLS and optional bearer upload token.
+func NewWithOptions(base string, maxUploadMB int, opts httpx.ClientOptions, bearerToken string) *Client {
 	if maxUploadMB <= 0 {
 		maxUploadMB = 120
 	}
 	return &Client{
-		base:     strings.TrimRight(base, "/"),
-		http:     httpx.PrimaryClient(""),
-		maxBytes: int64(maxUploadMB) << 20,
+		base:        strings.TrimRight(base, "/"),
+		http:        httpx.PrimaryClientWithOptions(opts),
+		maxBytes:    int64(maxUploadMB) << 20,
+		bearerToken: strings.TrimSpace(bearerToken),
+	}
+}
+
+func (c *Client) authorize(req *http.Request) {
+	if c.bearerToken != "" {
+		req.Header.Set("Authorization", "Bearer "+c.bearerToken)
 	}
 }
 
@@ -100,49 +113,6 @@ type ManualFallbackInput struct {
 	Title   string
 	Channel string
 	Body    string
-}
-
-// CreateManualFallback creates a signal from a user-pasted source URL and body.
-// This endpoint has no idempotency key, so callers must not retry an ambiguous
-// POST result automatically.
-func (c *Client) CreateManualFallback(ctx context.Context, in ManualFallbackInput) (*Signal, error) {
-	if strings.TrimSpace(in.URL) == "" || strings.TrimSpace(in.Title) == "" || strings.TrimSpace(in.Body) == "" {
-		return nil, errors.New("manual fallback requires url, title, and body")
-	}
-	if int64(len(in.Body)) > c.maxBytes {
-		return nil, fmt.Errorf("manual fallback body is %d bytes, over max_upload_mb", len(in.Body))
-	}
-	if in.Channel == "" {
-		in.Channel = InferChannel(in.URL)
-		if in.Channel == "" {
-			in.Channel = "web"
-		}
-	}
-	payload := struct {
-		Title              string `json:"title"`
-		URL                string `json:"url"`
-		ChannelCode        string `json:"channel_code"`
-		EvidenceStatusCode string `json:"evidence_status_code"`
-		BodyText           string `json:"body_text"`
-	}{
-		Title:              strings.TrimSpace(in.Title),
-		URL:                strings.TrimSpace(in.URL),
-		ChannelCode:        in.Channel,
-		EvidenceStatusCode: "pending_review",
-		BodyText:           in.Body,
-	}
-	body, err := json.Marshal(payload)
-	if err != nil {
-		return nil, fmt.Errorf("encode manual fallback: %w", err)
-	}
-	var out Signal
-	if err := c.doJSON(ctx, http.MethodPost, "/api/v1/signals", "application/json", body, &out); err != nil {
-		return nil, err
-	}
-	if out.ID == "" {
-		return nil, errors.New("manual fallback response did not include a signal id")
-	}
-	return &out, nil
 }
 
 // CaptureResult is the unified POST /capture response. The client only needs
@@ -700,24 +670,6 @@ func (c *Client) UploadDocument(ctx context.Context, path string) (*Document, er
 	return &out, nil
 }
 
-// Reachable reports whether /openapi.json answers, used by doctor.
-func (c *Client) Reachable(ctx context.Context) error {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/openapi.json", nil)
-	if err != nil {
-		return err
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	io.Copy(io.Discard, io.LimitReader(resp.Body, 4096))
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("%s: %s", c.base, resp.Status)
-	}
-	return nil
-}
-
 func (c *Client) doJSON(ctx context.Context, method, path, contentType string, payload []byte, out any) error {
 	req, err := http.NewRequestWithContext(ctx, method, c.base+path, bytes.NewReader(payload))
 	if err != nil {
@@ -725,6 +677,7 @@ func (c *Client) doJSON(ctx context.Context, method, path, contentType string, p
 	}
 	req.Header.Set("Content-Type", contentType)
 	req.Header.Set("Accept", "application/json")
+	c.authorize(req)
 	resp, err := c.http.Do(req)
 	if err != nil {
 		return err
@@ -828,113 +781,4 @@ func createFilePart(mw *multipart.Writer, field, filename, contentType string) (
 
 func escapeQuotes(s string) string {
 	return strings.NewReplacer("\\", "\\\\", `"`, "\\\"").Replace(s)
-}
-
-// SupportsCapture reports whether the backend exposes either supported page
-// capture route, plus the legacy document and archive APIs used by the client.
-func (c *Client) SupportsCapture(ctx context.Context) (bool, error) {
-	doc, err := c.openapiDocument(ctx)
-	if err != nil {
-		return false, err
-	}
-	pageCapture := hasPath(doc.Paths, "/api/v1/capture/jobs") ||
-		hasPath(doc.Paths, "/api/v1/capture") ||
-		hasPath(doc.Paths, "/api/v1/signals/capture")
-	return pageCapture && hasPath(doc.Paths, "/api/v1/documents/raw") && hasPath(doc.Paths, "/api/v1/signals/{signal_id}/archive"), nil
-}
-
-func (c *Client) captureRoute(ctx context.Context) (string, bool, error) {
-	c.routeMu.Lock()
-	defer c.routeMu.Unlock()
-	if c.capturePath != "" {
-		return c.capturePath, c.captureIdempotent, nil
-	}
-	doc, err := c.openapiDocument(ctx)
-	// Older deployments and reverse proxies may not expose OpenAPI. Preserve
-	// the historical endpoint in that case; a failed POST is never replayed
-	// through another route.
-	if err != nil || len(doc.Paths) == 0 {
-		return "/api/v1/signals/capture", false, nil
-	}
-	if hasPath(doc.Paths, "/api/v1/capture/jobs") {
-		c.capturePath = "/api/v1/capture/jobs"
-		c.captureIdempotent = true // required submission_id is part of this contract
-		return c.capturePath, c.captureIdempotent, nil
-	}
-	if hasPath(doc.Paths, "/api/v1/capture") {
-		c.capturePath = "/api/v1/capture"
-		c.captureIdempotent = captureHasSubmissionID(*doc)
-		return c.capturePath, c.captureIdempotent, nil
-	}
-	if hasPath(doc.Paths, "/api/v1/signals/capture") {
-		c.capturePath = "/api/v1/signals/capture"
-		c.captureIdempotent = false
-		return c.capturePath, c.captureIdempotent, nil
-	}
-	return "", false, fmt.Errorf("%s advertises neither unified nor legacy page capture", c.base)
-}
-
-type openAPIDocument struct {
-	Paths      map[string]json.RawMessage `json:"paths"`
-	Components struct {
-		Schemas map[string]struct {
-			Properties map[string]json.RawMessage `json:"properties"`
-		} `json:"schemas"`
-	} `json:"components"`
-}
-
-func captureHasSubmissionID(doc openAPIDocument) bool {
-	var operation struct {
-		Post struct {
-			RequestBody struct {
-				Content map[string]struct {
-					Schema struct {
-						Ref string `json:"$ref"`
-					} `json:"schema"`
-				} `json:"content"`
-			} `json:"requestBody"`
-		} `json:"post"`
-	}
-	if err := json.Unmarshal(doc.Paths["/api/v1/capture"], &operation); err != nil {
-		return false
-	}
-	media, ok := operation.Post.RequestBody.Content["multipart/form-data"]
-	if !ok {
-		return false
-	}
-	const schemaPrefix = "#/components/schemas/"
-	if !strings.HasPrefix(media.Schema.Ref, schemaPrefix) {
-		return false
-	}
-	schema, ok := doc.Components.Schemas[strings.TrimPrefix(media.Schema.Ref, schemaPrefix)]
-	if !ok {
-		return false
-	}
-	_, ok = schema.Properties["submission_id"]
-	return ok
-}
-
-func (c *Client) openapiDocument(ctx context.Context) (*openAPIDocument, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.base+"/openapi.json", nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := c.http.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("%s: %s", c.base, resp.Status)
-	}
-	var doc openAPIDocument
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 8<<20)).Decode(&doc); err != nil {
-		return nil, err
-	}
-	return &doc, nil
-}
-
-func hasPath(paths map[string]json.RawMessage, path string) bool {
-	_, ok := paths[path]
-	return ok
 }

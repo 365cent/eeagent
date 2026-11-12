@@ -13,8 +13,11 @@ export function buildListSignalsParams(input: {
   query?: string
   stageChip?: string
   themeId?: string
+  tag?: string
+  offset?: number
+  limit?: number
 }): ListSignalsParams {
-  const params: ListSignalsParams = { limit: 200 }
+  const params: ListSignalsParams = { limit: input.limit ?? 200, offset: input.offset ?? 0 }
   const q = input.query?.trim()
   if (q) params.keyword = q
 
@@ -22,6 +25,9 @@ export function buildListSignalsParams(input: {
   if (stage) params.value_chain_stage = stage
 
   if (input.themeId) params.theme_id = input.themeId
+
+  const tag = input.tag?.trim()
+  if (tag) params.tag = tag
 
   return params
 }

@@ -26,7 +26,7 @@ export type UtilityPageConfig = {
 export const utilityPages: Record<string, UtilityPageConfig> = {
   newSignal: { eyebrow: '06 · 原始信息采集', title: '新建信号', description: '粘贴链接或录入研究线索，系统将生成可追溯的信号记录。', action: '保存信号', icon: <PlusOutlined /> },
   createTopic: { eyebrow: '02 · 需求点提取', title: '新建主题', description: '创建一个研究主题，聚合相关证据并持续沉淀洞察。', action: '创建主题', icon: <PlusOutlined /> },
-  report: { eyebrow: '07 · 研究交付', title: '导出报告', description: '选择报告范围与 PDF 模板，导出当前研究快照。', action: '生成 PDF', icon: <FilePdfOutlined /> },
+  report: { eyebrow: '07 · 研究交付', title: '链路报告', description: '按技术落脚点生成持久化 Markdown 链路报告，并预览最近导出。', action: '生成 Markdown', icon: <FilePdfOutlined /> },
   notifications: { eyebrow: '08 · 工作提醒', title: '通知中心', description: '查看复核、抓取与协作任务的最新状态。', action: '全部标记已读', icon: <BellOutlined /> },
   search: { eyebrow: '09 · 全局检索', title: '搜索结果', description: '跨信号、主题、需求点和技术落脚点检索研究资产。', action: '保存检索', icon: <SearchOutlined /> },
   profile: { eyebrow: '10 · 个人空间', title: '用户资料', description: '管理个人研究偏好、工作空间和最近访问记录。', action: '保存资料', icon: <UserOutlined /> },

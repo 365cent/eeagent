@@ -396,6 +396,7 @@ async def claim_capture_job_for_client(
     job_id: uuid.UUID,
     worker_id: str = Form("capture-client"),
     db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_capture_identity),
 ):
     result = await db.execute(
         select(CaptureJob).where(CaptureJob.id == job_id).with_for_update()
@@ -403,6 +404,7 @@ async def claim_capture_job_for_client(
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(404, "capture job not found")
+    assert_capture_job_access(job.owner_subject, actor)
     if job.status != "awaiting_client":
         raise HTTPException(409, f"job is not awaiting client capture (status={job.status})")
     now = datetime.now(timezone.utc)
@@ -429,6 +431,7 @@ async def client_release_capture_job(
     worker_id: str = Form("capture-client"),
     reason: str = Form("Client released job back to import queue."),
     db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_capture_identity),
 ):
     """Return a reserved import job to awaiting_client (abort, disconnect, retry)."""
     result = await db.execute(
@@ -437,6 +440,7 @@ async def client_release_capture_job(
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(404, "capture job not found")
+    assert_capture_job_access(job.owner_subject, actor)
     if job.status != "running" or job.stage != "capturing":
         raise HTTPException(409, f"job is not held for client capture (status={job.status}, stage={job.stage})")
     if job.payload_object_key:
@@ -463,6 +467,7 @@ async def client_fail_capture_job(
     worker_id: str = Form("capture-client"),
     error: str = Form(...),
     db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_capture_identity),
 ):
     """Record a terminal client-side capture failure (page load, captcha, etc.)."""
     result = await db.execute(
@@ -471,6 +476,7 @@ async def client_fail_capture_job(
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(404, "capture job not found")
+    assert_capture_job_access(job.owner_subject, actor)
     if job.status not in {"awaiting_client", "running"}:
         raise HTTPException(409, f"job cannot be failed from client (status={job.status})")
     if job.status == "running" and job.worker_id and not _worker_id_matches(job.worker_id, worker_id):
@@ -497,6 +503,7 @@ async def client_submit_capture_job(
     file: UploadFile = File(...),
     worker_id: str = Form("capture-client"),
     db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_capture_identity),
 ):
     """Attach browser-captured bytes to a panorama import job and queue server processing."""
     settings = get_settings()
@@ -509,6 +516,7 @@ async def client_submit_capture_job(
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(404, "capture job not found")
+    assert_capture_job_access(job.owner_subject, actor)
     if job.status not in {"awaiting_client", "running"}:
         raise HTTPException(409, f"job cannot accept client upload (status={job.status})")
     if job.status == "running" and job.worker_id and not _worker_id_matches(job.worker_id, worker_id):
@@ -555,13 +563,18 @@ async def get_capture_job(
 
 
 @router.post("/jobs/{job_id}/retry", response_model=CaptureJobOut, status_code=202)
-async def retry_capture_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def retry_capture_job(
+    job_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_capture_identity),
+):
     result = await db.execute(
         select(CaptureJob).where(CaptureJob.id == job_id).with_for_update()
     )
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(404, "capture job not found")
+    assert_capture_job_access(job.owner_subject, actor)
     if job.status != "failed":
         raise HTTPException(409, f"only failed jobs can be retried (status={job.status})")
     job.status = "queued"

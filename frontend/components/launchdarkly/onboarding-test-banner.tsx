@@ -45,12 +45,12 @@ function ConnectedOnboardingBanner() {
   return <BannerBody on={on} connected />
 }
 
-/** Small banner for the onboarding flag reveal; safe when LaunchDarkly is not configured. */
+/** Small banner for the onboarding flag reveal; hidden when LaunchDarkly is not configured. */
 export function LaunchDarklyOnboardingBanner() {
   const clientSideID = process.env.NEXT_PUBLIC_LAUNCHDARKLY_CLIENT_SIDE_ID?.trim()
 
   if (!clientSideID) {
-    return <BannerBody on={false} connected={false} />
+    return null
   }
 
   return <ConnectedOnboardingBanner />

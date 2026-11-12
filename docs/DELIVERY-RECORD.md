@@ -168,6 +168,33 @@ This record keeps evidence for implementation slices removed from the remaining-
 - OpenAPI snapshot adds document figure/keyword routes.
 - Checks (macOS): `unit` **65 passed**; `contracts` **kept**; `test_chain_reports` + trace freshness cases **3 passed** (isolated `eea_test`).
 
+### Public release v0.1.0 — engineering closure slice (2026-11-12)
+
+- **BE-15**: Chain reports export deterministic Markdown + ReportLab PDF (`STSong-Light` CID); expanded landing-point sections (需求五步、交叉验证、功能正反向、九宫格、战略版本).
+- **BE-14**: `GET /api/v1/agent/sessions/{id}/messages|patches`, `GET /api/v1/agent/skills/status`.
+- **BE-01/OPS-03**: Capture job `claim|client-*|retry` routes use `get_capture_identity` + owner access checks.
+- **CC-03/CC-07**: Client `ca_cert_path`, bearer token via env/file, HTTPS/non-loopback disables LAN `auto_api`; `platform` split into `probe.go`, `documents.go`, `factory.go`.
+- **FE-10/11/12**: PDF chain report download; multi-session agent UI with patches/memories + legacy fallback; hide unconfigured LaunchDarkly banner; remove `@vercel/analytics`.
+- **Repo**: Apache-2.0 `LICENSE`, `THIRD_PARTY_NOTICES.md`; removed meetings PDF bundle and enterprise UI screenshot study from public tree (retained `docs/reference/*.docx`, `docs/wbs/*.xlsx`).
+- Checks (macOS): `test_chain_reports` **3 passed**; `test_agent_workflow::test_session_messages_and_skills_status` passed; `go test -short ./internal/config ./internal/platform` passed; `pnpm typecheck` + `pnpm build` passed. Linux OPS-06 / Windows CC-06 sign-off remain open.
+
+### Release readiness wave 4 — Docker Compose Linux deploy (OPS-01/04/05 partial)
+
+- [`deploy/docker-compose.yml`](../deploy/docker-compose.yml): PostgreSQL, migrate, API, worker, Next.js, Nginx; shared `objectstore` volume.
+- Images: [`deploy/Dockerfile.backend`](../deploy/Dockerfile.backend), [`deploy/Dockerfile.frontend`](../deploy/Dockerfile.frontend); [`deploy/nginx/eea-intranet.conf`](../deploy/nginx/eea-intranet.conf).
+- Ops scripts: `compose-up.sh`, `compose-migrate.sh`, `backup-eea.sh`, `restore-eea.sh`.
+- `/readyz` adds `semantic_gateway` degraded when LLM/MaaS unset; DB/object failures still 503.
+- CI job `deploy-compose`: `docker compose config` + `build` on Ubuntu.
+- Checks: `docker compose config` (local when Docker available). OPS-06 physical host sign-off still open.
+
+### Release readiness wave 3 — frontend FE-02/03/10/11/12 slice
+
+- **FE-10:** 链路报告页 [`chain-report-view.tsx`](../frontend/views/utility/chain-report-view.tsx) 接入 `POST/GET /api/v1/reports` 与 Markdown 下载预览；追溯工作台展示 `basis_freshness` 标签（[`basis-freshness.ts`](../frontend/lib/basis-freshness.ts)）。
+- **FE-02/03:** 信号列表读取 `X-Total-Count` 服务端分页、技术标签 `tag` 筛选；标签建议展示 `TagSuggestion.details` 折叠面板。
+- **FE-11（局部）:** 文档入库结果支持图块索引与章节关键词读取/重算（BE-12 API）。
+- **FE-12:** 新增 `pnpm typecheck`；`pnpm build` + `tsc --noEmit` 通过（macOS）。
+- 待续：多会话 Agent SSE、Playwright E2E、FE-13 大规模 view 拆分。
+
 ## 2026-11-11
 
 ### BE-14 — Pydantic AI durable agent workflow (backend)

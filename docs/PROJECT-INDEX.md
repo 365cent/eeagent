@@ -9,9 +9,8 @@
 3. [eFuse 原始案例 Word](reference/德赛西威EEA关键技术落脚点推导链路逐环节图文对照说明-以「智能保险丝（eFuse）」为案例-1009.docx)：业务推导原文、案例表和截图。作为业务来源保持不变。
 4. [平台实施计划](platform-implementation-plan.md)：需求解释、数据模型、流程与技术提案；第 7 节及后续工程方案不应误认为原始 Word 的要求。
 5. [WBS 正文](wbs/EEA-WBS-001-WBS文档.md)及[工作簿](wbs/EEA-WBS-工作清单.xlsx)：范围、工作包、职责、估时和历史里程碑。Markdown 是当前追溯主线；工作簿的单元格核对仍列为 DOC-01 工作。
-6. [会议纪要](meetings/2026-10-29-EEA白皮书agent需求-智能纪要.md)：业务讨论、真实信号/skills 等输入和部署线索；纪要中的旧技术描述须以当前代码核实。
-7. [Docs TODO](TODO.md)：业务输入、文档维护、验收证据、安装手册、发布包和交接。
-8. [业务与环境输入登记表](INPUT-REGISTER.md)：已收到与仍待提供的材料、责任方、版本/许可和受影响验收项。
+6. [Docs TODO](TODO.md)：业务输入、文档维护、验收证据、安装手册、发布包和交接。
+7. [业务与环境输入登记表](INPUT-REGISTER.md)：已收到与仍待提供的材料、责任方、版本/许可和受影响验收项。
 9. 本地开发：仓库根 [README.md](../README.md)；Linux 生产见 [deploy/README.md](../deploy/README.md)。
 
 ## 来源与参考材料
@@ -21,12 +20,8 @@
 | [reference/](reference/) | 原始 Word 等外部来源；业务规则以来源文件为准，不在此改写原件。 |
 | [platform-implementation-plan.md](platform-implementation-plan.md) | 需求条文、业务规则、Agent/文档能力、图表语义及实施提案。 |
 | [wbs/](wbs/) | WBS 正文和工作簿；估时及历史排期用于范围管理，不构成当前发布日期承诺。 |
-| [meetings/](meetings/) | 会议记录与图片；核实后的决定由根计划/追溯表索引。 |
-| [enterprise-ui-study.md](enterprise-ui-study.md) | 公开产品页面与界面交互参考；仅作行为研究，截图不作为本项目素材。 |
 | [research/](research/) | 专项调研结论，例如采集端替代方案。 |
 | [figures.md](figures.md)、[images/](images/) | 报告流程图源码和来源截图。改图以 Mermaid 源码为准。 |
-| [合订 PDF](EEA-Platform-Plan-and-UI-Study.pdf) | 只读快照；若与 Markdown 不同，以 Markdown 为准。 |
-
 ## 七环节业务链
 
 1. **原始信息采集与证据留存**：采集信号，保存来源、原始证据和可核验时间信息。

@@ -114,6 +114,7 @@ import { useShellColorScheme } from '@/hooks/use-shell-color-scheme'
 import { querySurfaceState } from '@/hooks/use-query-surface'
 import { NewSignalImportPage } from '@/components/import/new-signal-import'
 import { WorkflowStudio } from '@/components/workflow-studio'
+import { ChainReportView } from '@/views/utility/chain-report-view'
 import { PlatformSettingsPage } from '@/views/utility/platform-settings-page'
 import { ProfilePage } from '@/views/utility/profile-page'
 import { ArchivedSignalsView } from '@/views/evidence/archived-signals-view'
@@ -781,7 +782,15 @@ export function UtilityView({ page, onNavigate, signalId }: { page: keyof typeof
       </>
     )
   }
-  if (isReport || page === 'search') {
+  if (isReport) {
+    return (
+      <>
+        <PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} />
+        <ChainReportView onNavigate={onNavigate} />
+      </>
+    )
+  }
+  if (page === 'search') {
     return (
       <>
         <PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} />

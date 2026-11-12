@@ -3,8 +3,11 @@ package httpx
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -13,9 +16,21 @@ import (
 
 const defaultRequestTimeout = 15 * time.Minute
 
+// ClientOptions configures TLS roots and LAN bind for API uploads.
+type ClientOptions struct {
+	BindIP     string
+	CACertPath string
+}
+
 // PrimaryClient returns the LAN-bound client used for platform API uploads.
 // When bindIP is empty, connections use the default local route.
 func PrimaryClient(bindIP string) *http.Client {
+	return PrimaryClientWithOptions(ClientOptions{BindIP: bindIP})
+}
+
+// PrimaryClientWithOptions builds a client with optional enterprise CA PEM.
+func PrimaryClientWithOptions(opts ClientOptions) *http.Client {
+	bindIP := opts.BindIP
 	if bindIP == "" {
 		bindIP = netinfo.PrimaryIPv4()
 	}
@@ -38,6 +53,20 @@ func PrimaryClient(bindIP string) *http.Client {
 		DialContext:         dialer,
 		MaxIdleConnsPerHost: 4,
 		IdleConnTimeout:     90 * time.Second,
+	}
+	if strings.TrimSpace(opts.CACertPath) != "" {
+		pool, err := x509.SystemCertPool()
+		if err != nil || pool == nil {
+			pool = x509.NewCertPool()
+		}
+		pem, err := os.ReadFile(opts.CACertPath)
+		if err != nil {
+			panic("httpx: read ca_cert_path: " + err.Error())
+		}
+		if !pool.AppendCertsFromPEM(pem) {
+			panic("httpx: ca_cert_path did not contain a PEM certificate")
+		}
+		transport.TLSClientConfig = &tls.Config{RootCAs: pool, MinVersion: tls.VersionTLS12}
 	}
 	return &http.Client{Transport: transport, Timeout: defaultRequestTimeout}
 }

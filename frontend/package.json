@@ -9,7 +9,8 @@
     "start": "next start",
     "fonts:install": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/install-platform-fonts.ps1",
     "antd": "antd",
-    "antd:lint": "antd lint components --format json && antd lint views --format json && antd lint config --format json && antd lint features --format json"
+    "antd:lint": "antd lint components --format json && antd lint views --format json && antd lint config --format json && antd lint features --format json",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@ant-design/cssinjs": "^1.24.0",
@@ -20,7 +21,6 @@
     "@antv/g6": "^5.1.1",
     "@tanstack/react-query": "^5.104.4",
     "@tanstack/react-query-devtools": "^5.104.4",
-    "@vercel/analytics": "1.6.1",
     "antd": "^6.6.6",
     "launchdarkly-react-client-sdk": "^3.9.4",
     "minisearch": "^7.2.0",

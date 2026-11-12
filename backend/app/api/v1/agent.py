@@ -11,16 +11,20 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.identity import OperatorIdentity, get_operator_identity
 from app.db.base import get_db
-from app.models.agent_models import AgentMemory, AgentSession
+from app.models.agent_models import AgentMemory, AgentMessage, AgentPatch, AgentSession
 from app.schemas.agent import (
     AgentMemoryIn,
     AgentMemoryOut,
     AgentMessageIn,
     AgentMessageOut,
+    AgentMessageRecord,
     AgentPatchActionOut,
+    AgentPatchOut,
     AgentSessionCreate,
     AgentSessionOut,
+    AgentSkillsStatusOut,
 )
+from app.services.skills import baseline_mode, load_skill_packs
 from app.services.agent_events import format_sse, list_events_after
 from app.services.agent_patches import apply_confirmed_patch, get_owned_patch, reject_patch
 from app.services.agent_runtime import cancel_run, execute_user_message, get_owned_session
@@ -77,6 +81,75 @@ async def list_sessions(
             updated_at=s.updated_at,
         )
         for s in rows
+    ]
+
+
+@router.get("/skills/status", response_model=AgentSkillsStatusOut)
+async def get_agent_skills_status():
+    packs = load_skill_packs()
+    return AgentSkillsStatusOut(
+        baseline_mode=baseline_mode(),
+        packs=[{"name": p.name, "version": p.version, "checksum": p.checksum} for p in packs],
+    )
+
+
+@router.get("/sessions/{session_id}/messages", response_model=list[AgentMessageRecord])
+async def list_session_messages(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_operator_identity),
+    limit: int = Query(200, le=500),
+):
+    await get_owned_session(db, session_id, actor)
+    rows = (
+        await db.execute(
+            select(AgentMessage)
+            .where(AgentMessage.session_id == session_id)
+            .order_by(AgentMessage.created_at.asc())
+            .limit(limit)
+        )
+    ).scalars()
+    return [
+        AgentMessageRecord(
+            id=row.id,
+            session_id=row.session_id,
+            run_id=row.run_id,
+            role=row.role,
+            content=row.content,
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
+
+
+@router.get("/sessions/{session_id}/patches", response_model=list[AgentPatchOut])
+async def list_session_patches(
+    session_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_operator_identity),
+):
+    await get_owned_session(db, session_id, actor)
+    rows = (
+        await db.execute(
+            select(AgentPatch)
+            .where(AgentPatch.session_id == session_id)
+            .order_by(AgentPatch.created_at.desc())
+        )
+    ).scalars()
+    return [
+        AgentPatchOut(
+            id=row.id,
+            signal_id=row.signal_id,
+            status=row.status,
+            baseline_snapshot=row.baseline_snapshot,
+            diff=row.diff,
+            reason=row.reason,
+            citation_refs=list(row.citation_refs or []),
+            expires_at=row.expires_at,
+            created_at=row.created_at,
+            conflict_reason=row.conflict_reason,
+        )
+        for row in rows
     ]
 
 

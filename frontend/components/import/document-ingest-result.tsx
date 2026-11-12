@@ -20,6 +20,9 @@ import { StatusTag } from '@/features/shared/status-tag'
 import {
   fetchDocument,
   fetchDocumentCanonicalMd,
+  fetchDocumentFigures,
+  fetchDocumentKeywords,
+  extractDocumentKeywords,
   reingestDocument,
   createSignal,
 } from '@/lib/api/eea-api'
@@ -47,6 +50,9 @@ export function DocumentIngestResult({ doc, filename, onUpdated, onNavigate }: D
   const [previewBusy, setPreviewBusy] = useState(false)
   const [retryBusy, setRetryBusy] = useState(false)
   const [saveSignalBusy, setSaveSignalBusy] = useState(false)
+  const [keywordsBusy, setKeywordsBusy] = useState(false)
+  const [figureLabels, setFigureLabels] = useState<string[]>([])
+  const [keywordTerms, setKeywordTerms] = useState<string[]>([])
 
   const status = ingestStatusMeta(current.ingest_status)
   const displayName = filename ?? current.filename ?? current.id
@@ -93,6 +99,34 @@ export function DocumentIngestResult({ doc, filename, onUpdated, onNavigate }: D
       onUpdated?.(detail)
     } catch {
       /* ignore */
+    }
+  }
+
+  const loadFigures = async () => {
+    setKeywordsBusy(true)
+    try {
+      const rows = await fetchDocumentFigures(current.id)
+      setFigureLabels(
+        rows.map((row) => `图 ${row.figure_index} · ${row.review_status}${row.caption ? ` · ${row.caption}` : ''}`),
+      )
+    } catch (err) {
+      const detail = err instanceof EeaApiError ? err.message : String(err)
+      messageApi.error(detail || '图块列表加载失败')
+    } finally {
+      setKeywordsBusy(false)
+    }
+  }
+
+  const loadKeywords = async (recompute: boolean) => {
+    setKeywordsBusy(true)
+    try {
+      const rows = recompute ? await extractDocumentKeywords(current.id) : await fetchDocumentKeywords(current.id)
+      setKeywordTerms(rows.map((row) => row.term))
+    } catch (err) {
+      const detail = err instanceof EeaApiError ? err.message : String(err)
+      messageApi.error(detail || '章节关键词加载失败')
+    } finally {
+      setKeywordsBusy(false)
     }
   }
 
@@ -167,7 +201,38 @@ export function DocumentIngestResult({ doc, filename, onUpdated, onNavigate }: D
                 `DOC_INGEST_MAX_BYTES`）时仅保留原始 blob，不生成 canonical Markdown。
               </Text>
             ) : null}
+            {figureLabels.length ? (
+              <Space wrap size={[4, 4]}>
+                {figureLabels.map((label) => (
+                  <Tag key={label}>{label}</Tag>
+                ))}
+              </Space>
+            ) : null}
+            {keywordTerms.length ? (
+              <Space wrap size={[4, 4]}>
+                {keywordTerms.map((term) => (
+                  <Tag key={term} color="blue">
+                    {term}
+                  </Tag>
+                ))}
+              </Space>
+            ) : null}
             <Space wrap>
+              {hasCanonical ? (
+                <Button size="small" loading={keywordsBusy} onClick={() => void loadFigures()}>
+                  加载图块索引
+                </Button>
+              ) : null}
+              {hasCanonical ? (
+                <>
+                  <Button size="small" loading={keywordsBusy} onClick={() => void loadKeywords(false)}>
+                    读取关键词
+                  </Button>
+                  <Button size="small" loading={keywordsBusy} onClick={() => void loadKeywords(true)}>
+                    重新抽取关键词
+                  </Button>
+                </>
+              ) : null}
               {hasCanonical ? (
                 <Button size="small" onClick={() => void openPreview()}>
                   查看完整 Markdown

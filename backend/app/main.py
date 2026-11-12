@@ -144,14 +144,20 @@ def create_app() -> FastAPI:
                 db_ready = True
             except Exception:
                 db_ready = False
-        status = "ready" if db_ready and storage_ready else "not_ready"
-        code = 200 if status == "ready" else 503
+        core_ready = db_ready and storage_ready
+        llm_configured = bool(settings.llm_base_url_normalized or settings.semantic_api_key)
+        semantic = "ok" if llm_configured else "degraded"
+        status = "ready" if core_ready else "not_ready"
+        if core_ready and semantic == "degraded":
+            status = "degraded"
+        code = 200 if core_ready else 503
         return JSONResponse(
             status_code=code,
             content={
                 "status": status,
                 "database": db_ready,
                 "object_dir": storage_ready,
+                "semantic_gateway": semantic,
             },
         )
 

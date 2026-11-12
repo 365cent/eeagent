@@ -8,6 +8,7 @@ import { STANDARD_CONSTRAINTS, STANDARD_PHASES } from '@/features/technology/sta
 import { useLandingRows, useTraceChain } from '@/hooks/use-eea-queries'
 import { EeaApiError, signalArchiveUrl, documentCanonicalUrl } from '@/lib/api/client'
 import { formatApiDate } from '@/lib/eea-mappers'
+import { basisFreshnessMeta } from '@/lib/basis-freshness'
 import type { NavigateFn } from '@/types/platform'
 
 const { Text, Paragraph } = Typography
@@ -100,6 +101,14 @@ export function DeductionChainWorkspace({ onNavigate, initialLandingPointId }: {
               </Tag>
               <Tag>交叉验证：{trace.demand_cross_validation_conclusion ?? '无记录'}</Tag>
               <Tag>战略版本：{trace.assessment_versions.length}</Tag>
+              {(() => {
+                const meta = basisFreshnessMeta(trace.basis_freshness)
+                return (
+                  <Tag color={meta.color} title={meta.description}>
+                    依据状态：{meta.title}
+                  </Tag>
+                )
+              })()}
             </Space>
             <Row gutter={[18, 18]} style={{ marginTop: 16 }}>
               <Col xs={24} sm={12} lg={6}><Text strong>技术落脚点</Text><div>{trace.landing_point.name}</div></Col>

@@ -232,6 +232,8 @@ func runDoctor(args []string, out io.Writer) int {
 	}
 	base := cfg.EffectiveAPIBase()
 	fmt.Fprintf(out, "api_base      %s\n", base)
+	fmt.Fprintf(out, "ca_cert       %s\n", orDash(cfg.CACertPath))
+	fmt.Fprintf(out, "auth_token    %s\n", cfg.AuthTokenSource())
 	fmt.Fprintf(out, "auto_api      %v (lan %s)\n", cfg.AutoAPI, orDash(netinfo.PrimaryIPv4()))
 	var exe string
 	var browserErr error
@@ -256,7 +258,7 @@ func runDoctor(args []string, out io.Writer) int {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	api := platform.New(base, cfg.MaxUploadMB)
+	api := platform.NewForConfig(cfg)
 	defer api.CloseIdleConnections()
 	if err := api.Reachable(ctx); err != nil {
 		fmt.Fprintf(out, "backend       unreachable (%v)\n", err)

@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AgentSessionCreate(BaseModel):
@@ -56,3 +56,34 @@ class AgentMemoryOut(BaseModel):
     key: str
     content: str
     created_at: datetime
+
+
+class AgentMessageRecord(BaseModel):
+    id: uuid.UUID
+    session_id: uuid.UUID
+    run_id: uuid.UUID | None
+    role: str
+    content: str
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgentPatchOut(BaseModel):
+    id: uuid.UUID
+    signal_id: uuid.UUID
+    status: str
+    baseline_snapshot: dict
+    diff: dict
+    reason: str | None
+    citation_refs: list
+    expires_at: datetime
+    created_at: datetime
+    conflict_reason: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class AgentSkillsStatusOut(BaseModel):
+    baseline_mode: bool
+    packs: list[dict[str, str]]

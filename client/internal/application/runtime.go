@@ -24,7 +24,13 @@ type Runtime struct {
 }
 
 func New(cfg config.Config, dir string) *Runtime {
-	return &Runtime{config: cfg, dir: dir, API: platform.New(cfg.EffectiveAPIBase(), cfg.MaxUploadMB), Browser: NewBrowserSession(BrowserOptions(cfg)), PublicHTTP: httpx.OutboundClient(15 * time.Minute)}
+	return &Runtime{
+		config:     cfg,
+		dir:        dir,
+		API:        platform.NewForConfig(cfg),
+		Browser:    NewBrowserSession(BrowserOptions(cfg)),
+		PublicHTTP: httpx.OutboundClient(15 * time.Minute),
+	}
 }
 
 // BrowserOptions applies the same archive-mode settings for GUI and CLI.

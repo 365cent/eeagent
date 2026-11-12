@@ -1,6 +1,8 @@
 import {
   eeaFetch,
+  eeaFetchBlob,
   eeaFetchText,
+  eeaFetchWithMeta,
   eeaPostFormData,
   documentCanonicalUrl,
   signalArchiveUrl,
@@ -58,6 +60,16 @@ import type {
   StrategyFunnelPatchPayload,
   CaptureJobOut,
   CaptureResult,
+  ChainReportOut,
+  AgentSessionOut,
+  AgentMessageRecord,
+  AgentPatchOut,
+  AgentMessageResponse,
+  AgentSkillsStatusOut,
+  AgentMemoryOut,
+  DocumentFigureOut,
+  DocumentKeywordOut,
+  SignalsPage,
 } from '@/lib/api/types'
 
 export function fetchRefCodes(domain?: string) {
@@ -72,8 +84,15 @@ export function fetchSyncStamp() {
   return eeaFetch<DataSyncStamp>('/sync-stamp')
 }
 
+export async function fetchSignalsPage(params: ListSignalsParams = {}): Promise<SignalsPage> {
+  const { data, headers } = await eeaFetchWithMeta<SignalOut[]>(`/signals${toQueryString(params)}`)
+  const raw = headers.get('X-Total-Count')
+  const parsed = raw ? Number.parseInt(raw, 10) : data.length
+  return { items: data, total: Number.isFinite(parsed) ? parsed : data.length }
+}
+
 export function fetchSignals(params: ListSignalsParams = {}) {
-  return eeaFetch<SignalOut[]>(`/signals${toQueryString(params)}`)
+  return fetchSignalsPage(params).then((page) => page.items)
 }
 
 export function fetchSignal(signalId: string) {
@@ -576,6 +595,102 @@ export function fetchAccessHistory(limit = 20) {
 
 export function fetchSessionMe() {
   return eeaFetch<SessionOut>('/session/me')
+}
+
+export function fetchDocumentFigures(documentId: string) {
+  return eeaFetch<DocumentFigureOut[]>(`/documents/${encodeURIComponent(documentId)}/figures`)
+}
+
+export function fetchDocumentKeywords(documentId: string) {
+  return eeaFetch<DocumentKeywordOut[]>(`/documents/${encodeURIComponent(documentId)}/keywords`)
+}
+
+export function extractDocumentKeywords(documentId: string) {
+  return eeaFetch<DocumentKeywordOut[]>(`/documents/${encodeURIComponent(documentId)}/extract-keywords`, {
+    method: 'POST',
+  })
+}
+
+export function listChainReports() {
+  return eeaFetch<ChainReportOut[]>('/reports')
+}
+
+export function createChainReport(payload: {
+  demand_point_id?: string
+  landing_point_id?: string
+  format?: 'md' | 'pdf'
+}) {
+  return eeaFetch<ChainReportOut>('/reports', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function downloadChainReportMarkdown(reportId: string) {
+  return eeaFetchText(`/reports/${encodeURIComponent(reportId)}/download?format=md`)
+}
+
+export function downloadChainReportPdf(reportId: string) {
+  return eeaFetchBlob(`/reports/${encodeURIComponent(reportId)}/download?format=pdf`)
+}
+
+export function fetchAgentSkillsStatus() {
+  return eeaFetch<AgentSkillsStatusOut>('/agent/skills/status')
+}
+
+export function listAgentSessions() {
+  return eeaFetch<AgentSessionOut[]>('/agent/sessions')
+}
+
+export function createAgentSession(payload: {
+  title?: string
+  project_key?: string
+  page_context?: Record<string, unknown>
+}) {
+  return eeaFetch<AgentSessionOut>('/agent/sessions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function listAgentSessionMessages(sessionId: string) {
+  return eeaFetch<AgentMessageRecord[]>(`/agent/sessions/${encodeURIComponent(sessionId)}/messages`)
+}
+
+export function listAgentSessionPatches(sessionId: string) {
+  return eeaFetch<AgentPatchOut[]>(`/agent/sessions/${encodeURIComponent(sessionId)}/patches`)
+}
+
+export function postAgentSessionMessage(sessionId: string, message: string) {
+  return eeaFetch<AgentMessageResponse>(`/agent/sessions/${encodeURIComponent(sessionId)}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message }),
+  })
+}
+
+export function confirmAgentPatch(sessionId: string, patchId: string) {
+  return eeaFetch<{ patch_id: string; status: string; message: string }>(
+    `/agent/sessions/${encodeURIComponent(sessionId)}/patches/${encodeURIComponent(patchId)}/confirm`,
+    { method: 'POST' },
+  )
+}
+
+export function rejectAgentPatch(sessionId: string, patchId: string) {
+  return eeaFetch<{ patch_id: string; status: string; message: string }>(
+    `/agent/sessions/${encodeURIComponent(sessionId)}/patches/${encodeURIComponent(patchId)}/reject`,
+    { method: 'POST' },
+  )
+}
+
+export function listAgentMemories() {
+  return eeaFetch<AgentMemoryOut[]>('/agent/memories')
+}
+
+export function deleteAgentMemory(memoryId: string) {
+  return eeaFetch<void>(`/agent/memories/${encodeURIComponent(memoryId)}`, { method: 'DELETE' })
 }
 
 export type { AssistantChatTurn } from '@/lib/api/types'

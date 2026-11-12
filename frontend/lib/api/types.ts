@@ -15,6 +15,8 @@ export type SignalOut = {
   channel_code: string
   publisher: string | null
   published_at: string | null
+  event_date_text?: string | null
+  event_date_precision?: string | null
   value_chain_stage_code: string | null
   signal_type_code: string | null
   evolution_node_code: string | null
@@ -157,8 +159,16 @@ export type ThemeAggregatePreview = {
   reason: string
 }
 
+export type TagCandidateDetail = {
+  name: string
+  frequency?: number | null
+  rerank_score?: number | null
+  evidence_snippet?: string | null
+}
+
 export type TagSuggestion = {
   suggested_tags: string[]
+  details?: TagCandidateDetail[]
   value_chain_stage_code: string | null
   signal_type_code: string | null
   source: string
@@ -601,7 +611,7 @@ export type TraceChain = {
   demand_review_status: string | null
   demand_cross_validation_conclusion: string | null
   function_published: boolean | null
-  basis_freshness: 'unknown_untracked'
+  basis_freshness: 'fresh' | 'stale' | 'unconfirmed' | 'unknown_untracked'
   completeness: TraceCompleteness
 }
 
@@ -644,8 +654,90 @@ export type ListSignalsParams = {
   channel?: string
   evidence_status?: string
   theme_id?: string
+  tag?: string
   limit?: number
   offset?: number
+}
+
+export type SignalsPage = {
+  items: SignalOut[]
+  total: number
+}
+
+export type DocumentFigureOut = {
+  figure_index: number
+  caption: string | null
+  review_status: string
+}
+
+export type DocumentKeywordOut = {
+  term: string
+  score: number | null
+  chunk_id: number | null
+  source: string
+}
+
+export type AgentSessionOut = {
+  id: string
+  title: string | null
+  project_key: string | null
+  status: string
+  created_at: string
+  updated_at: string
+}
+
+export type AgentMessageRecord = {
+  id: string
+  session_id: string
+  run_id: string | null
+  role: string
+  content: string
+  created_at: string
+}
+
+export type AgentPatchOut = {
+  id: string
+  signal_id: string
+  status: string
+  baseline_snapshot: Record<string, unknown>
+  diff: Record<string, unknown>
+  reason: string | null
+  citation_refs: string[]
+  expires_at: string
+  created_at: string
+  conflict_reason?: string | null
+}
+
+export type AgentMessageResponse = {
+  session_id: string
+  run_id: string
+  status: 'completed' | 'approval_required' | 'failed' | 'cancelled'
+  output: Record<string, unknown> | null
+  error: string | null
+}
+
+export type AgentSkillsStatusOut = {
+  baseline_mode: boolean
+  packs: { name: string; version: string; checksum: string }[]
+}
+
+export type AgentMemoryOut = {
+  id: string
+  scope: string
+  project_key: string | null
+  key: string
+  content: string
+  created_at: string
+}
+
+export type ChainReportOut = {
+  id: string
+  status: string
+  format: string
+  object_key: string | null
+  error: string | null
+  demand_point_id: string | null
+  landing_point_id: string | null
 }
 
 export type AccessLogOut = {

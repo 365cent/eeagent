@@ -67,10 +67,22 @@ jobs:
         working-directory: frontend
         run: |
           pnpm install --frozen-lockfile
+          pnpm typecheck
           pnpm build
       - name: Ant Design lint
         working-directory: frontend
         run: pnpm antd:lint
+
+  deploy-compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Compose file
+        run: docker compose -f deploy/docker-compose.yml config
+      - name: Build images
+        run: |
+          cp deploy/.env.compose.example deploy/.env
+          docker compose -f deploy/docker-compose.yml build
 
   client-go:
     runs-on: ubuntu-latest
