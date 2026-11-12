@@ -28,6 +28,5 @@ func main() {
 		fmt.Fprintf(os.Stderr, "config: %v\n", err)
 		os.Exit(1)
 	}
-	_ = config.EnsureSingleFileExtension(dir, &cfg)
 	os.Exit(ui.Run(cfg, dir))
 }

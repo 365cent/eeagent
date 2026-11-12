@@ -2,23 +2,9 @@ import type { DocumentRawOut } from '@/lib/api/types'
 
 export type IngestStatus = DocumentRawOut['ingest_status']
 
-export function ingestStatusMeta(status: string): {
-  label: string
-  color: 'success' | 'processing' | 'error' | 'warning' | 'default'
-} {
-  switch (status) {
-    case 'parsed':
-      return { label: '已解析', color: 'success' }
-    case 'failed':
-      return { label: '解析失败', color: 'error' }
-    case 'skipped':
-      return { label: '跳过解析', color: 'warning' }
-    case 'stored':
-      return { label: '已存储', color: 'default' }
-    default:
-      return { label: status, color: 'default' }
-  }
-}
+import { ingestStatusMeta } from '@/lib/status-registry'
+
+export { ingestStatusMeta }
 
 export function formatDocumentSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`

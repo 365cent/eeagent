@@ -8,9 +8,17 @@
 
 - 流量经 OpenAI 兼容 **`/chat/completions`** 出站（[`backend/app/services/llm_gateway.py`](../backend/app/services/llm_gateway.py)）。
 - 配置示例含 `auto`、`deepseek-v4-flash-hw`、Qwen 3.8/3.6 等；仓库**不绑定** OpenAI 官方模型 ID，具体费用与延迟取决于实际网关与返回模型。
-- 生产评估应避免长期使用 `auto`；应固定模型/版本并记录网关实际返回的 `model` 字段。
+- 生产评估应避免长期使用 `auto`；应固定模型/版本并记录网关实际返回的 `model` 字段。用量日志里的 `requested_model` 与 `served_model` 就是这对值，模型 ID 仍只来自环境变量或网关，不写进代码。
 
-外部参考：[Prompt engineering](https://developers.openai.com/api/docs/guides/prompt-engineering)、[Model selection](https://developers.openai.com/api/docs/guides/model-selection)、[Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=chat)、[Reasoning models](https://developers.openai.com/api/docs/guides/reasoning)、[Evaluation best practices](https://developers.openai.com/api/docs/guides/evaluation-best-practices)。
+## 用量记录
+
+每次 chat、vision 和 Pydantic AI 调用都会打一条 `app.llm.usage` 日志，字段包括任务名、`PROMPT_REVISION`、请求模型、网关返回模型、模型回退序号、调用方重试序号、延迟，以及提供商返回的 input/output/cache read/cache write。原始 `/chat/completions` 响应里没有的缓存字段记为缺省，不记成 0。Pydantic AI 会把缺省的缓存计数填成 0，日志用 `usage_source=pydantic_ai` 标出，不能把这个 0 当成已测量的未命中。本地 `FunctionModel` 不记 token。日志和 `eea_agent_run.usage_json` 都不含提示词或图像。
+
+请求体仍然只有 `model`、`messages`、`temperature`、`max_tokens`。在确认当前网关和模型接受之前，不发送 `prompt_cache_options`、breakpoint 或 retention。持久化 Agent 成功的一轮会把同一份用量写入 `usage_json`。
+
+仍未做在线采样，因此没有缓存命中率、价格或节省金额。Pydantic AI 内部的 HTTP 重试会计入它汇总后的 `model_requests`，不会各记一行。
+
+外部参考：[Prompt engineering](https://developers.openai.com/api/docs/guides/prompt-engineering)、[Model selection](https://developers.openai.com/api/docs/guides/model-selection)、[Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=chat)、[Reasoning models](https://developers.openai.com/api/docs/guides/reasoning)、[Evaluation best practices](https://developers.openai.com/api/docs/guides/evaluation-best-practices)、[Prompt caching](https://developers.openai.com/api/docs/guides/prompt-caching)。
 
 ## 最高优先级改进（尚未全面实施）
 
@@ -228,8 +236,8 @@ perspectives（字符串数组，至少2条）、evidence_signal_ids（至少2�
 
 指标：schema/解析成功率；引用与引述有效率；标签/环节/类型准确率；需求五步与来源多样性；人工 1–5（正确性、依据、用处、简洁）；p50/p95 延迟；input/output/reasoning tokens；重试与 fallback 次数。
 
-**已测量（代码审阅）：** 参数位置、重试路径、提示词落点。  
-**未测量：** 真实质量、提供商 token 费、模型延迟、reasoning token。
+**已测量（代码审阅）：** 参数位置、重试路径、提示词落点；用量日志字段与 `usage_json` 列。  
+**未测量：** 真实质量、提供商 token 费、模型延迟、缓存命中与节省。本地测试不联系网关。
 
 本地测试以契约为主（`TestModel`/`FunctionModel`）；实时 agent 见 [`backend/tests/test_agent_live.py`](../backend/tests/test_agent_live.py)（`EEA_LLM_INTEGRATION=1`）。
 

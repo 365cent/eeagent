@@ -16,87 +16,52 @@ endpoints remain for the browser extension and API callers.
 """
 from __future__ import annotations
 
-import json
 import uuid
 from datetime import datetime, timedelta, timezone
 from functools import partial
-from pathlib import Path
 
 from anyio import to_thread
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+
+from app.core.capture_identity import assert_capture_job_access, get_capture_identity
+from app.core.identity import OperatorIdentity
+from app.services.orphan_objects import record_orphan_object, resolve_orphan_object
 from sqlalchemy import select
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.platform.launchdarkly import EVIDENCE_CAPTURE, require_feature, track_workflow_success
 from app.db.base import get_db
 from app.models.models import CaptureJob, Document, Signal
-from app.schemas.schemas import CaptureJobOut, CaptureResult, DocumentRawOut
-from app.services.body_excerpt import lead_excerpt_from_markdown
+from app.schemas.schemas import CaptureJobOut, CaptureResult
 from app.services.doc_ingest import normalize_document_mime
-from app.services.doc_summary import build_document_body_summary
-from app.services.objectstore import load_bytes, save_bytes
-from app.services.objectstore import sha256_bytes
+from app.services.objectstore import save_bytes
 from app.services.refcodes import codes, normalize as normalize_ref_code
 from app.services.url_fetch import FetchError, fetch_url
+from app.domains.capture.document_path import _document_path
+from app.domains.capture.submission import _is_html, _submission_fingerprint
+from app.domains.evidence.html_capture import _signal_from_html
+from app.domains.evidence.signal_queries import get_signal_detail
 
-from app.api.v1.documents import _ingest as _ingest_document
-from app.api.v1.documents import _raw_out
-from app.api.v1.signals import (
-    _create_signal_record,
-    _document_title,
-    _infer_channel_code,
-    _linked_demand_points,
-    _load_signal,
-    _signal_from_html,
-    _to_detail,
+from app.domains.evidence.document_pipeline import document_raw_out as _raw_out
+
+router = APIRouter(
+    prefix="/capture",
+    tags=["capture"],
+    dependencies=[Depends(require_feature(EVIDENCE_CAPTURE))],
 )
-
-router = APIRouter(prefix="/capture", tags=["capture"])
-
-_HTML_SUFFIXES = {".html", ".htm", ".xhtml"}
-
-
-def _is_html(*, mime: str | None, filename: str | None) -> bool:
-    # split off charset parameters ("text/html; charset=utf-8")
-    base = (mime or "").split(";")[0].strip().lower()
-    if base == "text/html":
-        return True
-    return bool(filename) and Path(filename).suffix.lower() in _HTML_SUFFIXES
-
-
-def _submission_fingerprint(
-    *,
-    url: str | None,
-    data: bytes,
-    filename: str | None,
-    mime: str | None,
-    channel_code: str | None,
-    publisher: str | None,
-    source_label: str | None,
-) -> str:
-    payload = {
-        "url": url,
-        "content_sha256": sha256_bytes(data) if data else None,
-        "filename": filename if data else None,
-        "mime": mime if data else None,
-        "channel_code": channel_code,
-        "publisher": publisher,
-        "source_label": source_label,
-    }
-    canonical = json.dumps(payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
-    return sha256_bytes(canonical.encode("utf-8"))
 
 
 async def _signal_detail(db: AsyncSession, signal_id: uuid.UUID):
-    signal = await _load_signal(db, signal_id)
-    detail = _to_detail(signal)
-    detail.linked_demand_points = await _linked_demand_points(db, signal.tech_theme_id)
+    detail = await get_signal_detail(db, signal_id)
+    if detail is None:
+        raise HTTPException(404, "signal not found")
     return detail
 
 
 async def _capture_result(db: AsyncSession, signal: Signal, *, via: str) -> CaptureResult:
+    track_workflow_success(EVIDENCE_CAPTURE)
     document_out = None
     if signal.document_id is not None:
         document = await db.get(Document, signal.document_id)
@@ -136,6 +101,7 @@ async def _capture_job_out(db: AsyncSession, job: CaptureJob) -> CaptureJobOut:
         started_at=job.started_at,
         heartbeat_at=job.heartbeat_at,
         finished_at=job.finished_at,
+        cancel_requested_at=job.cancel_requested_at,
         signal_id=job.signal_id,
         error=job.error,
         result=result,
@@ -143,81 +109,6 @@ async def _capture_job_out(db: AsyncSession, job: CaptureJob) -> CaptureJobOut:
         channel_code=job.channel_code,
         import_batch_id=job.import_batch_id,
     )
-
-
-async def _document_path(
-    db: AsyncSession,
-    *,
-    data: bytes,
-    filename: str | None,
-    mime: str | None,
-    source_url: str | None,
-    publisher: str | None = None,
-    source_label: str | None = None,
-    channel_code: str | None = None,
-    capture_submission_id: uuid.UUID | None = None,
-    capture_submission_sha256: str | None = None,
-    vision_captions: bool = False,
-) -> tuple[Signal, DocumentRawOut]:
-    """Document bytes → raw blob + ingest + derived signal (mirrors
-    POST /documents/raw dedupe + POST /signals document_id path)."""
-    if not data:
-        raise HTTPException(422, "file 为空：拒绝存储空文档（REQ-SIG-10 证据留存原则）")
-    digest = sha256_bytes(data)
-    doc = (
-        await db.execute(select(Document).where(Document.sha256 == digest))
-    ).scalar_one_or_none()
-    if doc is None:
-        object_key = save_bytes(data, folder="documents", ext="bin")
-        stmt = (
-            pg_insert(Document)
-            .values(
-                sha256=digest,
-                mime=mime or "application/octet-stream",
-                size=len(data),
-                filename=filename,
-                object_key=object_key,
-                uploaded_by="local-admin",
-            )
-            .on_conflict_do_nothing(index_elements=["sha256"])
-            .returning(Document)
-        )
-        inserted = (await db.execute(stmt)).scalar_one_or_none()
-        if inserted is None:
-            await db.rollback()
-            doc = (
-                await db.execute(select(Document).where(Document.sha256 == digest))
-            ).scalar_one()
-        else:
-            await db.commit()
-            await db.refresh(inserted)
-            doc = inserted
-    if doc.ingest_status != "parsed":
-        await _ingest_document(db, doc, data, vision_captions=vision_captions)
-    # derived signal (S1-3): summary body, server-default title/url
-    canonical = ""
-    if doc.canonical_md_object_key:
-        blob = load_bytes(doc.canonical_md_object_key)
-        if blob is not None:
-            canonical = blob.decode("utf-8", errors="replace")
-    body_text = build_document_body_summary(doc.filename or "", canonical)
-    url = source_url or f"eea://document/{doc.id}"
-    sig = await _create_signal_record(
-        db,
-        title=_document_title(doc),
-        url=url,
-        # documents have no host to infer from; the closed vocab only has the two channels
-        evidence_status_code="retained" if body_text else "fetching",
-        channel_code=channel_code or (_infer_channel_code(source_url) if source_url else "web"),
-        publisher=publisher,
-        source_label=source_label,
-        excerpt=lead_excerpt_from_markdown(_document_title(doc), body_text) if body_text else None,
-        body_text=body_text or None,
-        document_id=doc.id,
-        capture_submission_id=capture_submission_id,
-        capture_submission_sha256=capture_submission_sha256,
-    )
-    return sig, _raw_out(doc)
 
 
 @router.post("", response_model=CaptureResult, status_code=201)
@@ -355,6 +246,7 @@ async def create_capture_job(
     channel_code: str | None = Form(None),
     submission_id: uuid.UUID = Form(...),
     db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_capture_identity),
 ):
     """Persist a capture request and return before document parsing begins.
 
@@ -409,6 +301,7 @@ async def create_capture_job(
             raise HTTPException(409, "submission_id was already used for a different capture")
         return await _capture_job_out(db, existing)
 
+    payload_key: str | None = None
     existing_signal = (
         await db.execute(
             select(Signal).where(Signal.capture_submission_id == submission_id)
@@ -427,6 +320,7 @@ async def create_capture_job(
             signal_id=existing_signal.id,
             attempt_count=0,
             finished_at=datetime.now(timezone.utc),
+            owner_subject=actor.subject,
         )
     else:
         payload_key = (
@@ -451,12 +345,19 @@ async def create_capture_job(
             payload_size=len(data),
             via=via,
             status="queued",
+            owner_subject=actor.subject,
         )
     db.add(job)
     try:
         await db.commit()
+        if job.payload_object_key:
+            await resolve_orphan_object(db, job.payload_object_key)
+            await db.commit()
     except IntegrityError:
         await db.rollback()
+        if payload_key:
+            await record_orphan_object(db, payload_key, "capture job commit failed")
+            await db.commit()
         existing = (
             await db.execute(
                 select(CaptureJob).where(CaptureJob.submission_id == submission_id)
@@ -477,8 +378,11 @@ async def list_capture_jobs(
     import_batch_id: uuid.UUID | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_capture_identity),
 ):
     q = select(CaptureJob).order_by(CaptureJob.created_at).limit(limit)
+    if actor.role != "platform_admin":
+        q = q.where(CaptureJob.owner_subject == actor.subject)
     if status:
         q = q.where(CaptureJob.status == status)
     if import_batch_id is not None:
@@ -492,6 +396,7 @@ async def claim_capture_job_for_client(
     job_id: uuid.UUID,
     worker_id: str = Form("capture-client"),
     db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_capture_identity),
 ):
     result = await db.execute(
         select(CaptureJob).where(CaptureJob.id == job_id).with_for_update()
@@ -499,6 +404,7 @@ async def claim_capture_job_for_client(
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(404, "capture job not found")
+    assert_capture_job_access(job.owner_subject, actor)
     if job.status != "awaiting_client":
         raise HTTPException(409, f"job is not awaiting client capture (status={job.status})")
     now = datetime.now(timezone.utc)
@@ -525,6 +431,7 @@ async def client_release_capture_job(
     worker_id: str = Form("capture-client"),
     reason: str = Form("Client released job back to import queue."),
     db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_capture_identity),
 ):
     """Return a reserved import job to awaiting_client (abort, disconnect, retry)."""
     result = await db.execute(
@@ -533,6 +440,7 @@ async def client_release_capture_job(
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(404, "capture job not found")
+    assert_capture_job_access(job.owner_subject, actor)
     if job.status != "running" or job.stage != "capturing":
         raise HTTPException(409, f"job is not held for client capture (status={job.status}, stage={job.stage})")
     if job.payload_object_key:
@@ -559,6 +467,7 @@ async def client_fail_capture_job(
     worker_id: str = Form("capture-client"),
     error: str = Form(...),
     db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_capture_identity),
 ):
     """Record a terminal client-side capture failure (page load, captcha, etc.)."""
     result = await db.execute(
@@ -567,6 +476,7 @@ async def client_fail_capture_job(
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(404, "capture job not found")
+    assert_capture_job_access(job.owner_subject, actor)
     if job.status not in {"awaiting_client", "running"}:
         raise HTTPException(409, f"job cannot be failed from client (status={job.status})")
     if job.status == "running" and job.worker_id and not _worker_id_matches(job.worker_id, worker_id):
@@ -593,6 +503,7 @@ async def client_submit_capture_job(
     file: UploadFile = File(...),
     worker_id: str = Form("capture-client"),
     db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_capture_identity),
 ):
     """Attach browser-captured bytes to a panorama import job and queue server processing."""
     settings = get_settings()
@@ -605,6 +516,7 @@ async def client_submit_capture_job(
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(404, "capture job not found")
+    assert_capture_job_access(job.owner_subject, actor)
     if job.status not in {"awaiting_client", "running"}:
         raise HTTPException(409, f"job cannot accept client upload (status={job.status})")
     if job.status == "running" and job.worker_id and not _worker_id_matches(job.worker_id, worker_id):
@@ -638,21 +550,31 @@ async def client_submit_capture_job(
 
 
 @router.get("/jobs/{job_id}", response_model=CaptureJobOut)
-async def get_capture_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_capture_job(
+    job_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_capture_identity),
+):
     job = await db.get(CaptureJob, job_id)
     if job is None:
         raise HTTPException(404, "capture job not found")
+    assert_capture_job_access(job.owner_subject, actor)
     return await _capture_job_out(db, job)
 
 
 @router.post("/jobs/{job_id}/retry", response_model=CaptureJobOut, status_code=202)
-async def retry_capture_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def retry_capture_job(
+    job_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_capture_identity),
+):
     result = await db.execute(
         select(CaptureJob).where(CaptureJob.id == job_id).with_for_update()
     )
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(404, "capture job not found")
+    assert_capture_job_access(job.owner_subject, actor)
     if job.status != "failed":
         raise HTTPException(409, f"only failed jobs can be retried (status={job.status})")
     job.status = "queued"
@@ -670,19 +592,27 @@ async def retry_capture_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db
 
 
 @router.post("/jobs/{job_id}/cancel", response_model=CaptureJobOut)
-async def cancel_capture_job(job_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def cancel_capture_job(
+    job_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_capture_identity),
+):
     result = await db.execute(
         select(CaptureJob).where(CaptureJob.id == job_id).with_for_update()
     )
     job = result.scalar_one_or_none()
     if job is None:
         raise HTTPException(404, "capture job not found")
-    if job.status != "queued":
-        raise HTTPException(409, f"only queued jobs can be cancelled (status={job.status})")
-    job.status = "cancelled"
-    job.stage = "cancelled"
-    job.error = None
-    job.finished_at = datetime.now(timezone.utc)
+    assert_capture_job_access(job.owner_subject, actor)
+    if job.status == "queued":
+        job.status = "cancelled"
+        job.stage = "cancelled"
+        job.error = None
+        job.finished_at = datetime.now(timezone.utc)
+    elif job.status == "running":
+        job.cancel_requested_at = datetime.now(timezone.utc)
+    else:
+        raise HTTPException(409, f"job cannot be cancelled (status={job.status})")
     await db.commit()
     await db.refresh(job)
     return await _capture_job_out(db, job)

@@ -3,8 +3,6 @@ import uuid
 from datetime import datetime
 from functools import partial
 from pathlib import Path
-from urllib.parse import urlparse
-
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Response, UploadFile
 from fastapi.responses import JSONResponse, PlainTextResponse
 from anyio import to_thread
@@ -16,12 +14,11 @@ from sqlalchemy.orm import selectinload
 from app.core.config import get_settings
 from app.core.identity import OperatorIdentity, get_operator_identity
 from app.db.base import get_db
-from app.models.models import DemandPoint, Document, Signal, SignalTag, TechTheme, Vocab
+from app.platform.launchdarkly import SIGNAL_TAGGING, require_feature, track_workflow_success
+from app.models.models import Document, Signal, SignalTag, TechTheme, Vocab
 from app.schemas.schemas import (
     SignalAssistantMessageIn,
     SignalAssistantMessageOut,
-    SignalBase,
-    ThemeOut,
     SignalCreate,
     SignalDetail,
     SignalFigureOut,
@@ -29,11 +26,20 @@ from app.schemas.schemas import (
     SignalStudioIn,
     SignalUpdate,
     TagAssignment,
+    TagCandidateDetail,
     TagSuggestion,
+    SignalSourceCreate,
+    SignalSourceOut,
     ThemeAggregateCandidate,
     ThemeAggregatePreview,
     ThemeAssignment,
 )
+from app.domains.evidence.channel import _infer_channel_code
+from app.domains.evidence.document_pipeline import document_title as _document_title
+from app.domains.evidence.html_capture import _signal_from_html
+from app.domains.evidence.signal_queries import find_signal, get_signal_detail, signal_out as _to_out
+from app.domains.evidence.signal_record import create_signal_record as _create_signal_record
+from app.domains.evidence.theme_match import match_theme as _match_theme, theme_display_tags
 from app.services.audit import record_correction
 from app.services.body_excerpt import lead_excerpt_from_markdown, resolve_signal_excerpt
 from app.services.doc_summary import build_document_body_summary, excerpt_from_canonical
@@ -44,6 +50,7 @@ from app.services.html_snapshot import (
     prepare_archive_replay_html,
 )
 from app.services.judgment import judge_signal_type, judge_stage, rank_theme_overlaps, select_best_theme
+from app.services.signal_sources import add_supplementary_url, list_sources
 from app.services.tagging_guard import assert_expected_signal_revision, human_corrected_fields
 from app.services.llm import suggest_tags_with_llm
 from app.services.llm_gateway import (
@@ -63,7 +70,6 @@ from app.services.studio import (
     parse_studio_payload,
     strip_report_markdown,
 )
-from app.services.signal_duplicate import disambiguate_title_for_url, title_indicates_duplicate_url
 from app.services.tagging import (
     get_or_create_vocab,
     normalize_url,
@@ -89,95 +95,24 @@ def _query_code(domain: str, value: str) -> str:
 
 
 async def _load_signal(db: AsyncSession, sid: uuid.UUID) -> Signal:
-    obj = (
-        await db.execute(
-            select(Signal)
-            # populate_existing: expire_on_commit=False keeps identity-mapped state
-            # across commit, so a reload after an FK/relationship change must
-            # refresh already-loaded attributes (e.g. theme after auto-aggregate).
-            .options(
-                selectinload(Signal.tags).selectinload(SignalTag.vocab),
-                selectinload(Signal.theme),
-                selectinload(Signal.document),
-            )
-            .where(Signal.id == sid)
-            .execution_options(populate_existing=True)
-        )
-    ).scalar_one_or_none()
+    obj = await find_signal(db, sid)
     if obj is None:
         raise HTTPException(404, "signal not found")
     return obj
 
 
-async def _theme_display_tags(db: AsyncSession) -> dict[uuid.UUID, set[str]]:
-    rows = (await db.execute(text("SELECT tech_theme_id, tag_name FROM eea_v_tech_theme_display_tags"))).all()
-    theme_tags: dict[uuid.UUID, set[str]] = {}
-    for theme_id, tag_name in rows:
-        theme_tags.setdefault(theme_id, set()).add(tag_name)
-    return theme_tags
-
-
-async def _match_theme(db: AsyncSession, tag_names: set[str]) -> tuple[uuid.UUID | None, str]:
-    """REQ-SIG-08: match the signal's tags against every theme's display tags."""
-    return select_best_theme(await _theme_display_tags(db), tag_names)
-
-
-def _to_out(s: Signal) -> SignalOut:
-    out = SignalOut(**SignalBase.model_validate(s).model_dump())
-    out.tags = [st.vocab.name for st in s.tags]
-    out.url_duplicate_renamed = title_indicates_duplicate_url(s.title)
-    return out
-
-
-async def _linked_demand_points(db: AsyncSession, theme_id: uuid.UUID | None) -> list[DemandPoint]:
-    """S1-3 来源栏「关联需求」：demand points sourced from the signal's theme."""
-    if theme_id is None:
-        return []
-    return list(
-        (
-            await db.execute(
-                select(DemandPoint)
-                .where(DemandPoint.source_tech_theme_id == theme_id)
-                .order_by(DemandPoint.created_at)
-            )
-        ).scalars()
-    )
-
-
-def _to_detail(s: Signal) -> SignalDetail:
-    out = SignalDetail(
-        **SignalBase.model_validate(s).model_dump(),
-        body_object_key=s.body_object_key,
-        body_sha256=s.body_sha256,
-        snapshot_html_object_key=s.snapshot_html_object_key,
-        theme=ThemeOut.model_validate(s.theme) if s.theme else None,
-    )
-    out.tags = [st.vocab.name for st in s.tags]
-    out.url_duplicate_renamed = title_indicates_duplicate_url(s.title)
-    return out
-
-
-@router.get("", response_model=list[SignalOut])
-async def list_signals(
-    keyword: str | None = None,
-    value_chain_stage: str | None = None,
-    channel: str | None = None,
-    evidence_status: str | None = None,
-    theme_id: uuid.UUID | None = None,
-    source: str | None = None,  # 来源 (REQ-SIG-04, 图2-1-1 筛选：价值链环节、来源、关键词)
-    include_archived: bool = Query(
-        False,
-        description="When false and evidence_status is unset, archived signals are omitted from the list.",
-    ),
-    limit: int = Query(50, le=200),
-    offset: int = 0,
-    db: AsyncSession = Depends(get_db),
+def _apply_signal_list_filters(
+    q,
+    *,
+    keyword: str | None,
+    value_chain_stage: str | None,
+    channel: str | None,
+    evidence_status: str | None,
+    theme_id: uuid.UUID | None,
+    source: str | None,
+    tag: str | None,
+    include_archived: bool,
 ):
-    q = (
-        select(Signal)
-        .options(selectinload(Signal.tags).selectinload(SignalTag.vocab))
-        .order_by(Signal.created_at.desc())
-    )
     if keyword:
         like = f"%{keyword}%"
         q = q.where(or_(Signal.title.ilike(like), Signal.excerpt.ilike(like), Signal.publisher.ilike(like)))
@@ -193,118 +128,62 @@ async def list_signals(
         q = q.where(Signal.tech_theme_id == theme_id)
     if source:
         q = q.where(Signal.publisher.ilike(f"%{source}%"))
-    rows = (await db.execute(q.limit(limit).offset(offset))).scalars().all()
-    return [_to_out(s) for s in rows]
+    if tag:
+        q = q.join(Signal.tags).join(Vocab).where(Vocab.name.ilike(f"%{tag.strip()}%"))
+    return q
 
 
-async def _create_signal_record(
-    db: AsyncSession,
-    *,
-    title: str,
-    url: str,
-    channel_code: str,
-    evidence_status_code: str,
-    publisher: str | None = None,
-    published_at: datetime | None = None,
-    value_chain_stage_code: str | None = None,
-    signal_type_code: str | None = None,
-    evolution_node_code: str | None = None,
-    source_label: str | None = None,
-    excerpt: str | None = None,
-    body_text: str | None = None,
-    snapshot_html_object_key: str | None = None,
-    document_id: uuid.UUID | None = None,
-    capture_submission_id: uuid.UUID | None = None,
-    capture_submission_sha256: str | None = None,
-) -> Signal:
-    """Shared post-ingest pipeline for both ingestion paths (B3/B5): persist
-    the signal row, persist the body snapshot when one is present, pre-tag
-    (REQ-TAG-05) and auto-aggregate (REQ-SIG-08), and commit.
-
-    The JSON path (REQ-SIG-11) and the capture path (TODO.md B3 step 3) feed
-    the same function so the post-creation logic cannot drift apart.
-
-    S1-3 document sources (document_id set): tags come only from the LLM
-    suggestion — no jieba fallback — and automatic theme aggregation is
-    skipped (tech_theme_id stays null until a manual PUT /theme); a whole
-    deck poured into jieba otherwise re-creates the demo-theme
-    misattribution (backend/TODO.md W4.1).
-    """
-    stage_explicit = value_chain_stage_code
-    signal_type_explicit = signal_type_code
-    # REQ-TAG-04: 平台按标题与证据快照初判价值链环节（人工可纠偏）
-    snapshot_for_rules = text_for_tagging(title, body_text)
-    if value_chain_stage_code is None:
-        value_chain_stage_code = judge_stage(title, snapshot_for_rules)
-    url_norm = normalize_url(url)
-    title, _dup_renamed = await disambiguate_title_for_url(db, title, url_norm)
-    sig = Signal(
-        title=title,
-        url=url,
-        url_normalized=url_norm,
-        channel_code=channel_code,
-        publisher=publisher,
-        published_at=published_at,
-        value_chain_stage_code=value_chain_stage_code,
-        signal_type_code=signal_type_code,
-        evolution_node_code=evolution_node_code,
-        evidence_status_code=evidence_status_code,
-        source_label=source_label,
-        excerpt=excerpt,
-        body_object_key=save_body(body_text) if body_text else None,
-        body_sha256=sha256_text(body_text) if body_text else None,
-        captured_at=func.now() if body_text else None,
-        snapshot_html_object_key=snapshot_html_object_key,
-        document_id=document_id,
-        capture_submission_id=capture_submission_id,
-        capture_submission_sha256=capture_submission_sha256,
+@router.get("", response_model=list[SignalOut])
+async def list_signals(
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    keyword: str | None = None,
+    value_chain_stage: str | None = None,
+    channel: str | None = None,
+    evidence_status: str | None = None,
+    theme_id: uuid.UUID | None = None,
+    source: str | None = None,  # 来源 (REQ-SIG-04, 图2-1-1 筛选：价值链环节、来源、关键词)
+    tag: str | None = Query(None, description="Technical tag substring filter"),
+    include_archived: bool = Query(
+        False,
+        description="When false and evidence_status is unset, archived signals are omitted from the list.",
+    ),
+    limit: int = Query(50, le=200),
+    offset: int = 0,
+):
+    q = (
+        select(Signal)
+        .options(selectinload(Signal.tags).selectinload(SignalTag.vocab))
+        .order_by(Signal.created_at.desc())
     )
-    db.add(sig)
-    try:
-        await db.flush()
-    except IntegrityError:
-        await db.rollback()
-        if capture_submission_id is None:
-            raise
-        existing = (
-            await db.execute(
-                select(Signal).where(Signal.capture_submission_id == capture_submission_id)
-            )
-        ).scalar_one_or_none()
-        if existing is None:
-            raise
-        if existing.capture_submission_sha256 != capture_submission_sha256:
-            raise HTTPException(409, "submission_id was already used for a different capture")
-        return existing
-    # REQ-TAG-05: jieba recall → rerank → LLM 精选；环节/类型仍可由 LLM 结构化建议。
-    tag_names: list[str] = []
-    if body_text:
-        tagging_text = text_for_tagging(title, body_text)
-        llm_body = tagging_text or (body_text or "")[:6000]
-        llm_suggestion = await suggest_tags_with_llm(title, llm_body)
-        if llm_suggestion is not None:
-            if stage_explicit is None and llm_suggestion.value_chain_stage_code:
-                sig.value_chain_stage_code = value_chain_stage_code = llm_suggestion.value_chain_stage_code
-            if signal_type_explicit is None and llm_suggestion.signal_type_code:
-                sig.signal_type_code = llm_suggestion.signal_type_code
-        if document_id is None:
-            tag_names, _, _ = await suggest_tech_tags(title, body_text)
-        for name in tag_names:
-            v = await get_or_create_vocab(db, "tech_tag", name)
-            db.add(SignalTag(signal_id=sig.id, vocab_id=v.id))
-        if document_id is None:
-            # REQ-SIG-08: 抓取后自动预标，并按标签向上归集（人工 PUT /theme 仍可纠偏）
-            theme_id, _ = await _match_theme(db, set(tag_names))
-            if theme_id is not None:
-                sig.tech_theme_id = theme_id
-    await db.commit()
-    return sig
-
-
-def _document_title(document: Document) -> str:
-    if document.filename:
-        return Path(document.filename).stem or document.filename
-    return f"文档 {document.sha256[:8]}"
+    q = _apply_signal_list_filters(
+        q,
+        keyword=keyword,
+        value_chain_stage=value_chain_stage,
+        channel=channel,
+        evidence_status=evidence_status,
+        theme_id=theme_id,
+        source=source,
+        tag=tag,
+        include_archived=include_archived,
+    )
+    id_q = _apply_signal_list_filters(
+        select(Signal.id),
+        keyword=keyword,
+        value_chain_stage=value_chain_stage,
+        channel=channel,
+        evidence_status=evidence_status,
+        theme_id=theme_id,
+        source=source,
+        tag=tag,
+        include_archived=include_archived,
+    )
+    total = int(
+        (await db.execute(select(func.count()).select_from(id_q.distinct().subquery()))).scalar_one() or 0
+    )
+    rows = (await db.execute(q.limit(limit).offset(offset))).scalars().unique().all()
+    response.headers["X-Total-Count"] = str(total)
+    return [_to_out(s) for s in rows]
 
 
 def _document_summary_body(document: Document) -> str:
@@ -378,61 +257,6 @@ async def create_signal(payload: SignalCreate, db: AsyncSession = Depends(get_db
     return await get_signal(sig.id, db)
 
 
-def _infer_channel_code(url: str) -> str:
-    """Capture default channel (TODO.md B3): the weixin mp host maps to
-    wechat_mp, every other origin to web — the two closed-vocab channels."""
-    return "wechat_mp" if urlparse(url).netloc.lower() == "mp.weixin.qq.com" else "web"
-
-
-async def _signal_from_html(
-    db: AsyncSession,
-    *,
-    url: str,
-    data: bytes,
-    channel_code: str | None = None,
-    html_label: str = "archive_html",
-    capture_submission_id: uuid.UUID | None = None,
-    capture_submission_sha256: str | None = None,
-    figure_vision_captions: bool = True,
-) -> Signal:
-    """HTML bytes → signal: snapshot parse, object-store archive, shared
-    post-ingest pipeline. Feeds POST /signals/capture (extension upload) and
-    the unified POST /capture (uploaded html file or server-fetched page)."""
-    if not data:
-        raise HTTPException(422, f"{html_label} 文件为空")
-    if channel_code is None:
-        channel_code = _infer_channel_code(url)
-    else:
-        channel_code = _query_code("channel", channel_code)
-    # parse_html_snapshot is synchronous, CPU-heavy parsing (bs4 + MarkItDown
-    # over the article fragment; multi-MB SingleFile pages can take ~0.5s). Run it in
-    # a worker thread so one large capture cannot stall the event loop (and
-    # with it every concurrent request).
-    snap = await to_thread.run_sync(partial(parse_html_snapshot, page_url=url), data)
-    snap = await enrich_snapshot_figures(snap, vision_captions=figure_vision_captions)
-    if not snap.body_md:
-        # 有正文时不得在未落盘情况下标「已留存」的反面：无正文的页面不落行
-        raise HTTPException(422, "无法从 archive_html 抽出正文（body_md 为空），未创建信号")
-    # 1. 存 HTML → snapshot_html_object_key（TODO.md B3 处理顺序）
-    html_key = save_bytes(data, folder="signals", ext="html")
-    excerpt = await resolve_signal_excerpt(snap.title or url, snap.body_md)
-    # 2+3. html_snapshot 正文 + 共用创建后逻辑（judge_stage/suggest_tags/归集）
-    return await _create_signal_record(
-        db,
-        title=snap.title or url,
-        url=url,
-        channel_code=channel_code,
-        evidence_status_code="retained",
-        publisher=snap.publisher,
-        published_at=snap.published_at,
-        excerpt=excerpt,
-        body_text=snap.body_md,
-        snapshot_html_object_key=html_key,
-        capture_submission_id=capture_submission_id,
-        capture_submission_sha256=capture_submission_sha256,
-    )
-
-
 @router.post("/capture", response_model=SignalDetail, status_code=201)
 async def capture_signal(
     url: str = Form(...),
@@ -459,9 +283,9 @@ async def capture_signal(
 
 @router.get("/{signal_id}", response_model=SignalDetail)
 async def get_signal(signal_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    s = await _load_signal(db, signal_id)
-    detail = _to_detail(s)
-    detail.linked_demand_points = await _linked_demand_points(db, s.tech_theme_id)
+    detail = await get_signal_detail(db, signal_id)
+    if detail is None:
+        raise HTTPException(404, "signal not found")
     return detail
 
 
@@ -612,7 +436,10 @@ async def signal_assistant_message(
 
     try:
         reply, model = await chat_completion(
-            messages, temperature=0.25, max_tokens=900
+            messages,
+            temperature=0.25,
+            max_tokens=900,
+            task="evidence_assistant",
         )
     except LLMNotConfiguredError as exc:
         raise HTTPException(
@@ -666,6 +493,8 @@ async def signal_studio(
                     temperature=0.2,
                     max_tokens=1600,
                     max_model_attempts=3,
+                    task=f"studio.{payload.kind}",
+                    caller_attempt=attempt + 1,
                 )
         except LLMNotConfiguredError as exc:
             raise HTTPException(
@@ -718,7 +547,7 @@ async def theme_aggregate_preview(signal_id: uuid.UUID, db: AsyncSession = Depen
             reason="文档来源信号不参与自动归集，请人工指定主题",
         )
     tag_names = {st.vocab.name for st in s.tags}
-    theme_tags = await _theme_display_tags(db)
+    theme_tags = await theme_display_tags(db)
     ranked = rank_theme_overlaps(theme_tags, tag_names)
     names: dict[uuid.UUID, str] = {}
     if ranked:
@@ -750,6 +579,8 @@ async def auto_aggregate_signal(signal_id: uuid.UUID, db: AsyncSession = Depends
     exists. Manual PUT /{signal_id}/theme stays the audited override path.
     """
     s = await _load_signal(db, signal_id)
+    if s.evidence_status_code == "archived":
+        raise HTTPException(409, "已归档信号不能自动归集")
     if s.document_id is not None:
         # S1-3: document-sourced signals are themed only by the audited manual
         # PUT /theme — automatic aggregation stays off even on demand
@@ -833,6 +664,7 @@ async def set_tags(
     payload: TagAssignment,
     db: AsyncSession = Depends(get_db),
     actor: OperatorIdentity = Depends(get_operator_identity),
+    _feature: None = Depends(require_feature(SIGNAL_TAGGING)),
 ):
     s = await _load_signal(db, signal_id)
     assert_expected_signal_revision(s, payload.expected_updated_at)
@@ -849,6 +681,7 @@ async def set_tags(
     if sorted(tag_names) != old:
         await record_correction(db, "signal", s.id, "tech_tags", old, sorted(tag_names), actor)
     await db.commit()
+    track_workflow_success(SIGNAL_TAGGING)
     return await get_signal(signal_id, db)
 
 
@@ -876,7 +709,11 @@ async def assign_theme(
 
 
 @router.get("/{signal_id}/tag-suggestions", response_model=TagSuggestion)
-async def tag_suggestions(signal_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def tag_suggestions(
+    signal_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _feature: None = Depends(require_feature(SIGNAL_TAGGING)),
+):
     from app.core.config import get_settings
 
     s = await _load_signal(db, signal_id)
@@ -918,8 +755,20 @@ async def tag_suggestions(signal_id: uuid.UUID, db: AsyncSession = Depends(get_d
         degraded_reason = "标签精选模型暂不可用，已使用精排/词频结果。"
     elif not llm_configured and not semantic_api.semantic_configured():
         degraded_reason = "对话模型与语义服务未配置，已使用词频建议。"
+    if tag_source == "llm-rerank-refine":
+        degraded_reason = None
+    snippet = (tagging_text or fallback_text or "")[:160] or None
+    details = [
+        TagCandidateDetail(
+            name=name,
+            rerank_score=rerank_score if index == 0 else None,
+            evidence_snippet=snippet,
+        )
+        for index, name in enumerate(tags)
+    ]
     suggestion = TagSuggestion(
         suggested_tags=tags,
+        details=details,
         value_chain_stage_code=stage,
         signal_type_code=sig_type,
         source=tag_source,
@@ -934,3 +783,56 @@ async def tag_suggestions(signal_id: uuid.UUID, db: AsyncSession = Depends(get_d
     if "signal_type_code" in protected:
         suggestion.signal_type_code = None
     return suggestion
+
+
+@router.get("/{signal_id}/sources", response_model=list[SignalSourceOut])
+async def get_signal_sources(signal_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    await _load_signal(db, signal_id)
+    rows = await list_sources(db, signal_id)
+    return [SignalSourceOut.model_validate(row) for row in rows]
+
+
+@router.post("/{signal_id}/sources", response_model=SignalSourceOut, status_code=201)
+async def post_signal_source(
+    signal_id: uuid.UUID,
+    payload: SignalSourceCreate,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_operator_identity),
+):
+    if actor.role not in {"researcher", "taxonomy_admin", "platform_admin"}:
+        raise HTTPException(403, "当前角色不能添加来源 URL")
+    signal = await _load_signal(db, signal_id)
+    if signal.evidence_status_code == "archived":
+        raise HTTPException(409, "已归档信号不能新增来源")
+    row = await add_supplementary_url(db, signal, payload.url, provenance=payload.provenance)
+    await db.commit()
+    await db.refresh(row)
+    return SignalSourceOut.model_validate(row)
+
+
+@router.post("/{signal_id}/auto-tag", response_model=SignalDetail)
+async def auto_tag_signal(
+    signal_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_operator_identity),
+    _feature: None = Depends(require_feature(SIGNAL_TAGGING)),
+):
+    if actor.role not in {"researcher", "taxonomy_admin", "platform_admin"}:
+        raise HTTPException(403, "当前角色不能写入标签建议")
+    s = await _load_signal(db, signal_id)
+    if s.evidence_status_code == "archived":
+        raise HTTPException(409, "已归档信号不能自动打标")
+    suggestion = await tag_suggestions(signal_id, db)
+    protected = set(suggestion.protected_fields)
+    data = {}
+    if suggestion.value_chain_stage_code and "value_chain_stage_code" not in protected:
+        data["value_chain_stage_code"] = suggestion.value_chain_stage_code
+    if suggestion.signal_type_code and "signal_type_code" not in protected:
+        data["signal_type_code"] = suggestion.signal_type_code
+    if data:
+        payload = SignalUpdate(**data)
+        return await update_signal(signal_id, payload, db, actor)
+    if suggestion.suggested_tags and "tech_tags" not in protected:
+        payload = TagAssignment(tag_names=suggestion.suggested_tags, expected_updated_at=s.updated_at)
+        return await set_tags(signal_id, payload, db, actor)
+    return await get_signal(signal_id, db)

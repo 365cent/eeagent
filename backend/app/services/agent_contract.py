@@ -79,6 +79,7 @@ class AgentDeps:
     run_id: uuid.UUID | None = None
     ledger: CitationLedger = field(default_factory=CitationLedger)
     approved_patch_ids: set[uuid.UUID] = field(default_factory=set)
+    instruction_addon: str = ""
 
 
 class AgentTurn(BaseModel):

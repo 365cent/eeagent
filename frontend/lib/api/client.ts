@@ -11,6 +11,29 @@ export class EeaApiError extends Error {
   }
 }
 
+export async function eeaFetchWithMeta<T>(
+  path: string,
+  init?: RequestInit,
+): Promise<{ data: T; headers: Headers }> {
+  const url = `${getEeaApiBase()}${path.startsWith('/') ? path : `/${path}`}`
+  const response = await fetch(url, {
+    ...init,
+    headers: {
+      Accept: 'application/json',
+      ...(init?.headers ?? {}),
+    },
+  })
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    throw new EeaApiError(response.status, formatEeaApiError(response.status, body, path))
+  }
+  if (response.status === 204) {
+    return { data: undefined as T, headers: response.headers }
+  }
+  const data = (await response.json()) as T
+  return { data, headers: response.headers }
+}
+
 export async function eeaFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const url = `${getEeaApiBase()}${path.startsWith('/') ? path : `/${path}`}`
   const response = await fetch(url, {
@@ -65,6 +88,22 @@ export function documentPreviewPdfUrl(documentId: string): string {
 export function documentDeckPreviewUrl(documentId: string): string {
   const base = `${getEeaApiBase()}/documents/${encodeURIComponent(documentId)}/deck-preview`
   return `${base}?eea_embed=5`
+}
+
+export async function eeaFetchBlob(path: string, init?: RequestInit): Promise<Blob> {
+  const url = `${getEeaApiBase()}${path.startsWith('/') ? path : `/${path}`}`
+  const response = await fetch(url, {
+    ...init,
+    headers: {
+      Accept: 'application/pdf,application/octet-stream,*/*',
+      ...(init?.headers ?? {}),
+    },
+  })
+  if (!response.ok) {
+    const body = await response.text().catch(() => '')
+    throw new EeaApiError(response.status, formatEeaApiError(response.status, body, path))
+  }
+  return response.blob()
 }
 
 export function toQueryString(params: Record<string, string | number | boolean | undefined | null>): string {

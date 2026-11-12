@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, computed_field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, computed_field, field_serializer, field_validator
 
 from app.services.refcodes import codes, normalize
 
@@ -129,6 +129,20 @@ class SignalCreate(RefCodeValidated):
     body_text: str | None = None  # REQ-SIG-11 pasted-body fallback
 
 
+class SignalSourceOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+    id: uuid.UUID
+    url: str
+    url_normalized: str
+    is_primary: bool
+    provenance: str | None
+
+
+class SignalSourceCreate(BaseModel):
+    url: str = Field(min_length=1)
+    provenance: str | None = None
+
+
 class SignalUpdate(RefCodeValidated):
     title: str | None = None
     value_chain_stage_code: str | None = None
@@ -144,6 +158,7 @@ class SignalUpdate(RefCodeValidated):
 
 class SignalBase(BaseModel):
     model_config = ConfigDict(from_attributes=True)
+
     id: uuid.UUID
     title: str
     url: str
@@ -151,6 +166,8 @@ class SignalBase(BaseModel):
     channel_code: str
     publisher: str | None
     published_at: datetime | None
+    event_date_text: str | None = None
+    event_date_precision: str | None = None
     value_chain_stage_code: str | None
     signal_type_code: str | None
     evolution_node_code: str | None
@@ -162,6 +179,17 @@ class SignalBase(BaseModel):
     captured_at: datetime | None
     created_at: datetime
     updated_at: datetime
+
+    @field_serializer("published_at", "captured_at", when_used="json")
+    def _serialize_event_times(self, value: datetime | None) -> str | None:
+        if value is None:
+            return None
+        from zoneinfo import ZoneInfo
+
+        tz_cn = ZoneInfo("Asia/Shanghai")
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=tz_cn)
+        return value.astimezone(tz_cn).isoformat()
 
 
 class SignalOut(SignalBase):
@@ -247,6 +275,19 @@ class DocumentDetail(DocumentRawOut):
     ingested_at: datetime | None = None
     has_canonical: bool = False
     ingest_error: str | None = None
+
+
+class DocumentFigureOut(BaseModel):
+    figure_index: int
+    caption: str | None = None
+    review_status: str
+
+
+class DocumentKeywordOut(BaseModel):
+    term: str
+    score: float | None = None
+    chunk_id: int | None = None
+    source: str = "heuristic"
 
 
 class AssistantChatTurn(BaseModel):
@@ -421,6 +462,7 @@ class FunctionCreate(RefCodeValidated):
 
 
 class FunctionUpdate(RefCodeValidated):
+    expected_updated_at: datetime | None = None
     name: str | None = None
     value_chain_stage_code: str | None = None
     forward_trace: dict | None = None
@@ -641,8 +683,16 @@ class AuditOut(BaseModel):
     corrected_at: datetime
 
 
+class TagCandidateDetail(BaseModel):
+    name: str
+    frequency: int | None = None
+    rerank_score: float | None = None
+    evidence_snippet: str | None = None
+
+
 class TagSuggestion(BaseModel):
     suggested_tags: list[str]
+    details: list[TagCandidateDetail] = Field(default_factory=list)
     value_chain_stage_code: str | None = None
     signal_type_code: str | None = None
     source: str = "jieba-frequency"
@@ -698,6 +748,7 @@ class CaptureJobOut(BaseModel):
     started_at: datetime | None = None
     heartbeat_at: datetime | None = None
     finished_at: datetime | None = None
+    cancel_requested_at: datetime | None = None
     signal_id: uuid.UUID | None = None
     error: str | None = None
     result: CaptureResult | None = None
@@ -875,7 +926,7 @@ class TraceChain(BaseModel):
         description="Persisted DemandPoint.cross_validation.conclusion, if present"
     )
     function_published: bool | None = Field(description="Persisted VehicleFunction.published")
-    basis_freshness: Literal["unknown_untracked"] = Field(
+    basis_freshness: Literal["fresh", "stale", "unconfirmed", "unknown_untracked"] = Field(
         description=(
             "Unknown: DemandPoint has no updated_at/confirmed_at baseline, so the API cannot "
             "reliably determine whether the evidence basis changed after review or assessment"

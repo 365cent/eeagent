@@ -11,8 +11,8 @@ from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.v1.capture import _submission_fingerprint
-from app.api.v1.signals import _infer_channel_code
+from app.domains.capture.submission import _submission_fingerprint
+from app.domains.evidence.channel import _infer_channel_code
 from app.models.models import CaptureJob, PanoramaImportBatch, PanoramaImportUrl
 from app.services.objectstore import save_bytes, sha256_bytes
 from app.services.tagging import normalize_url

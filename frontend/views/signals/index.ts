@@ -1,1 +1,2 @@
-export { SignalsView, SignalRowActions } from '@/views/dashboard/workspace'
+export { SignalsView } from './signals-view'
+export { SignalRowActions } from '@/features/evidence/signal-columns'

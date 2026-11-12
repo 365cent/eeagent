@@ -1,4 +1,3 @@
-import { Analytics } from '@vercel/analytics/next'
 import { AntdRegistry } from '@ant-design/nextjs-registry'
 import type { Metadata, Viewport } from 'next'
 import 'antd/dist/reset.css'
@@ -6,9 +5,8 @@ import './globals.css'
 import './dashboard.css'
 
 export const metadata: Metadata = {
-  title: 'EEA 前瞻技术扫描平台 | DESAY SV',
-  description: '德赛西威 EEA 前瞻技术扫描平台研究总览与战略研判工作台',
-  generator: 'v0.app',
+  title: 'EEA 前瞻技术扫描平台',
+  description: 'EEA 前瞻技术扫描平台研究总览与战略研判工作台',
   applicationName: 'EEA 前瞻技术扫描平台',
   formatDetection: { telephone: false },
   icons: {
@@ -47,7 +45,6 @@ export default function RootLayout({
     <html lang="zh-CN">
       <body className="antialiased" suppressHydrationWarning>
         <AntdRegistry>{children}</AntdRegistry>
-        {process.env.NODE_ENV === 'production' && <Analytics />}
       </body>
     </html>
   )

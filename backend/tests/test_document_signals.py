@@ -31,7 +31,7 @@ async def _upload_document(client, monkeypatch, canonical_md: str) -> dict:
             vision_model=None,
         )
 
-    monkeypatch.setattr("app.api.v1.documents.ingest_document", fake_ingest)
+    monkeypatch.setattr("app.domains.evidence.document_pipeline.ingest_document", fake_ingest)
     r = await client.post(
         "/api/v1/documents/raw",
         files={"file": ("QCC-Figma-Compose-工具链.pptx", b"deck-bytes", "application/octet-stream")},

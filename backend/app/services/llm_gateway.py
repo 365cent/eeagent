@@ -24,6 +24,8 @@ import httpx
 logger = logging.getLogger(__name__)
 
 from app.core.config import get_settings
+from app.platform.http import open_async_http_client
+from app.services.llm_usage import log_llm_call, usage_from_chat_payload
 
 _CACHE_TTL_SECONDS = 600.0
 
@@ -37,10 +39,19 @@ class LLMNoModelError(RuntimeError):
 
 
 class LLMUpstreamError(RuntimeError):
-    def __init__(self, status: int, detail: str) -> None:
+    def __init__(
+        self,
+        status: int,
+        detail: str,
+        *,
+        usage: dict | None = None,
+        served_model: str | None = None,
+    ) -> None:
         super().__init__(detail)
         self.status = status
         self.detail = detail
+        self.usage = usage if isinstance(usage, dict) else None
+        self.served_model = served_model if isinstance(served_model, str) and served_model else None
 
 
 # Non-chat endpoints the gateway also lists: embeddings, rerankers, OCR, image
@@ -98,7 +109,7 @@ async def list_models(*, timeout: float = 15.0) -> list[str]:
     base = settings.llm_base_url_normalized
     if not base:
         raise LLMNotConfiguredError("LLM_BASE_URL must be set in backend/.env")
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with open_async_http_client(timeout=timeout) as client:
         resp = await client.get(f"{base}/models", headers=_headers())
     if resp.status_code >= 400:
         raise LLMUpstreamError(resp.status_code, resp.text[:300] or resp.reason_phrase)
@@ -115,11 +126,14 @@ def chat_candidates(models: list[str]) -> list[str]:
     return [m for m in models if not _NON_CHAT.search(m)]
 
 
-def _upstream_retryable(exc: LLMUpstreamError) -> bool:
+def upstream_retryable(exc: LLMUpstreamError) -> bool:
     if exc.status in (408, 429, 500, 502, 503, 504, 554):
         return True
     detail = exc.detail.lower()
     return "timeout" in detail or "edgeone" in detail
+
+
+_upstream_retryable = upstream_retryable  # backward compat for existing imports
 
 
 def upstream_from_pydantic_ai(exc: BaseException) -> LLMUpstreamError:
@@ -169,7 +183,7 @@ async def _probe_chat(model: str, *, timeout: float = 20.0) -> bool:
         "max_tokens": 1,
     }
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
+        async with open_async_http_client(timeout=timeout) as client:
             resp = await client.post(
                 f"{settings.llm_base_url_normalized}/chat/completions",
                 headers=_headers(),
@@ -230,6 +244,20 @@ async def resolve_vision_model(*, force: bool = False) -> str:
     return _remember("vision", model)
 
 
+def _usage_dict(data: object) -> dict | None:
+    if isinstance(data, dict) and isinstance(data.get("usage"), dict):
+        return data["usage"]
+    return None
+
+
+def _served_model(data: object, requested: str) -> str:
+    if isinstance(data, dict):
+        reported = data.get("model")
+        if isinstance(reported, str) and reported.strip():
+            return reported
+    return requested
+
+
 async def _post_chat_completion(
     *,
     base: str,
@@ -238,14 +266,14 @@ async def _post_chat_completion(
     temperature: float,
     max_tokens: int,
     timeout: float,
-) -> tuple[str, str]:
+) -> tuple[str, str, dict | None]:
     payload = {
         "model": model,
         "messages": messages,
         "temperature": temperature,
         "max_tokens": max_tokens,
     }
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with open_async_http_client(timeout=timeout) as client:
         resp = await client.post(
             f"{base}/chat/completions", headers=_headers(), json=payload
         )
@@ -257,16 +285,35 @@ async def _post_chat_completion(
                 resp.status_code,
                 body[:200] if body else resp.reason_phrase,
             )
-            raise LLMUpstreamError(resp.status_code, body or resp.reason_phrase)
-        data = resp.json()
+            parsed: object = None
+            try:
+                parsed = resp.json()
+            except ValueError:
+                parsed = None
+            raise LLMUpstreamError(
+                resp.status_code,
+                body or resp.reason_phrase,
+                usage=_usage_dict(parsed),
+                served_model=_served_model(parsed, "") or None,
+            )
+        try:
+            data = resp.json()
+        except ValueError as exc:
+            raise LLMUpstreamError(502, "LLM response was not JSON") from exc
 
+    usage = _usage_dict(data)
+    served = _served_model(data, model)
     try:
         content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError) as exc:
-        raise LLMUpstreamError(502, f"unexpected LLM response shape: {data!r}") from exc
+        raise LLMUpstreamError(
+            502, "unexpected LLM response shape", usage=usage, served_model=served
+        ) from exc
     if not isinstance(content, str) or not content.strip():
-        raise LLMUpstreamError(502, "empty assistant content from LLM")
-    return content.strip(), str(data.get("model") or model)
+        raise LLMUpstreamError(
+            502, "empty assistant content from LLM", usage=usage, served_model=served
+        )
+    return content.strip(), served, usage
 
 
 async def chat_completion(
@@ -275,8 +322,14 @@ async def chat_completion(
     temperature: float = 0.3,
     max_tokens: int = 1200,
     max_model_attempts: int = 1,
+    task: str = "chat",
+    caller_attempt: int = 1,
 ) -> tuple[str, str]:
-    """Return (assistant_text, model_name) via ``LLM_BASE_URL`` OpenAI chat API."""
+    """Return (assistant_text, served_model) via ``LLM_BASE_URL`` OpenAI chat API.
+
+    Each model attempt logs provider usage when the response includes it.
+    The request body stays model, messages, temperature, and max_tokens.
+    """
     settings = get_settings()
     base = settings.llm_base_url_normalized
     if not base:
@@ -287,9 +340,10 @@ async def chat_completion(
 
     last: LLMUpstreamError | None = None
     for idx, model in enumerate(chain):
+        started = time.perf_counter()
         try:
             async with _chat_sem:
-                return await _post_chat_completion(
+                text, served, raw_usage = await _post_chat_completion(
                     base=base,
                     model=model,
                     messages=messages,
@@ -298,6 +352,21 @@ async def chat_completion(
                     timeout=timeout,
                 )
         except LLMUpstreamError as exc:
+            latency_ms = int((time.perf_counter() - started) * 1000)
+            log_llm_call(
+                usage_from_chat_payload(
+                    exc.usage,
+                    task=task,
+                    requested_model=model,
+                    served_model=exc.served_model or model,
+                    model_attempt=idx + 1,
+                    caller_attempt=caller_attempt,
+                    fallback=idx > 0,
+                    latency_ms=latency_ms,
+                    http_status=exc.status,
+                    model_requests=1 if exc.usage else None,
+                )
+            )
             last = exc
             if idx + 1 >= len(chain) or not _upstream_retryable(exc):
                 raise
@@ -307,6 +376,21 @@ async def chat_completion(
                 model,
                 exc.status,
             )
+            continue
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        log_llm_call(
+            usage_from_chat_payload(
+                raw_usage,
+                task=task,
+                requested_model=model,
+                served_model=served,
+                model_attempt=idx + 1,
+                caller_attempt=caller_attempt,
+                fallback=idx > 0,
+                latency_ms=latency_ms,
+            )
+        )
+        return text, served
     if last is not None:
         raise last
     raise LLMNoModelError("no chat model attempts remain")

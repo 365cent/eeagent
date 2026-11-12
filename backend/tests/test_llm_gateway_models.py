@@ -9,7 +9,7 @@ import app.services.llm_gateway as gw
 from app.core.config import get_settings
 from app.services import semantic_api
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.no_db]
 
 MODELS = [
     "Qwen3-Embedding-8B",
@@ -115,6 +115,8 @@ async def test_resolve_vision_model_uses_gateway_list(monkeypatch):
 
 
 async def test_maas_embedding_and_rerank(monkeypatch):
+    from contextlib import asynccontextmanager
+
     monkeypatch.setenv("MAAS_API_BASE_URL", "https://maas.example.com/v2")
     monkeypatch.setenv("MAAS_API_KEY", "test-key")
     get_settings.cache_clear()
@@ -140,6 +142,10 @@ async def test_maas_embedding_and_rerank(monkeypatch):
                 )
             raise AssertionError(url)
 
-    monkeypatch.setattr(semantic_api.httpx, "AsyncClient", FakeClient)
+    @asynccontextmanager
+    async def fake_open_client(**_kwargs):
+        yield FakeClient()
+
+    monkeypatch.setattr(semantic_api, "open_async_http_client", fake_open_client)
     assert await semantic_api.create_embeddings(["hello"]) == [[0.1, 0.2]]
     assert await semantic_api.rerank("q", ["a"]) == [(0, 0.5)]

@@ -16,6 +16,7 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from app.services.capture_jobs import worker_loop
+from app.db.base import engine
 
 
 async def _run() -> None:
@@ -27,7 +28,10 @@ async def _run() -> None:
         except (NotImplementedError, RuntimeError):
             # Windows development can stop the process with the default handler.
             pass
-    await worker_loop(stop_event)
+    try:
+        await worker_loop(stop_event)
+    finally:
+        await engine.dispose()
 
 
 if __name__ == "__main__":

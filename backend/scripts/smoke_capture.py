@@ -1,7 +1,7 @@
 """End-to-end smoke test for the W2 capture pipeline against the running dev API.
 
 Usage: uv run python scripts/smoke_capture.py
-Requires the stack up: uv run python scripts/start_api.py
+Requires the stack up: uv run python scripts/dev.py (foreground) or scripts/start_api.py (background)
 
 Posts one clearly-marked smoke signal (url example.com/eea-wf-smoke) via
 POST /api/v1/signals/capture, reads body and archive back, and uploads one

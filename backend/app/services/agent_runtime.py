@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.identity import OperatorIdentity
 from app.models.agent_models import AgentMessage, AgentRun, AgentSession
 from app.services.agent_events import append_event
+from app.services.agent_instructions import build_instruction_addon
 from app.services.agent_workflow import (
     build_eea_agent,
     deps_for_session,
@@ -63,16 +64,35 @@ async def execute_user_message(
         session.page_context,
         run_id=run.id,
     )
+    deps.instruction_addon = await build_instruction_addon(db, deps)
+
+    stream_buffer: list[tuple[str, dict]] = []
+    stream_events_persisted = False
 
     async def sink(event_type: str, payload: dict) -> None:
-        await append_event(db, session=session, event_type=event_type, payload=payload, run_id=run.id)
+        stream_buffer.append((event_type, payload))
+
+    async def persist_buffered_stream_events() -> None:
+        nonlocal stream_events_persisted
+        if stream_events_persisted or not stream_buffer:
+            return
+        for event_type, payload in stream_buffer:
+            await append_event(
+                db,
+                session=session,
+                event_type=event_type,
+                payload=payload,
+                run_id=run.id,
+            )
+        stream_events_persisted = True
+        stream_buffer.clear()
 
     status = "completed"
     output_payload: dict | None = None
     error: str | None = None
     try:
         agent = await build_eea_agent()
-        output, messages = await run_agent_turn(
+        output, messages, usage = await run_agent_turn(
             agent,
             user_message=message,
             deps=deps,
@@ -100,8 +120,10 @@ async def execute_user_message(
             )
         )
         run.output_json = output_payload
+        run.usage_json = usage
         run.status = status
         run.finished_at = datetime.now(timezone.utc)
+        await persist_buffered_stream_events()
         await append_event(
             db,
             session=session,
@@ -138,6 +160,7 @@ async def execute_user_message(
         error = "Agent 运行失败"
         run.status = "failed"
         run.error_message = str(exc)
+        await persist_buffered_stream_events()
         await append_event(
             db,
             session=session,

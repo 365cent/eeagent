@@ -59,6 +59,14 @@ class Settings(BaseSettings):
     agent_patch_ttl_hours: int = Field(default=24, ge=1, le=168)
     agent_rag_chunk_size: int = Field(default=900, ge=200, le=4000)
 
+    # LaunchDarkly server-side SDK (Test/Production SDK key from environment settings).
+    launchdarkly_sdk_key: str = ""
+    skills_dir: str = ""
+    capture_bearer_tokens: str = Field(
+        default="",
+        description="Comma-separated subject:token pairs for capture client Bearer auth",
+    )
+
     @property
     def database_url(self) -> str:
         return (

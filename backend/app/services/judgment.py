@@ -80,6 +80,32 @@ def rank_theme_overlaps(
     return sorted(overlaps.items(), key=lambda item: (-item[1], str(item[0])))
 
 
+def aggregation_structured_basis(tag_names: set[str]) -> dict[str, str | None]:
+    """Wave-1 structured rationale for theme aggregation (REQ-SIG-08 / BE-05)."""
+    ordered = sorted(tag_names, key=lambda name: (-len(name), name))
+    return {
+        "tech_object": ordered[0] if ordered else None,
+        "underlying_capability": ordered[1] if len(ordered) > 1 else None,
+        "change_direction": ordered[2] if len(ordered) > 2 else None,
+    }
+
+
+def structured_basis_consistent(
+    theme_display_tags: set[str], tag_names: set[str]
+) -> tuple[bool, str]:
+    matched = sorted(
+        [
+            tag
+            for tag in tag_names
+            if any(_tags_match(tag, theme_tag) for theme_tag in theme_display_tags)
+        ],
+        key=lambda name: (-len(name), name),
+    )
+    if len(matched) < 2:
+        return False, "归集依据不足：需至少两个与主题一致的技术标签"
+    return True, ""
+
+
 def select_best_theme(
     theme_tags: dict[uuid.UUID, set[str]], suggested_tags: set[str]
 ) -> tuple[uuid.UUID | None, str]:

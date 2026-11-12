@@ -76,6 +76,13 @@ class DemandPoint(Base):
     time_series: Mapped[list | None] = mapped_column(JSONB)
     review_status: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+    confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    confirmed_by_subject: Mapped[str | None] = mapped_column(Text)
+    low_freq_strong_signal: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    low_freq_strong_signal_reason: Mapped[str | None] = mapped_column(Text)
 
     functions: Mapped[list["VehicleFunction"]] = relationship(back_populates="demand_point")
 
@@ -119,6 +126,8 @@ class Signal(Base):
         UUID(as_uuid=True), ForeignKey("eea_document.id", name="fk_eea_signal_document")
     )
     captured_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    event_date_text: Mapped[str | None] = mapped_column(Text)
+    event_date_precision: Mapped[str | None] = mapped_column(Text)
     # Optional idempotency receipt for POST /capture. Legacy signal routes leave
     # both fields NULL; a capture key is bound to one canonical request digest.
     capture_submission_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True))
@@ -133,6 +142,29 @@ class Signal(Base):
     tags: Mapped[list["SignalTag"]] = relationship(
         back_populates="signal", cascade="all, delete-orphan"
     )
+    sources: Mapped[list["SignalSource"]] = relationship(
+        back_populates="signal", cascade="all, delete-orphan"
+    )
+
+
+class SignalSource(Base):
+    __tablename__ = "eea_signal_source"
+    __table_args__ = (
+        UniqueConstraint("signal_id", "url_normalized", name="uq_signal_source_url"),
+        Index("eea_signal_source_signal_idx", "signal_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    signal_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eea_signal.id", ondelete="CASCADE"), nullable=False
+    )
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    url_normalized: Mapped[str] = mapped_column(Text, nullable=False)
+    is_primary: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    provenance: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    signal: Mapped[Signal] = relationship(back_populates="sources")
 
 
 class CaptureJob(Base):
@@ -186,6 +218,8 @@ class CaptureJob(Base):
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    owner_subject: Mapped[str | None] = mapped_column(Text)
+    cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class PanoramaImportBatch(Base):
@@ -326,6 +360,57 @@ class CorrectionAudit(Base):
     operator_subject: Mapped[str] = mapped_column(Text, nullable=False)
     operator_role: Mapped[str] = mapped_column(Text, nullable=False)
     corrected_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    reason: Mapped[str | None] = mapped_column(Text)
+    model_version: Mapped[str | None] = mapped_column(Text)
+    rule_version: Mapped[str | None] = mapped_column(Text)
+    skill_version: Mapped[str | None] = mapped_column(Text)
+    score_source: Mapped[str | None] = mapped_column(Text)
+
+
+class EmbeddingCache(Base):
+    __tablename__ = "eea_embedding_cache"
+
+    content_sha256: Mapped[str] = mapped_column(CHAR(64), primary_key=True)
+    model_version: Mapped[str] = mapped_column(Text, primary_key=True)
+    vocab_fingerprint: Mapped[str] = mapped_column(CHAR(64), primary_key=True)
+    vector_json: Mapped[list] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class StoredObjectOrphan(Base):
+    __tablename__ = "eea_stored_object_orphan"
+
+    object_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ChainReport(Base):
+    __tablename__ = "eea_chain_report"
+    __table_args__ = (
+        CheckConstraint(
+            "(demand_point_id IS NOT NULL) <> (landing_point_id IS NOT NULL)",
+            name="ck_chain_report_target",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    demand_point_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eea_demand_point.id")
+    )
+    landing_point_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eea_tech_landing_point.id")
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="queued")
+    format: Mapped[str] = mapped_column(Text, nullable=False)
+    object_key: Mapped[str | None] = mapped_column(Text)
+    error: Mapped[str | None] = mapped_column(Text)
+    data_snapshot_json: Mapped[dict | None] = mapped_column(JSONB)
+    requested_by_subject: Mapped[str] = mapped_column(Text, nullable=False)
+    requested_by_role: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class VehicleFunction(Base):
@@ -346,6 +431,9 @@ class VehicleFunction(Base):
     l2_l4_difference: Mapped[str | None] = mapped_column(Text)
     published: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
     demand_point: Mapped[DemandPoint] = relationship(back_populates="functions")
     landing_points: Mapped[list["TechLandingPoint"]] = relationship(

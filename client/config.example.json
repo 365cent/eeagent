@@ -14,5 +14,8 @@
   "interactive_timeout_sec": 180,
   "min_text_chars": 10,
   "capture_archive": "extension",
-  "singlefile_extension_path": ""
+  "singlefile_extension_path": "",
+  "ca_cert_path": "",
+  "auth_token_env": "EEA_CAPTURE_TOKEN",
+  "auth_token_file": ""
 }

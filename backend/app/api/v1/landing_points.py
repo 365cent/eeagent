@@ -7,20 +7,19 @@ from sqlalchemy.orm import selectinload
 
 from app.core.identity import OperatorIdentity, get_operator_identity
 from app.db.base import get_db
+from app.platform.launchdarkly import TECHNOLOGY_DECOMPOSITION, require_feature, track_workflow_success
 from app.models.models import DemandPoint, DeploymentStandard, TechLandingPoint, VehicleFunction, Vocab
 from app.schemas.schemas import LandingPointCreate, LandingPointOut, LandingPointUpdate
 from app.services.audit import record_correction
 from app.services.demand_validation import validate_confirmed_demand
+from app.domains.landing.serialization import landing_point_out as _to_out
 from app.services.tagging import get_or_create_vocab
 
-router = APIRouter(prefix="/landing-points", tags=["landing-points"])
-
-
-def _to_out(lp: TechLandingPoint) -> LandingPointOut:
-    out = LandingPointOut.model_validate(lp)
-    out.domain_name = lp.domain.name if lp.domain else ""
-    out.standard_count = len(lp.standards)
-    return out
+router = APIRouter(
+    prefix="/landing-points",
+    tags=["landing-points"],
+    dependencies=[Depends(require_feature(TECHNOLOGY_DECOMPOSITION))],
+)
 
 
 async def _get_landing_point(db: AsyncSession, lp_id: uuid.UUID) -> TechLandingPoint | None:
@@ -78,6 +77,7 @@ async def create_landing_point(
     # re-select with eager loads: the fresh instance has unloaded relationships,
     # and touching them after commit would raise MissingGreenlet in the async session
     lp = await _get_landing_point(db, lp.id)
+    track_workflow_success(TECHNOLOGY_DECOMPOSITION)
     return _to_out(lp)
 
 

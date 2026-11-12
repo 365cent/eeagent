@@ -16,7 +16,7 @@ import type {
 } from '@/lib/api/types'
 import { formatApiDate } from '@/lib/eea-mappers'
 import { PageHeader } from '@/components/shared/page-header'
-import { useOverviewStats } from '@/hooks/use-eea-queries'
+import { eeaQueryKeys, useOverviewStats } from '@/hooks/use-eea-queries'
 
 const { Paragraph, Text } = Typography
 
@@ -80,8 +80,8 @@ const FUNNEL_STAGES: ReadonlyArray<{ number: FunnelStage; title: string; summary
 
 const CLASSIFICATIONS: StrategyClassification[] = ['前瞻布局', '短期可落地', '产业投资/生态合作']
 
-const funnelQueryKey = (landingPointId: string) => ['eea', 'strategy', 'funnel', landingPointId] as const
-const historyQueryKey = (landingPointId: string) => ['eea', 'strategy', 'history', landingPointId] as const
+const funnelQueryKey = eeaQueryKeys.strategyFunnel
+const historyQueryKey = eeaQueryKeys.strategyHistory
 
 function syncScanForm(form: FormInstance<ScanForm>, funnel: StrategyFunnelOut) {
   form.setFieldsValue({

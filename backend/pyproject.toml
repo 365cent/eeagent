@@ -3,7 +3,7 @@ name = "eea-backend"
 version = "0.1.0"
 description = "EEA 前瞻技术扫描平台后端（FastAPI + PostgreSQL）"
 authors = [
-    { name = "Jianqi Ding", email = "dingjianqi@desaysv.com" }
+    { name = "EEA Contributors" }
 ]
 requires-python = ">=3.12"
 dependencies = [
@@ -13,7 +13,10 @@ dependencies = [
     "html2text>=2024.2.26",
     "httpx>=0.28.1",
     "jieba>=0.42.1",
+    "launchdarkly-server-sdk>=9.20.0",
     "markitdown[all]>=0.1.9",
+    "numpy>=2.0.0",
+    "pyyaml>=6.0.2",
     "openpyxl>=3.1.5",
     "psycopg[binary]>=3.3.6",
     "pydantic-ai-slim[openai]>=2.63",
@@ -22,6 +25,7 @@ dependencies = [
     "python-pptx>=1.0.2",
     "sqlalchemy[asyncio]>=2.1.6",
     "uvicorn[standard]>=0.54.0",
+    "reportlab>=5.1.0",
 ]
 
 [build-system]
@@ -34,10 +38,36 @@ packages = ["app"]
 [dependency-groups]
 dev = [
     "anyio>=4.15.1",
+    "import-linter>=2.10",
     "pytest>=9.1.1",
 ]
+
+[tool.importlinter]
+root_package = "app"
+
+[[tool.importlinter.contracts]]
+name = "Platform must not import domains or API"
+type = "forbidden"
+source_modules = ["app.platform"]
+forbidden_modules = ["app.domains", "app.api"]
+
+[[tool.importlinter.contracts]]
+name = "Services must not import API"
+type = "forbidden"
+source_modules = ["app.services"]
+forbidden_modules = ["app.api"]
+
+[[tool.importlinter.contracts]]
+name = "Domains must not import API"
+type = "forbidden"
+source_modules = ["app.domains"]
+forbidden_modules = ["app.api"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
-markers = ["live_maas: hits real MaaS when MAAS_API_* is set in .env"]
+markers = [
+    "live_maas: hits real MaaS when MAAS_API_* is set in .env",
+    "no_db: no eea_test lock, migrate, or per-test TRUNCATE",
+    "db: integration test using eea_test (default)",
+]

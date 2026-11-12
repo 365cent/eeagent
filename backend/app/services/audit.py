@@ -12,8 +12,16 @@ async def record_correction(
     old_value,
     new_value,
     actor: OperatorIdentity,
+    *,
+    reason: str | None = None,
+    model_version: str | None = None,
+    rule_version: str | None = None,
+    skill_version: str | None = None,
+    score_source: str | None = None,
 ) -> None:
     """REQ-RULE-02: 人工纠偏必须留痕。"""
+    if old_value == new_value:
+        return
     db.add(
         CorrectionAudit(
             entity_type=entity_type,
@@ -25,5 +33,10 @@ async def record_correction(
             new_value=new_value,
             operator_subject=actor.subject,
             operator_role=actor.role,
+            reason=reason,
+            model_version=model_version,
+            rule_version=rule_version,
+            skill_version=skill_version,
+            score_source=score_source,
         )
     )

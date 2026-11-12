@@ -2,6 +2,8 @@
 
 import pytest
 
+pytestmark = pytest.mark.no_db
+
 from app.services.useragent import simplify_ua
 
 CASES = [

@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import time
 import uuid
 from typing import Any, Awaitable, Callable
 
-from pydantic_ai import Agent, DeferredToolRequests, ModelRetry
+from pydantic_ai import Agent, DeferredToolRequests, ModelRetry, RunContext
 from pydantic_ai.messages import ModelMessagesTypeAdapter
 from pydantic_ai.models.openai import OpenAIChatModel
 
@@ -29,6 +30,12 @@ from app.services.agent_tools import (
     suggest_theme_membership_tool,
 )
 from app.services.llm_gateway import LLMNotConfiguredError, resolve_chat_model
+from app.services.llm_usage import (
+    http_status_of,
+    log_llm_call,
+    usage_from_agent_result,
+    usage_without_result,
+)
 from app.services.pydantic_agent import build_model
 from app.core.config import get_settings
 
@@ -57,6 +64,11 @@ async def build_eea_agent(*, model: OpenAIChatModel | None = None) -> Agent[Agen
     agent.tool(propose_db_patch_tool, name="propose_db_patch")
     agent.tool(apply_confirmed_patch_tool, name="apply_confirmed_patch", requires_approval=True)
     agent.tool(draft_trace_report_tool, name="draft_trace_report")
+
+    @agent.instructions
+    def runtime_context(ctx: RunContext[AgentDeps]) -> str:
+        """Trusted server-side context preloaded on AgentDeps before each run."""
+        return ctx.deps.instruction_addon
 
     @agent.output_validator
     async def _validate_turn(ctx, output: AgentRunOutput) -> AgentRunOutput:
@@ -96,7 +108,11 @@ async def run_agent_turn(
     message_history: list[Any] | None = None,
     deferred_tool_results=None,
     event_sink: EventSink | None = None,
-) -> tuple[AgentRunOutput, list[Any]]:
+) -> tuple[AgentRunOutput, list[Any], dict[str, Any] | None]:
+    model = getattr(agent, "model", None)
+    requested_model = str(getattr(model, "model_name", None) or "")
+    started = time.perf_counter()
+
     async def handler(ctx, event) -> None:
         if event_sink is None:
             return
@@ -107,13 +123,31 @@ async def run_agent_turn(
         if tool_name:
             await event_sink("tool.call", {"tool": tool_name})
 
-    result = await agent.run(
-        user_message,
-        deps=deps,
-        message_history=message_history or [],
-        deferred_tool_results=deferred_tool_results,
-        event_stream_handler=handler,
+    try:
+        result = await agent.run(
+            user_message,
+            deps=deps,
+            message_history=message_history or [],
+            deferred_tool_results=deferred_tool_results,
+            event_stream_handler=handler if event_sink is not None else None,
+        )
+    except Exception as exc:
+        log_llm_call(
+            usage_without_result(
+                task="durable_agent",
+                requested_model=requested_model,
+                latency_ms=int((time.perf_counter() - started) * 1000),
+                http_status=http_status_of(exc),
+            )
+        )
+        raise
+    usage = usage_from_agent_result(
+        result,
+        task="durable_agent",
+        requested_model=requested_model,
+        latency_ms=int((time.perf_counter() - started) * 1000),
     )
+    log_llm_call(usage)
 
     output = result.output
     if isinstance(output, AgentTurn) and event_sink:
@@ -127,7 +161,7 @@ async def run_agent_turn(
                 "approval.required",
                 {"tool": call.tool_name, "tool_call_id": call.tool_call_id},
             )
-    return output, result.all_messages()
+    return output, result.all_messages(), usage.as_dict()
 
 
 def deps_for_session(

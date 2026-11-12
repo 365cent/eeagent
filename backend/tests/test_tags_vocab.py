@@ -88,7 +88,7 @@ async def test_tag_suggestions_from_signal_text(client):
     r = await client.get(f"/api/v1/signals/{sig['id']}/tag-suggestions")
     assert r.status_code == 200
     body = r.json()
-    assert body["source"] in ("jieba-frequency", "embedding-rerank")
+    assert body["source"] in ("jieba-frequency", "embedding-rerank", "llm-rerank-refine")
     assert len(body["suggested_tags"]) >= 1
     if body["source"] == "embedding-rerank":
         assert body.get("rerank_score") is not None

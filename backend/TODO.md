@@ -14,6 +14,7 @@
 
 - [ ] P0 · 部分实现 · 依赖 OPS-01（生产初始化）、BE-03（身份接入后收紧权限）。
 - 已交付幂等和持久任务首个实现切片；实现与检查证据见[交付记录](../docs/DELIVERY-RECORD.md#be-01--capture-idempotency-and-durable-worker-slice)。BE-01 验收仍未完成。
+- 摄取和结果查询迁入共享 evidence 领域；仍需验证完整的事务边界、失败恢复及各入口行为一致性。
 - 来源：Word §2.1、表A；REQ-SIG-01/02/07/10/11；WBS 1.3.2。
 - 入口：[capture.py](app/api/v1/capture.py)、[signals.py](app/api/v1/signals.py)、[documents.py](app/api/v1/documents.py)、[objectstore.py](app/services/objectstore.py)。
 - 把路由之间互调私有函数改为共享摄取服务，统一空文件、MIME/扩展名、大小限制、渠道识别、来源 URL、文档哈希和异常处理。
@@ -24,7 +25,7 @@
 - `GET /capture/jobs/{id}` 返回当前状态和成功结果；`POST .../retry` 重排失败任务，`POST .../cancel` 仅取消尚未领取的任务。自动重试有次数上限和退避；同一 submission ID 不会重复创建信号。
 - 失败保留 URL、时间和原因；恢复后复用任务关联。重复文档复用 blob，信号创建的幂等范围须单独按 submission_id 控制。
 - 对象写入采用临时文件加原子替换；阻止对象键路径越界；数据库提交失败后保留可清理孤立对象记录，不能误报成功。
-- 剩余：运行中任务暂不支持协作式取消；孤立对象与终态任务清理策略未实现；任务暂未绑定可信用户，跨用户查询/操作须等 OPS-03；Linux 数据库迁移、worker 重启及端到端证据未验证。
+- 剩余：孤立对象与终态任务清理策略（`orphan_maintenance` 仅报告/可选清理入口）；任务暂未绑定可信用户，跨用户查询/操作须等 OPS-03；Linux 数据库迁移、worker 重启及端到端证据未验证。运行中任务协作式取消已实现（`cancel_requested_at` + worker 检查）。
 - 剩余验收：URL/HTML/文档/粘贴统一留存；空、超限、错误 MIME、幂等冲突/并发、进程中断和重试；前端与 Go 客户端必须显示真实任务状态和最终结果。生产公网页面必须由用户侧浏览器采集上传，生产环境不调用服务端 `fetch_url()`。
 
 ## BE-02 证据生命周期与查询
@@ -32,7 +33,7 @@
 - [ ] P0 · 部分实现 · 依赖 BE-01。
 - 来源：Word §2.1–2.2、图2-1-1/2-1-2/2-2；REQ-SIG-03…11；WBS 1.3.2。
 - 入口：[signals.py](app/api/v1/signals.py)、[schemas.py](app/schemas/schemas.py)、[html_snapshot.py](app/services/html_snapshot.py)。
-- 统一 metadata、采集时间、实际事件时间与发布时间语义；未知日期不补成当天。保留原文、原链接与派生正文；正文修补留版本/审计。
+- 统一 metadata、采集时间、实际事件时间与发布时间语义；未知日期不补成当天（`event_date_text`/`event_date_precision` 已在共享 `create_signal_record` 写入）。保留原文、原链接与派生正文；正文修补留版本/审计。
 - 在服务端约束五种证据状态及两种演进节点；没有可读且已落盘的快照不能标已留存。待人工复核表示已有证据但分类/归集未确认。
 - 完成检索标题、发布主体、摘要与技术标签，以及来源/渠道/环节/状态/主题筛选。保留列表兼容形状，通过响应总数头提供分页总量。
 - 归档后禁止新自动推导和自动覆盖，历史链路仍可读；恢复后需要重新复核。补正文后按规则更新状态，禁止仅修改状态制造成功。
@@ -69,7 +70,7 @@
 - [ ] P1 · 部分实现 · 主题归集/来源计数依赖 BE-03、BE-04；自动建议接入 BE-06，手工维护可先交付。
 - 来源：Word §2.3、图2-3、表1；REQ-SIG-08、REQ-DEM-02/03/05/08/14/15；WBS 1.3.4。
 - 入口：[themes.py](app/api/v1/themes.py)、[judgment.py](app/services/judgment.py)、主题指标视图迁移、[test_themes.py](tests/test_themes.py)。
-- 以技术对象、底层能力、变化方向输出结构化归集依据；相似度和次优差值用于候选筛选，不能替代业务论证。单一信号当前最多一个主题。
+- 以技术对象、底层能力、变化方向输出结构化归集依据（wave-1：`aggregation_structured_basis` + 自动归集一致性门控）；相似度和次优差值用于候选筛选，不能替代业务论证。单一信号当前最多一个主题。
 - 自动归集仅处理未确认字段且须通过对象/能力/变化方向一致性规则；并列/证据不足返回理由，保留手动指派与移出。文档信号在新抽取能力验收前保持人工指定。
 - 新增信号的可追溯来源关联，包含主 URL 与补充 URL、规范化 URL、出处；迁移现有主链接，支持去重，禁止为了计数制造 URL。
 - 信号频次统计未归档主题成员；来源数统计主题历史关联成员的全部去重 URL（含归档来源，延续现有 source_count 行为），UI 明示两者口径。活动推导始终排除归档信号。
@@ -80,6 +81,7 @@
 ## BE-06 需求点推导与复核
 
 - [ ] P0 · 部分实现 · 依赖 BE-02、BE-03；BE-05 为自动建议前置，手工流程可先实现。
+- 全景工作簿导入仅建立待复核需求，不自动填写交叉验证结论或确认；下游功能须经正常人工流程。旧数据可运行 `python -m app.services.panorama_review_report` 输出待人工核查的候选记录；标记仅为启发式，不能证明来源或自动修改历史。
 - 已新增五步逐项引用门控；只接受同一来源主题下已留存信号。确认时再次校验至少两条不同 URL、发布主体和渠道的留存信号，且每条有技术标签、标签组合有差异；仅 taxonomy_admin/platform_admin 可确认。下游功能创建/发布与技术落脚点新增/编辑会重新核验当前证据。修改已确认需求会退回复核并撤销下游发布。FE-05 工作台切片已交付；真实时序与业务交叉验证质量验收仍依赖 DOC-04。
 - 来源：Word §2.3；REQ-DEM-01/04/06/07/09/10/11/12/13/15；WBS 1.3.4。
 - 入口：[demands.py](app/api/v1/demands.py)、[schemas.py](app/schemas/schemas.py)、[test_demands.py](tests/test_demands.py)。
@@ -179,19 +181,20 @@
 
 ## BE-14 产品内 Agent 与确认写回
 
-- [ ] P1 · 部分实现（已有单信号助手与 Pydantic AI 基础接线）· 依赖 BE-03/04/12/13。
+- [~] P1 · 后端工作流与验收测试已落地（`POST /api/v1/agent/*`、SSE、变更单、记忆）；FE-11 与网关真机签字仍开放 · 依赖 BE-03/04/12/13。
 - 来源：实施计划 §7.2 REQ-AGT-01…06；WBS 1.3.10。
-- 入口：[pydantic_agent.py](app/services/pydantic_agent.py)、[llm_gateway.py](app/services/llm_gateway.py)、现有 assistant 路由。
+- 入口：[agent_workflow.py](app/services/agent_workflow.py)、[agent_runtime.py](app/services/agent_runtime.py)、[api/v1/agent.py](app/api/v1/agent.py)；遗留 [`/signals/{id}/assistant/messages`](app/api/v1/signals.py) 保持兼容。
 - 单一 Pydantic AI 编排；新增 sessions/messages 持久化和 SSE，支持重连、取消、错误结束；使用已安装版本支持的序列化 API。
 - 注册 search_evidence/search_rag/suggest_tags/suggest_theme/propose_patch/apply_confirmed_patch/draft_trace_report；不暴露 shell、任意 SQL 或文件路径。
 - 引用最少到信号或文档 chunk，图块带 figure_index；验证引用真实存在。检索过滤用户可见范围。
 - 变更单保存基准版本、字段差异、理由和待确认状态；确认只应用所展示差异一次，过期需重新生成；拒绝不写业务数据。
 - 用户/项目记忆单独存储、可查看删除，不能把主数据更正自动当私人事实；所有会话与记忆检查归属。
 - 验收：跨用户隔离、取消/重连、伪造引用、重复确认、过期变更、人工字段保护、日志无密钥。
+- **macOS 证据（2026-11-11）**：`uv run pytest -q tests/test_agent_workflow.py tests/test_pydantic_ai_wiring.py` → 18 passed（含 10 步 smoke、SSE、`model_messages_json` 持久化）；可选 `EEA_LLM_INTEGRATION=1 … test_agent_live.py`。
 
 ## BE-15 链路报告
 
-- [ ] P1 · 部分实现（已有信号 studio 报告）· 依赖 BE-11、BE-12、BE-14。
+- [~] P1 · Markdown + ReportLab PDF 已落地（`chain_report.py` / `chain_report_pdf.py`，`GET …/download?format=pdf`）；黄金集与 Linux 字体容器验收仍开放 · 依赖 BE-11、BE-12、BE-14。
 - 来源：WBS 1.3.12；REQ-RULE-03、REQ-AGT-03；Word 表1/A/B/C。
 - 按需求点或落脚点生成 Markdown 与 PDF，包含原始证据、方法推导、审查结论、技术角色、空标准格、战略理由/版本、引用和局限。
 - 生成可留存/下载的报告任务与元数据，标明生成时间、使用数据版本和模型；无 LLM 时仍可导出确定性链路摘要。
@@ -208,6 +211,16 @@
 - 交付代码仓库层面的依赖锁定、启动/配置契约与组件验证证据；不把 macOS 检查描述为 Linux worker 或生产存储验收。
 - Linux 集成、离线 wheel 包、生产升级、备份/恢复及 10,000 条性能报告由 OPS-06 在 BE-16 后统一验收，避免 BE-16 ↔ OPS-02/05 循环依赖。
 - 验收：每条 traceability 用例有组件结果；迁移与接口契约检查齐全，严重缺陷清零；部署和恢复签收记录挂接 OPS-06。
+
+## BE-17 领域分层与依赖边界
+
+- [ ] P0 · 未开始 · 依赖无；与 BE-16 的契约检查互补，不阻塞既有路由交付。
+- 目标：HTTP 仅编排；平台横切能力归 `app/platform`；业务能力逐步迁入 `app/domains/*`；削减 `app.services` → `app.api` 反向依赖。
+- [ ] 约定目录：`app/platform`（配置、DB、身份、对象存储）、`app/domains/<bounded-context>`（用例与实体）、`app/api`（路由与 DTO 映射）；保留 `app/schemas` 直至领域 DTO 收敛。
+- [ ] 保持 `uv run lint-imports` 的 platform→domains/API、services→API、domains→API 契约通过（见 [pyproject.toml](pyproject.toml) 与 [tests/contracts.ini](tests/contracts.ini)），继续消除业务写入和路由私有函数互调。
+- [ ] OpenAPI 路径快照：[tests/test_openapi_snapshot.py](tests/test_openapi_snapshot.py) + [tests/snapshots/openapi_paths.json](tests/snapshots/openapi_paths.json)；路由变更须同步快照（`OPENAPI_UPDATE_SNAPSHOT=1`）。
+- [ ] 迁移顺序建议：`core`/`db`/`models` → `platform`；采集/信号/需求等垂直切片按 WBS 迁入 `domains`；共享摄取逻辑取代 API 私有函数互调（对齐 BE-01）。
+- 验收：import-linter 通过；OpenAPI 快照测试通过；无新增 `platform`→`api`/`domains` 违规；领域迁移切片有对应 pytest 证据。
 
 ## 原任务编号迁移
 

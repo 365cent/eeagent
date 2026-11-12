@@ -1,5 +1,9 @@
 """Signal excerpt skips portal chrome and prefers article lead."""
 
+import pytest
+
+pytestmark = pytest.mark.no_db
+
 from app.services.body_excerpt import lead_excerpt_from_markdown
 
 

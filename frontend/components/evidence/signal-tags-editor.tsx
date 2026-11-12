@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { PlusOutlined } from '@ant-design/icons'
-import { App as AntApp, Button, Input, Select, Space, Spin, Tag, Typography } from 'antd'
+import { App as AntApp, Button, Collapse, Input, Select, Space, Spin, Tag, Typography } from 'antd'
 import { useSignalTagSuggestions, useVocab } from '@/hooks/use-eea-queries'
 import { useSignalMutations } from '@/hooks/use-signal-mutations'
 import { EeaApiError } from '@/lib/api/client'
@@ -10,7 +10,7 @@ import { suggestionSourceLabel } from '@/lib/suggestion-source'
 import { protectedFieldLabels } from '@/lib/suggestion-source'
 import type { TagSuggestion } from '@/lib/api/types'
 
-const { Text } = Typography
+const { Text, Paragraph } = Typography
 
 type SignalTagsEditorProps = {
   signalId: string
@@ -182,6 +182,38 @@ export function SignalTagsEditor({ signalId, tags, updatedAt }: SignalTagsEditor
         ) : (
           <Text type="secondary" style={{ display: 'block', marginTop: 4 }}>暂无未采用的标签建议。</Text>
         )}
+        {suggestionsQuery.data?.details?.length ? (
+          <Collapse
+            style={{ marginTop: 8 }}
+            size="small"
+            items={[
+              {
+                key: 'details',
+                label: `候选详情（${suggestionsQuery.data.details.length}）`,
+                children: (
+                  <Space orientation="vertical" style={{ width: '100%' }}>
+                    {suggestionsQuery.data.details.map((row) => (
+                      <div key={row.name}>
+                        <Text strong>{row.name}</Text>
+                        {row.rerank_score != null ? (
+                          <Text type="secondary"> · 精排 {row.rerank_score.toFixed(3)}</Text>
+                        ) : null}
+                        {row.frequency != null ? (
+                          <Text type="secondary"> · 词频 {row.frequency}</Text>
+                        ) : null}
+                        {row.evidence_snippet ? (
+                          <Paragraph type="secondary" style={{ marginBottom: 0, fontSize: 12 }}>
+                            {row.evidence_snippet}
+                          </Paragraph>
+                        ) : null}
+                      </div>
+                    ))}
+                  </Space>
+                ),
+              },
+            ]}
+          />
+        ) : null}
       </div>
     </div>
   )

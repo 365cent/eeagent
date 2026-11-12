@@ -69,9 +69,13 @@ type Job struct {
 	FinishedAt    time.Time
 }
 
-// CaptureEngine captures a URL into a self-contained archive.
-type CaptureEngine interface {
-	Capture(ctx context.Context, url string) (*capture.Archive, error)
+// Uploader submits captures and file jobs to the EEA backend.
+type Uploader interface {
+	Capture(ctx context.Context, in platform.CaptureInput) (*platform.Signal, error)
+	SubmitFileJob(ctx context.Context, in platform.FileJobInput) (*platform.Signal, error)
+	CreateManualFallback(ctx context.Context, in platform.ManualFallbackInput) (*platform.Signal, error)
+	RetryCaptureJob(ctx context.Context, jobID string) (*platform.Signal, error)
+	WaitCaptureJobWithProgress(ctx context.Context, jobID string, onProgress platform.CaptureJobProgressFunc) (*platform.Signal, error)
 }
 
 // Options tunes the pool.
@@ -86,8 +90,8 @@ type Options struct {
 
 // Queue is a worker pool shared by the CLI and the GUI.
 type Queue struct {
-	engine CaptureEngine
-	api    *platform.Client
+	engine capture.CaptureEngine
+	api    Uploader
 	opts   Options
 
 	mu          sync.Mutex
@@ -106,7 +110,7 @@ type Queue struct {
 }
 
 // New prepares a queue. Workers start on Start.
-func New(engine CaptureEngine, api *platform.Client, opts Options) *Queue {
+func New(engine capture.CaptureEngine, api Uploader, opts Options) *Queue {
 	if opts.Workers <= 0 {
 		opts.Workers = 2
 	}

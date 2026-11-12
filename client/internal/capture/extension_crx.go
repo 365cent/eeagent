@@ -12,6 +12,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"eea/capture/internal/httpx"
 )
 
 const singleFileCRXUpdateURL = "https://clients2.google.com/service/update2/crx?response=redirect&prodversion=131.0.6778.0&acceptformat=crx2,crx3&x=id%3D" + chromeWebStoreSingleFileID + "%26uc"
@@ -22,7 +24,7 @@ func downloadAndUnpackSingleFileCRX(ctx context.Context, dest string) error {
 	if err != nil {
 		return err
 	}
-	client := &http.Client{Timeout: 3 * time.Minute}
+	client := httpx.OutboundClient(3 * time.Minute)
 	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("download SingleFile CRX: %w", err)

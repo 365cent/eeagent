@@ -51,6 +51,10 @@ EXPECTED_TABLES = {
     "eea_agent_memory",
     "eea_panorama_import_batch",
     "eea_panorama_import_url",
+    "eea_chain_report",
+    "eea_embedding_cache",
+    "eea_signal_source",
+    "eea_stored_object_orphan",
 }
 
 EXPECTED_VIEWS = {"eea_v_tech_theme_metrics", "eea_v_tech_theme_display_tags"}

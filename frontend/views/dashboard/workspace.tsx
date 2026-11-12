@@ -14,7 +14,6 @@ import {
   BranchesOutlined,
   BookOutlined,
   BulbOutlined,
-  CheckCircleFilled,
   ClockCircleOutlined,
   CloudDownloadOutlined,
   FileTextOutlined,
@@ -26,7 +25,6 @@ import {
   FilterOutlined,
   FundProjectionScreenOutlined,
   HomeOutlined,
-  InboxOutlined,
   LinkOutlined,
   PictureOutlined,
   QuestionCircleOutlined,
@@ -50,19 +48,20 @@ import {
 import { App as AntApp, Alert, Button, Card, Checkbox, Col, Divider, Dropdown, Input, Progress, Row, Segmented, Select, Space, Spin, Statistic, Table, Tag, Tooltip, Typography, Upload, Timeline } from 'antd'
 import { Drawer as VaulDrawer } from 'vaul'
 import { ProCard } from '@ant-design/pro-components'
-import type { ColumnsType } from 'antd/es/table'
 import { PlatformLayout } from '@/components/layout/platform-layout'
 import { PageHeader } from '@/components/shared/page-header'
+import { QueryFailure } from '@/components/shared/query-failure'
+import { SignalsView } from '@/views/signals'
+import { TraceView } from '@/views/trace'
+import { DeductionChainWorkspace } from '@/views/trace/deduction-chain-workspace'
+import { TechnologyView } from '@/views/technology'
+import { StrategyView } from '@/views/strategy'
 import { isMainMenuRoute } from '@/config/menu'
 import { utilityPages } from '@/config/utility-pages'
 import { ALL_VIEW_KEYS } from '@/config/routes'
 import {
-  useDemandRows,
-  useLandingRows,
   useOverviewStats,
-  usePanoramaStages,
   useSignalDetail,
-  useTraceChain,
   useSignalsListFiltered,
   useThemeRows,
   useRefCodeMaps,
@@ -78,8 +77,6 @@ import { StrategyFunnelCard } from '@/components/overview/strategy-funnel-card'
 import { PanoramaImportBanner } from '@/components/import/panorama-import-banner'
 import { NotificationsCenter } from '@/components/notifications/notifications-center'
 import { usePlatformNotifications } from '@/hooks/use-platform-notifications'
-import { setLivePlatformSearchData } from '@/lib/live-platform-data'
-import { resetPlatformSearchIndex } from '@/lib/platform-search-index'
 import { isUuid } from '@/lib/api/api-errors'
 import { EeaApiError, signalArchiveUrl, documentCanonicalUrl } from '@/lib/api/client'
 import {
@@ -87,7 +84,7 @@ import {
   DocumentPdfViewerLazy,
 } from '@/components/evidence/document-stage-preview'
 import { documentStagePreviewMode } from '@/lib/document-preview'
-import { fetchDocument, fetchLandingPoints, patchSignal } from '@/lib/api/eea-api'
+import { fetchDocument, patchSignal } from '@/lib/api/eea-api'
 import { buildAppPath } from '@/lib/navigation'
 import { excerptLooksLikeChrome, sourceExcerptSnippet } from '@/lib/evidence/audio-overview-segments'
 import type { AppRouteOptions, NavigateFn, Signal } from '@/types/platform'
@@ -98,7 +95,6 @@ import {
   persistStudioKind,
   type StudioCacheEntry,
 } from '@/lib/studio-cache'
-import type { MenuProps } from 'antd'
 import { EvidenceAssistantChat } from '@/components/evidence/evidence-assistant-chat'
 import { EvidenceAudioTransport } from '@/components/evidence/evidence-audio-transport'
 import { EvidenceStudioPane } from '@/components/evidence/evidence-studio-pane'
@@ -110,9 +106,6 @@ import { SignalThemeAssign } from '@/components/evidence/signal-theme-assign'
 import { TopicsView } from '@/components/topics/topics-view'
 import { CreateTopicForm } from '@/components/topics/create-topic-form'
 import { VocabKnowledgePanel } from '@/components/topics/vocab-knowledge-panel'
-import { FunctionDerivationEditor } from '@/components/technology/function-derivation-editor'
-import { LandingPointWorkbench } from '@/components/technology/landing-point-workbench'
-import { StrategyFunnelWorkbench } from '@/components/strategy/strategy-funnel-workbench'
 import { PlatformEmptyState, signalsTableLocale } from '@/components/shared/empty-state'
 import { useSignalTablePagination } from '@/lib/signal-table-pagination'
 import { QuerySurface } from '@/components/shared/query-surface'
@@ -121,27 +114,19 @@ import { useShellColorScheme } from '@/hooks/use-shell-color-scheme'
 import { querySurfaceState } from '@/hooks/use-query-surface'
 import { NewSignalImportPage } from '@/components/import/new-signal-import'
 import { WorkflowStudio } from '@/components/workflow-studio'
+import { ChainReportView } from '@/views/utility/chain-report-view'
 import { PlatformSettingsPage } from '@/views/utility/platform-settings-page'
 import { ProfilePage } from '@/views/utility/profile-page'
 import { ArchivedSignalsView } from '@/views/evidence/archived-signals-view'
+import {
+  buildSignalTableColumns,
+  SignalRowActions,
+  SignalStatusTag,
+} from '@/features/evidence/signal-columns'
 
 const { Text, Title, Paragraph } = Typography
 
-const statusColors: Record<string, string> = {
-  已留存: 'success',
-  待人工复核: 'warning',
-  抓取中: 'processing',
-  抓取失败: 'error',
-}
-
-function QueryFailure({ message, onRetry }: { message: string; onRetry: () => void }) {
-  return (
-    <Space orientation="vertical" size={8}>
-      <Text type="danger">{message}</Text>
-      <Button size="small" onClick={onRetry}>重试</Button>
-    </Space>
-  )
-}
+export { SignalRowActions }
 
 function SignalQuickPreviewDrawer({
   signal,
@@ -166,7 +151,7 @@ function SignalQuickPreviewDrawer({
               <Space wrap>
                 <Tag color="cyan">{signal.stage}</Tag>
                 <Tag color="purple">{signal.type}</Tag>
-                <Tag color={statusColors[signal.status]}>{signal.status}</Tag>
+                <SignalStatusTag status={signal.status} />
               </Space>
               <Divider />
               <Paragraph>
@@ -180,594 +165,6 @@ function SignalQuickPreviewDrawer({
         </VaulDrawer.Content>
       </VaulDrawer.Portal>
     </VaulDrawer.Root>
-  )
-}
-
-export function SignalRowActions({
-  record,
-  onNavigate,
-  onQuickPreview,
-}: {
-  record: Signal
-  onNavigate: (target: string) => void
-  onQuickPreview?: (signal: Signal) => void
-}) {
-  const { message: messageApi, modal: modalApi } = AntApp.useApp()
-  const queryClient = useQueryClient()
-
-  const items: MenuProps['items'] = [
-    { key: 'view', label: '查看证据', icon: <FileSearchOutlined /> },
-    ...(onQuickPreview ? [{ key: 'preview', label: '快速预览', icon: <ReadOutlined /> }] : []),
-    { key: 'topic', label: '加入主题', icon: <TagsOutlined /> },
-    { key: 'trace', label: '查看推导链', icon: <FundProjectionScreenOutlined /> },
-    ...(record.status === '待人工复核'
-      ? [{ key: 'review', label: '开始人工复核', icon: <CheckCircleFilled /> }]
-      : []),
-    { type: 'divider' },
-    { key: 'copy', label: '复制信号链接', icon: <LinkOutlined /> },
-    { key: 'archive', label: '归档停用', icon: <AlertOutlined />, danger: true },
-  ]
-
-  const onMenuClick: MenuProps['onClick'] = ({ key, domEvent }) => {
-    domEvent.stopPropagation()
-    switch (key) {
-      case 'view':
-        onNavigate(`singal/${record.key}`)
-        break
-      case 'preview':
-        onQuickPreview?.(record)
-        break
-      case 'topic':
-        onNavigate(`singal/${record.key}`)
-        break
-      case 'trace':
-        onNavigate('traceDetail')
-        break
-      case 'review':
-        onNavigate(`singal/${record.key}`)
-        break
-      case 'copy': {
-        const link = `${window.location.origin}${buildAppPath({ view: 'singal', id: record.key })}`
-        void navigator.clipboard.writeText(link).then(
-          () => messageApi.success('信号链接已复制'),
-          () => messageApi.error('复制失败，请手动复制链接'),
-        )
-        break
-      }
-      case 'archive':
-        modalApi.confirm({
-          title: '归档停用该信号？',
-          content: '信号将从主证据库移出并写入数据库（evidence_status=archived）。可在「归档证据库」恢复或永久删除。',
-          okText: '归档',
-          cancelText: '取消',
-          onOk: async () => {
-            try {
-              await patchSignal(record.key, { evidence_status_code: 'archived' })
-              messageApi.success('已归档停用，可在「归档证据库」管理')
-              await Promise.all([
-                queryClient.invalidateQueries({ queryKey: ['eea', 'signals'] }),
-                queryClient.invalidateQueries({ queryKey: eeaQueryKeys.overview }),
-              ])
-            } catch (err) {
-              const detail = err instanceof EeaApiError ? err.message : String(err)
-              messageApi.error(detail || '归档失败')
-            }
-          },
-        })
-        break
-      default:
-        break
-    }
-  }
-
-  return (
-    <Dropdown menu={{ items, onClick: onMenuClick }} trigger={['click']} placement="bottomRight">
-      <Button
-        type="text"
-        icon={<MoreOutlined />}
-        aria-label="更多操作"
-        onClick={(event) => event.stopPropagation()}
-      />
-    </Dropdown>
-  )
-}
-
-function buildSignalTableColumns({
-  onNavigate,
-  onTitleClick,
-  onQuickPreview,
-}: {
-  onNavigate: (target: string) => void
-  onTitleClick: (signal: Signal) => void
-  onQuickPreview?: (signal: Signal) => void
-}): ColumnsType<Signal> {
-  return [
-    {
-      title: '信号标题',
-      dataIndex: 'title',
-      render: (value: string, record) => (
-        <button type="button" className="signal-title signal-title-button" onClick={() => onTitleClick(record)}>
-          <span className="signal-dot" />
-          <span>
-            <Space size={6} wrap>
-              <Text strong>{value}</Text>
-              {record.urlDuplicateRenamed ? (
-                <Tooltip title="与已有证据同源；上传已允许，标题已自动加后缀区分">
-                  <Tag color="gold" style={{ margin: 0 }}>
-                    重复来源
-                  </Tag>
-                </Tooltip>
-              ) : null}
-            </Space>
-            <span className="signal-meta">{record.publisher} · {record.channel}</span>
-          </span>
-        </button>
-      ),
-    },
-    { title: '价值链环节', dataIndex: 'stage', render: (value: string) => <Tag className="stage-tag">{value}</Tag> },
-    { title: '类型', dataIndex: 'type' },
-    {
-      title: '技术方向',
-      dataIndex: 'tags',
-      render: (values: string[]) => (
-        <Space wrap>{values.map((tag) => <Tag key={tag} className="tech-tag">{tag}</Tag>)}</Space>
-      ),
-    },
-    { title: '证据状态', dataIndex: 'status', render: (value: string) => <Tag color={statusColors[value]}>{value}</Tag> },
-    { title: '更新时间', dataIndex: 'date' },
-    {
-      key: 'action',
-      width: 44,
-      render: (_value: unknown, record: Signal) => (
-        <SignalRowActions record={record} onNavigate={onNavigate} onQuickPreview={onQuickPreview} />
-      ),
-    },
-  ]
-}
-
-export function SignalsView({
-  query,
-  setQuery,
-  themeId,
-  onClearTheme,
-  onNavigate,
-  onPreviewSignal,
-}: {
-  query: string
-  setQuery: (value: string) => void
-  themeId?: string
-  onClearTheme?: () => void
-  onNavigate: (key: string) => void
-  onPreviewSignal: (signal: Signal | null) => void
-}) {
-  const [stage, setStage] = useState('全部环节')
-  const { rows: signalRows, isLoading, isError, refetch } = useSignalsListFiltered({ query, stageChip: stage, themeId })
-  const refCodeQuery = useRefCodeMaps()
-  const overviewQuery = useOverviewStats()
-  const overviewReady = overviewQuery.isSuccess
-  const overview = overviewQuery.data
-  const columns = buildSignalTableColumns({
-    onNavigate,
-    onTitleClick: onPreviewSignal,
-    onQuickPreview: onPreviewSignal,
-  })
-  const signalPagination = useSignalTablePagination()
-  return (
-    <>
-      <PageHeader
-        eyebrow="01 · 原始信息采集"
-        title="信号与证据库"
-        description="收集产业信号，留存可追溯证据，并通过封闭词表完成机器预标。"
-        action={
-          <Space>
-            <Button icon={<InboxOutlined />} onClick={() => onNavigate('archived')}>
-              归档证据库
-            </Button>
-            <Button type="primary" icon={<PlusOutlined />} onClick={() => onNavigate('newSignal')}>
-              新增信号
-            </Button>
-          </Space>
-        }
-      />
-      {themeId ? <Alert type="info" showIcon style={{ marginBottom: 16 }} title="正在查看该主题下的信号" action={<Button size="small" onClick={onClearTheme}>清除主题筛选</Button>} /> : null}
-      {overviewQuery.isError ? <QueryFailure message="信号统计加载失败，请检查服务连接后重试。" onRetry={() => { void overviewQuery.refetch() }} /> : null}
-      <Row gutter={16} className="summary-row">
-        <Col span={6}><Card><Statistic title="全部信号" value={overviewReady ? overview?.signals ?? 0 : '—'} /></Card></Col>
-        <Col span={6}><Card><Statistic title={<Tooltip title="按非空 url_normalized 去重，包含已归档信号。">去重来源数</Tooltip>} value={overviewReady ? overview?.signal_sources ?? '—' : '—'} /></Card></Col>
-        <Col span={6}><Card><Statistic title="已留存" value={overviewReady ? overview?.signals_retained ?? '—' : '—'} styles={{ content: { color: '#16a34a' } }} /></Card></Col>
-        <Col span={6}><Card><Statistic title="待人工复核" value={overviewReady ? overview?.signals_pending_review ?? 0 : '—'} styles={{ content: { color: '#d97706' } }} /></Card></Col>
-      </Row>
-      <Card className="panel-card view-card" title="证据列表" extra={<Space wrap><Input allowClear prefix={<SearchOutlined />} placeholder="搜索标题、发布主体或标签" value={query} onChange={(e) => setQuery(e.target.value)} /><Select value={stage} onChange={setStage} options={['全部环节', '创造端', '传递端', '兑现端', '规制端'].map((value) => ({ label: value, value }))} /></Space>}>
-        {isError || refCodeQuery.isError ? (
-          <QueryFailure message="信号列表加载失败，请检查服务连接后重试。" onRetry={() => { void (refCodeQuery.isError ? refCodeQuery.refetch() : refetch()) }} />
-        ) : !refCodeQuery.isSuccess || isLoading ? (
-          <Spin />
-        ) : (
-          <Table rowKey="key" columns={columns} dataSource={signalRows} pagination={signalPagination} scroll={{ x: 960 }} locale={signalsTableLocale(() => onNavigate('newSignal'))} />
-        )}
-      </Card>
-    </>
-  )
-}
-
-
-
-export function TraceView({ onNavigate }: { onNavigate: NavigateFn }) {
-  const panoramaQuery = usePanoramaStages()
-  const stages = panoramaQuery.data ?? []
-  const relationships = stages.flatMap((stage) =>
-    stage.demand_points.flatMap((demand) =>
-      demand.functions.flatMap((vehicleFunction) =>
-        vehicleFunction.landing_points.map((landingPoint) => ({
-          key: `${stage.stage_code}-${demand.id}-${vehicleFunction.id}-${landingPoint.id}`,
-          stage: stage.stage_label,
-          demand: demand.name,
-          vehicleFunction: vehicleFunction.name,
-          landingPoint: landingPoint.name,
-        landingPointId: landingPoint.id,
-          domain: landingPoint.domain_name,
-        })),
-      ),
-    ),
-  )
-
-  return (
-    <>
-      <PageHeader eyebrow="03 · 需求与功能映射" title="链路追溯" description="查看服务端已保存的需求、车辆功能与技术落脚点关系。" />
-      {panoramaQuery.isError ? (
-        <QueryFailure message="链路数据加载失败，请检查服务连接后重试。" onRetry={() => { void panoramaQuery.refetch() }} />
-      ) : panoramaQuery.isLoading ? (
-        <Spin />
-      ) : relationships.length === 0 ? (
-        <PlatformEmptyState title="暂无可追溯链路" description="保存真实需求、车辆功能和技术落脚点关系后，链路将在此显示。" />
-      ) : (
-        <Card className="panel-card view-card" title="已保存的推导关系">
-          <Table
-            rowKey="key"
-            dataSource={relationships}
-            pagination={{ pageSize: 10 }}
-            columns={[
-              { title: '价值链环节', dataIndex: 'stage' },
-              { title: '需求点', dataIndex: 'demand' },
-              { title: '车辆功能', dataIndex: 'vehicleFunction' },
-              { title: '技术落脚点', dataIndex: 'landingPoint' },
-              { title: '技术域', dataIndex: 'domain' },
-              {
-                title: '操作',
-                key: 'action',
-                render: (_value: unknown, record: (typeof relationships)[number]) => (
-                  <Button type="link" onClick={() => onNavigate(`traceDetail/${record.landingPointId}`)}>
-                    查看完整链路
-                  </Button>
-                ),
-              },
-            ]}
-          />
-        </Card>
-      )}
-    </>
-  )
-}
-
-export function TechnologyView() {
-  const panoramaQuery = usePanoramaStages()
-  const landingDetailsQuery = useQuery({
-    queryKey: eeaQueryKeys.landingPoints,
-    queryFn: () => fetchLandingPoints(),
-  })
-  const stages = panoramaQuery.data ?? []
-  const landingDetailsById = new Map((landingDetailsQuery.data ?? []).map((point) => [point.id, point]))
-  const hasPanoramaRecords = stages.some((stage) =>
-    stage.demand_count > 0 || stage.landing_point_count > 0 || stage.demand_points.length > 0,
-  )
-
-  return (
-    <>
-      <PageHeader eyebrow="04 · 功能与技术拆解" title="技术全景图" description="按价值链环节展开需求点、车辆功能与技术落脚点，建立技术地图。" />
-      <FunctionDerivationEditor />
-      <LandingPointWorkbench />
-      {landingDetailsQuery.isError ? (
-        <QueryFailure message="落脚点角色说明加载失败，请检查服务连接后重试。" onRetry={() => { void landingDetailsQuery.refetch() }} />
-      ) : null}
-      {panoramaQuery.isError ? (
-        <QueryFailure message="技术全景加载失败，请检查服务连接后重试。" onRetry={() => { void panoramaQuery.refetch() }} />
-      ) : panoramaQuery.isLoading ? (
-        <Spin />
-      ) : !hasPanoramaRecords ? (
-        <PlatformEmptyState title="暂无技术落脚点" description="需求与车辆功能形成有效推导并保存落脚点后，将在此显示真实技术全景。" />
-      ) : (
-        <div className="panorama-grid">
-          {stages.map((stage) => {
-            const landingPointRows = stage.demand_points.flatMap((demand) =>
-              demand.functions.flatMap((vehicleFunction) =>
-                vehicleFunction.landing_points.map((landingPoint) => ({
-                  ...landingPoint,
-                  demandName: demand.name,
-                  functionName: vehicleFunction.name,
-                  roleDescription: landingDetailsById.get(landingPoint.id)?.role_description ?? null,
-                })),
-              ),
-            )
-
-            return (
-              <Card
-                className="panel-card panorama-column"
-                key={stage.stage_code}
-                title={<span><span className="stage-marker" />{stage.stage_label}</span>}
-                extra={<Tag>{stage.demand_count} 个需求</Tag>}
-              >
-                {landingPointRows.length ? landingPointRows.map((item) => (
-                  <div className="landing-card" key={item.id}>
-                    <div className="landing-head"><Text strong>{item.name}</Text><Tag color="blue">{item.domain_name}</Tag></div>
-                    <Text type="secondary">需求：{item.demandName}</Text>
-                    <Text type="secondary">车辆功能：{item.functionName}</Text>
-                    <Text type="secondary">功能内角色：{landingDetailsQuery.isSuccess ? item.roleDescription || '未填写' : '正在加载中'}</Text>
-                    <div className="landing-footer"><span>{item.standard_count} 个部署标准</span></div>
-                  </div>
-                )) : <Text type="secondary">该环节暂无技术落脚点。</Text>}
-              </Card>
-            )
-          })}
-        </div>
-      )}
-    </>
-  )
-}
-
-export function StrategyView() {
-  return <StrategyFunnelWorkbench />
-}
-
-function DeductionChainWorkspace({ onNavigate, initialLandingPointId }: { onNavigate: NavigateFn; initialLandingPointId?: string }) {
-  const [landingPointId, setLandingPointId] = useState<string | undefined>(initialLandingPointId)
-  const landingQuery = useLandingRows()
-  const traceQuery = useTraceChain(landingPointId)
-  const trace = traceQuery.data
-  useEffect(() => {
-    setLandingPointId(initialLandingPointId || undefined)
-  }, [initialLandingPointId])
-  const standardPhases = ['设计', '制造', '运营'] as const
-  const standardConstraints = ['工程化', '经济性', '安全合规'] as const
-  const stageNames: Record<string, string> = {
-    landing_point: '技术落脚点',
-    vehicle_function: '车辆功能',
-    demand_point: '需求点',
-    theme: '技术主题',
-    signals: '原始信号',
-  }
-  const forwardSteps = Array.isArray(trace?.vehicle_function?.forward_trace?.steps)
-    ? trace.vehicle_function.forward_trace.steps
-    : []
-  const demandSteps = trace?.demand_point?.derivation_trace?.steps ?? []
-
-  return (
-    <div className="deduction-workspace">
-      <Card className="panel-card" title="选择技术落脚点">
-        {landingQuery.isError ? (
-          <QueryFailure message="技术落脚点加载失败，请检查服务连接后重试。" onRetry={() => { void landingQuery.refetch() }} />
-        ) : (
-          <Select
-            allowClear
-            showSearch={{ optionFilterProp: 'label' }}
-            loading={landingQuery.isLoading}
-            value={landingPointId}
-            onChange={(value) => {
-              setLandingPointId(value)
-              onNavigate(value ? `traceDetail/${value}` : 'traceDetail')
-            }}
-            placeholder="选择已保存的技术落脚点以查看来源链路"
-            options={landingQuery.rows.map((row) => ({ value: row.key, label: row.name }))}
-            style={{ width: '100%' }}
-          />
-        )}
-      </Card>
-      {traceQuery.isError ? (
-        traceQuery.error instanceof EeaApiError && [404, 422].includes(traceQuery.error.status) ? (
-          <Alert
-            type="warning"
-            showIcon
-            title="无法打开这条追溯链"
-            description={traceQuery.error.status === 404 ? '该技术落脚点已不存在，可能是链接过期或记录已删除。' : '追溯链接中的技术落脚点编号无效。'}
-            action={<Button size="small" onClick={() => onNavigate('traceDetail')}>重新选择落脚点</Button>}
-          />
-        ) : (
-          <QueryFailure message="推导链加载失败，请检查服务连接后重试。" onRetry={() => { void traceQuery.refetch() }} />
-        )
-      ) : traceQuery.isLoading ? (
-        <Spin />
-      ) : trace ? (
-        <Space orientation="vertical" size={16} style={{ width: '100%' }}>
-          {!trace.completeness.complete ? (
-            <Alert
-              type="warning"
-              showIcon
-              title="推导链存在缺失或失效引用"
-              description={[
-                trace.completeness.missing_stages.length
-                  ? `缺少环节：${trace.completeness.missing_stages.map((stage) => stageNames[stage] ?? stage).join('、')}`
-                  : '',
-                trace.completeness.unresolved_evidence_signal_ids.length
-                  ? `无法解析的信号引用：${trace.completeness.unresolved_evidence_signal_ids.join('、')}`
-                  : '',
-                trace.completeness.unresolved_document_ids.length
-                  ? `无法解析的文档引用：${trace.completeness.unresolved_document_ids.join('、')}`
-                  : '',
-              ].filter(Boolean).join('；')}
-            />
-          ) : (
-            <Alert type="success" showIcon title="当前链路的结构化关联完整。来源文件与图片对象仍需按各自链接核验。" />
-          )}
-
-          <Card className="panel-card" title="当前推导关系">
-            <Space wrap>
-              <Tag color="blue">技术域：{trace.landing_point.domain_name ?? '未关联'}</Tag>
-              <Tag color={trace.function_published ? 'green' : 'orange'}>
-                功能：{trace.vehicle_function?.name ?? '未关联'} · {trace.function_published ? '已发布' : trace.vehicle_function ? '未发布' : '未关联'}
-              </Tag>
-              <Tag color={trace.demand_review_status === 'confirmed' ? 'green' : 'orange'}>
-                需求复核：{trace.demand_review_status ?? '无记录'}
-              </Tag>
-              <Tag>交叉验证：{trace.demand_cross_validation_conclusion ?? '无记录'}</Tag>
-              <Tag>战略版本：{trace.assessment_versions.length}</Tag>
-            </Space>
-            <Row gutter={[18, 18]} style={{ marginTop: 16 }}>
-              <Col xs={24} sm={12} lg={6}><Text strong>技术落脚点</Text><div>{trace.landing_point.name}</div></Col>
-              <Col xs={24} sm={12} lg={6}><Text strong>车辆功能</Text><div>{trace.vehicle_function?.name ?? '未关联'}</div></Col>
-              <Col xs={24} sm={12} lg={6}><Text strong>需求点</Text><div>{trace.demand_point?.name ?? '未关联'}</div></Col>
-              <Col xs={24} sm={12} lg={6}><Text strong>技术主题</Text><div>{trace.theme?.working_name ?? '未关联'}</div></Col>
-            </Row>
-          </Card>
-
-          <Card className="panel-card" title="需求推导与交叉验证">
-            {trace.demand_point ? (
-              <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-                {demandSteps.length ? demandSteps.map((step, index) => (
-                  <Card key={`${step.key}-${index}`} size="small" title={`${index + 1}. ${step.key}`}>
-                    <Paragraph style={{ whiteSpace: 'pre-wrap' }}>{step.content}</Paragraph>
-                    <Space wrap>
-                      {step.evidence_signal_ids.map((id) => (
-                        <Button key={id} type="link" onClick={() => onNavigate(`singal/${id}`)}>
-                          回到证据 {id.slice(0, 8)}
-                        </Button>
-                      ))}
-                    </Space>
-                  </Card>
-                )) : <Text type="secondary">没有保存需求五步推导记录。</Text>}
-                <Paragraph type="secondary">
-                  交叉验证结论：{trace.demand_cross_validation_conclusion ?? '未记录'}；
-                  需求状态：{trace.demand_review_status ?? '未复核'}。
-                </Paragraph>
-              </Space>
-            ) : <Text type="secondary">该功能未关联需求点。</Text>}
-          </Card>
-
-          <Card className="panel-card" title="车辆功能推导与反向验证">
-            {trace.vehicle_function ? (
-              <Row gutter={[18, 18]}>
-                <Col xs={24} lg={12}>
-                  <Text strong>正向五步</Text>
-                  {forwardSteps.length ? (
-                    <ol>{forwardSteps.map((step, index) => (
-                      <li key={index}><Paragraph style={{ whiteSpace: 'pre-wrap' }}>{typeof step === 'string' ? step : JSON.stringify(step)}</Paragraph></li>
-                    ))}</ol>
-                  ) : <Paragraph type="secondary">未保存正向步骤。</Paragraph>}
-                </Col>
-                <Col xs={24} lg={12}>
-                  <Text strong>反向验证记录</Text>
-                  <Paragraph style={{ whiteSpace: 'pre-wrap' }}>
-                    {trace.vehicle_function.reverse_trace
-                      ? JSON.stringify(trace.vehicle_function.reverse_trace, null, 2)
-                      : '未保存反向验证记录。'}
-                  </Paragraph>
-                </Col>
-              </Row>
-            ) : <Text type="secondary">该需求点尚未形成车辆功能。</Text>}
-          </Card>
-
-          <Card className="panel-card" title="部署标准九宫格">
-            <Row gutter={[12, 12]}>
-              {standardPhases.map((phase) => standardConstraints.map((constraint) => {
-                const cell = trace.standards.find((item) => item.phase === phase && item.constraint_type === constraint)
-                const text = cell
-                  ? cell.requirement_text?.trim() || '已明确留空'
-                  : '尚未填写'
-                return (
-                  <Col key={`${phase}-${constraint}`} xs={24} sm={12} lg={8}>
-                    <Card size="small" title={`${phase} · ${constraint}`}>
-                      <Text type={cell?.requirement_text?.trim() ? undefined : 'secondary'}>{text}</Text>
-                    </Card>
-                  </Col>
-                )
-              }))}
-            </Row>
-          </Card>
-
-          <Card className="panel-card" title="原始信号、文件与图片">
-            {trace.signals.length ? (
-              <Space orientation="vertical" size={12} style={{ width: '100%' }}>
-                {trace.signals.map((signal) => (
-                  <Card key={signal.id} size="small" title={(
-                    <Space wrap>
-                      <Text strong>{signal.title}</Text>
-                      {signal.trace_relationships.includes('theme_member') ? <Tag color="blue">主题成员</Tag> : null}
-                      {signal.trace_relationships.includes('demand_evidence') ? <Tag color="purple">需求直接证据</Tag> : null}
-                      {signal.is_archived ? <Tag color="orange">已归档/停用</Tag> : <Tag color="green">{signal.evidence_status_code}</Tag>}
-                    </Space>
-                  )}>
-                    <Space wrap>
-                      <Text type="secondary">发布主体：{signal.publisher ?? '未记录'}</Text>
-                      <Text type="secondary">更新时间：{formatApiDate(signal.updated_at)}</Text>
-                      <Button type="link" onClick={() => onNavigate(`singal/${signal.id}`)}>打开证据</Button>
-                      {signal.archive_reference_present ? (
-                        <Button type="link" href={signalArchiveUrl(signal.id)} target="_blank" rel="noreferrer">查看网页存档</Button>
-                      ) : null}
-                    </Space>
-                    {signal.document ? (
-                      <Space wrap style={{ display: 'flex', marginTop: 8 }}>
-                        <Text>文档：{signal.document.filename ?? signal.document.id}</Text>
-                        <Tag>{signal.document.ingest_status}</Tag>
-                        <Tag>{signal.document.figure_count} 张图块</Tag>
-                        {signal.document.canonical_object_reference_present ? (
-                          <Button type="link" href={documentCanonicalUrl(signal.document.id)} target="_blank" rel="noreferrer">
-                            打开文档正文
-                          </Button>
-                        ) : <Text type="secondary">尚无可用的规范正文对象</Text>}
-                        {signal.document.figure_count > 0 ? (
-                          <Button type="link" onClick={() => onNavigate(`singal/${signal.id}`)}>在证据页查看图片</Button>
-                        ) : null}
-                      </Space>
-                    ) : null}
-                  </Card>
-                ))}
-              </Space>
-            ) : <PlatformEmptyState title="暂无关联信号" description="该落脚点的主题和证据链目前没有可回溯的信号记录。" />}
-          </Card>
-
-          <Card className="panel-card" title="部署边界与战略版本">
-            <Row gutter={[18, 18]}>
-              <Col xs={24} lg={12}>
-                <Text strong>当前部署边界证据</Text>
-                {trace.standards.filter((item) => item.requirement_text?.trim()).length ? (
-                  <ul>{trace.standards.filter((item) => item.requirement_text?.trim()).map((item) => (
-                    <li key={item.id}>{item.phase} · {item.constraint_type}：{item.requirement_text}</li>
-                  ))}</ul>
-                ) : <Paragraph type="secondary">没有非空部署标准；系统未补写内容。</Paragraph>}
-              </Col>
-              <Col xs={24} lg={12}>
-                {trace.assessment_versions.length ? (
-                  <Timeline items={trace.assessment_versions.map((assessment) => ({
-                    color: assessment.is_current ? 'green' : 'blue',
-                    children: (
-                      <Space orientation="vertical" size={4}>
-                        <Space wrap>
-                          <Text strong>v{assessment.version}</Text>
-                          <Tag color={assessment.is_current ? 'green' : 'default'}>{assessment.is_current ? '当前版本' : '历史版本'}</Tag>
-                          <Text>{assessment.classification}</Text>
-                          <Text>总分 {assessment.score_total}/25</Text>
-                        </Space>
-                        <Text type="secondary">操作者：{assessment.operator_subject ?? '—'} · {formatApiDate(assessment.assessed_at)}</Text>
-                        <Paragraph type="secondary">{assessment.strategy_note ?? '未填写策略备注'}</Paragraph>
-                      </Space>
-                    ),
-                  }))} />
-                ) : <Text type="secondary">尚无已定稿战略版本。</Text>}
-              </Col>
-            </Row>
-            <Divider />
-            <Alert
-              type="info"
-              showIcon
-              title="依据更新状态：无法确认"
-              description="当前数据模型没有需求复核时间基线，系统不会推断信号或标签更新后是否需要重新复核。"
-            />
-          </Card>
-        </Space>
-      ) : landingPointId ? (
-        <PlatformEmptyState title="暂无推导链" description="该落脚点尚无服务端返回的推导关系。" />
-      ) : (
-        <PlatformEmptyState title="请选择落脚点" description="当前展示真实已保存的落脚点链路，不生成示例节点或推导结论。" />
-      )}
-    </div>
   )
 }
 
@@ -1385,7 +782,15 @@ export function UtilityView({ page, onNavigate, signalId }: { page: keyof typeof
       </>
     )
   }
-  if (isReport || page === 'search') {
+  if (isReport) {
+    return (
+      <>
+        <PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} />
+        <ChainReportView onNavigate={onNavigate} />
+      </>
+    )
+  }
+  if (page === 'search') {
     return (
       <>
         <PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} />
@@ -1435,8 +840,6 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
   })
   const funnelSurface = querySurfaceState(overviewQuery)
   const signalsTableLoading = refCodesBootstrapping || signalsFetching
-  const { rows: demandRows } = useDemandRows()
-  const { rows: landingRows } = useLandingRows()
 
   const funnelSteps = useMemo(() => {
     if (!overviewQuery.isSuccess || !overview) return []
@@ -1452,15 +855,6 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
 
   useEeaDataSync(activeMenu)
 
-  useEffect(() => {
-    setLivePlatformSearchData({
-      signals: cachedSignals,
-      themes: themeRows,
-      demands: demandRows,
-      landings: landingRows,
-    })
-    resetPlatformSearchIndex()
-  }, [cachedSignals, themeRows, demandRows, landingRows])
   useLayoutEffect(() => {
     const mq = window.matchMedia('(max-width: 760px)')
     setIsMobile(mq.matches)

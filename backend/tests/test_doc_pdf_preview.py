@@ -1,5 +1,7 @@
 import pytest
 
+pytestmark = pytest.mark.no_db
+
 from app.services.doc_pdf_preview import (
     OfficePreviewUnavailableError,
     build_pdf_preview_bytes,

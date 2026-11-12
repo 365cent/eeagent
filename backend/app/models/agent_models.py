@@ -79,6 +79,7 @@ class AgentRun(Base):
     cancel_requested: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    usage_json: Mapped[dict | None] = mapped_column(JSONB)
 
     session: Mapped[AgentSession] = relationship(back_populates="runs")
 

@@ -297,6 +297,8 @@ def _inline_remote_images(container, page_url: str | None) -> None:
         return
     try:
         import httpx
+
+        from app.platform.http import sync_http_client
     except ImportError:  # pragma: no cover
         return
     referer = page_url
@@ -311,7 +313,7 @@ def _inline_remote_images(container, page_url: str | None) -> None:
             continue
         resolved = src if src.startswith(("http://", "https://")) else urljoin(page_url, src)
         try:
-            with httpx.Client(timeout=20.0, follow_redirects=True) as client:
+            with sync_http_client(timeout=20.0, follow_redirects=True) as client:
                 response = client.get(resolved, headers=headers)
         except httpx.HTTPError:
             continue

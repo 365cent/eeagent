@@ -33,7 +33,7 @@ const FORWARD_STEPS = [
 ] as const
 
 const AUTOMATION_LEVELS = ['L0', 'L1', 'L2', 'L3', 'L4', 'L5']
-const functionQueryKey = (demandId: string | null) => ['eea', 'vehicle-functions', demandId] as const
+const functionQueryKey = eeaQueryKeys.vehicleFunctions
 
 type ForwardStepKey = (typeof FORWARD_STEPS)[number]['key']
 type CoverageDraft = { need: string; coverage: string }

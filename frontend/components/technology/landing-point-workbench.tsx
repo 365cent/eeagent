@@ -27,15 +27,16 @@ import type {
 } from '@/lib/api/types'
 import { eeaQueryKeys } from '@/hooks/use-eea-queries'
 import { PlatformEmptyState } from '@/components/shared/empty-state'
+import { STANDARD_CONSTRAINTS, STANDARD_PHASES } from '@/features/technology/standards'
 
 const { Text } = Typography
 const { TextArea } = Input
 
-const PHASES: LandingPointStandardPhase[] = ['设计', '制造', '运营']
-const CONSTRAINTS: LandingPointStandardConstraint[] = ['工程化', '经济性', '安全合规']
-const allFunctionsKey = ['eea', 'vehicle-functions', null] as const
-const landingPointsKey = (functionId: string | null) => [...eeaQueryKeys.landingPoints, functionId] as const
-const standardsKey = (landingPointId: string) => ['eea', 'landing-point-standards', landingPointId] as const
+const PHASES = STANDARD_PHASES
+const CONSTRAINTS = STANDARD_CONSTRAINTS
+const allFunctionsKey = eeaQueryKeys.vehicleFunctions(null)
+const landingPointsKey = eeaQueryKeys.landingPointsForFunction
+const standardsKey = eeaQueryKeys.landingPointStandards
 
 type EditorMode = 'create' | 'edit' | 'view' | null
 

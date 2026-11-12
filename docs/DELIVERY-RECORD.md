@@ -20,8 +20,8 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 ### DOC-03 — current capture route and worker index slice
 
-- Updated the backend README, project index, and Mac development guide to identify the async capture route, migration head, worker entry point, and worker service template.
-- Evidence: [project index](PROJECT-INDEX.md), [Mac development guide](DEVELOPMENT-MAC.md), [backend README](../backend/README.md), and [docs TODO acceptance remainder](TODO.md#doc-03-架构数据和接口同步).
+- Updated the backend README, project index, and local development docs (now consolidated in root README) to identify the async capture route, migration head, worker entry point, and worker service template.
+- Evidence: [project index](PROJECT-INDEX.md), [root README](../README.md), [backend README](../backend/README.md), and [docs TODO acceptance remainder](TODO.md#doc-03-架构数据和接口同步).
 - Checks: content and links were reviewed in the workspace; no application test was run. Full architecture, identity, audit, and business-state documentation remains open.
 
 ### FE-01 — API-backed overview and technology slice
@@ -89,7 +89,7 @@ This record keeps evidence for implementation slices removed from the remaining-
 ### DOC-03 — migration and identity documentation sync
 
 - Updated current Alembic head references to `0011`, documented the Mac `eea_test` procedure and local reviewer role, removed the incorrect claim that an IP address is a user identity, and removed the synthetic eFuse chain from the local seed. A test confirms repeat-safe vocabulary seeding without synthetic business records.
-- Evidence: [backend README](../backend/README.md), [Mac development guide](DEVELOPMENT-MAC.md), [root TODO](../TODO.md), and subsystem TODOs.
+- Evidence: [backend README](../backend/README.md), [root README](../README.md), [root TODO](../TODO.md), and subsystem TODOs.
 - Checks: local content and migration-head references reviewed. No Linux documentation validation was run.
 
 ### DOC-02 — external input register slice
@@ -135,6 +135,89 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 - The Windows task view lists individual items, opens their signals, retries eligible failures with their original identity, and cancels queued items before the first attempt. Manual WeChat recovery preserves the original URL and submits pasted text for review. Windows runtime acceptance remains open.
 - The collector subagent stopped before verification. On review, two identical declarations of the recovered-job cancellation test prevented compilation of the queue tests. Removed the duplicate and retained the test case.
-- On macOS with Go 1.24.0, the portable package checks in the [Mac guide](DEVELOPMENT-MAC.md) passed with the test cache disabled. The Windows/amd64 build of `./cmd/capture` also succeeded. Windows GUI, real Edge/Chrome capture, multi-file recovery across application restart and package installation still need a Windows run.
+- On macOS with Go 1.24.0, the portable package checks documented in [README.md](../README.md) passed with the test cache disabled. The Windows/amd64 build of `./cmd/capture` also succeeded. Windows GUI, real Edge/Chrome capture, multi-file recovery across application restart and package installation still need a Windows run.
 - The frontend production build using the installed Next executable and scoped Ant Design lint passed after clarifying the trace recovery action label. The pnpm launcher failed to locate its cached 12.3.4 entry point during the earlier build attempt.
 - Implementation and remaining work are in the [queue](../client/internal/queue/queue.go), [queue tests](../client/internal/queue/queue_test.go), [Windows UI](../client/internal/ui/app.go) and [client TODO](../client/TODO.md#cc-04-gui-和人工恢复).
+
+## 2026-11-12
+
+### Release readiness wave 0 — foundation migration and CI (partial)
+
+- Migration [0016_release_foundation](../backend/migrations/versions/0016_release_foundation.py): capture `owner_subject` and cooperative `cancel_requested_at`; signal list date fields; demand confirm timestamps; audit provenance columns; `eea_embedding_cache`, `eea_signal_source`, `eea_stored_object_orphan`, `eea_chain_report`.
+- BE-01/03/06/07/08/15 stubs: capture identity and orphan tracking, cooperative cancel hook, `X-Total-Count` + tag filter, demand `confirmed_at`, function stale-save **409**, panorama substantive standard counts, chain report Markdown API (`POST/GET /api/v1/reports`, PDF **501**).
+- Test harness: default `EEA_PYTEST_LOCK=takeover` so stale `.pg/eea_test_suite.lock` does not block disposable `eea_test` runs; slice runner documented in [pytest_slices.sh](../backend/scripts/pytest_slices.sh).
+- Added [.github/workflows/ci.yml](../.github/workflows/ci.yml) (backend slices + frontend build/lint + Go `-short`).
+- Checks (macOS, branch `release/readiness-wave0`): `pytest_slices.sh contracts` **1 passed**; `unit` **66 passed**; `capture` **33 passed** (~7.5 min); OpenAPI snapshot **1 passed** after reports router. Full `integration` slice re-run in progress this session. Linux Actions postgres matrix and wave 2–5 UI/client/deploy acceptance remain open.
+
+### Release readiness wave 1 — backend BE-01…05 / BE-17 slice
+
+- **BE-01:** Cooperative cancel on running capture jobs (heartbeat + pre-processing gate); `cancel_requested_at` on `CaptureJobOut`; production URL-only rejection test; [`orphan_maintenance`](../backend/app/services/orphan_maintenance.py) CLI retained.
+- **BE-02:** `event_date_text` / `event_date_precision` derived on ingest via [`event_dates.py`](../backend/app/domains/evidence/event_dates.py); exposed on `SignalBase`.
+- **BE-04:** DB-backed embedding cache wired into optional `create_embeddings(..., db=)`; tag-suggestions `details` populated.
+- **BE-05:** Structured aggregation consistency gates in [`judgment.py`](../backend/app/services/judgment.py) + [`theme_match.py`](../backend/app/domains/evidence/theme_match.py); migration **0017** theme `source_count`; signal sources API; offline [`theme_clustering.py`](../backend/app/services/theme_clustering.py) report CLI.
+- **BE-17:** Demand serialization remains in domains; import-linter contracts kept.
+- Tests: production URL-only guard and event-date fields in [`test_capture_unified.py`](../backend/tests/test_capture_unified.py); cooperative running-job cancel in [`test_capture_jobs.py`](../backend/tests/test_capture_jobs.py).
+- Checks (macOS, branch `release/readiness-wave0`, this session): `contracts` **kept**; `unit` **65 passed**; `capture` **33 passed**; `openapi` **1 passed**; full `integration` slice running (`/tmp/eea-integration-wave1.log`). DOC-02 golden fixtures, OPS-03 production identity, and Linux worker lifecycle remain open for strict BE acceptance.
+
+### Release readiness wave 2 — trace freshness, documents, skills, reports
+
+- **BE-11:** `compute_basis_freshness` compares `DemandPoint.confirmed_at` to theme/evidence `Signal.updated_at` and blob readability (`fresh` / `stale` / `unconfirmed` / `unknown_untracked`).
+- **BE-12:** `GET/POST /api/v1/documents/{id}/figures` and `GET/POST …/keywords` (chunk index + tagging pipeline).
+- **BE-13:** `python -m app.services.skill_eval` fixture runner; existing `skills.py` declarative loader unchanged.
+- **BE-15:** Fixed chain report Markdown render (`build_signal_trace_markdown` tuple unpack); `test_chain_reports.py`.
+- OpenAPI snapshot adds document figure/keyword routes.
+- Checks (macOS): `unit` **65 passed**; `contracts` **kept**; `test_chain_reports` + trace freshness cases **3 passed** (isolated `eea_test`).
+
+### Public release v0.1.0 — engineering closure slice (2026-11-12)
+
+- **BE-15**: Chain reports export deterministic Markdown + ReportLab PDF (`STSong-Light` CID); expanded landing-point sections (需求五步、交叉验证、功能正反向、九宫格、战略版本).
+- **BE-14**: `GET /api/v1/agent/sessions/{id}/messages|patches`, `GET /api/v1/agent/skills/status`.
+- **BE-01/OPS-03**: Capture job `claim|client-*|retry` routes use `get_capture_identity` + owner access checks.
+- **CC-03/CC-07**: Client `ca_cert_path`, bearer token via env/file, HTTPS/non-loopback disables LAN `auto_api`; `platform` split into `probe.go`, `documents.go`, `factory.go`.
+- **FE-10/11/12**: PDF chain report download; multi-session agent UI with patches/memories + legacy fallback; hide unconfigured LaunchDarkly banner; remove `@vercel/analytics`.
+- **Repo**: Apache-2.0 `LICENSE`, `THIRD_PARTY_NOTICES.md`; removed meetings PDF bundle and enterprise UI screenshot study from public tree (retained `docs/reference/*.docx`, `docs/wbs/*.xlsx`).
+- Checks (macOS): `test_chain_reports` **3 passed**; `test_agent_workflow::test_session_messages_and_skills_status` passed; `go test -short ./internal/config ./internal/platform` passed; `pnpm typecheck` + `pnpm build` passed. Linux OPS-06 / Windows CC-06 sign-off remain open.
+- CI (GitHub `main` @ `c662098`): `deploy-compose` **failed** on `docker compose config` because `deploy/.env` was missing before validate (fixed in follow-up: copy `.env.compose.example` before config).
+
+### Release recheck — v0.1.0 post-public (2026-11-12)
+
+- **FE-11**: Evidence assistant wires SSE replay (`agent-events.ts`), run cancel API, and `sessionStorage` session persistence per signal; still no Playwright E2E or in-run live token stream (backend buffers SSE until turn commit).
+- **CI**: `deploy-compose` copies `deploy/.env.compose.example` → `.env` before `docker compose config` + build; validate/build run with `working-directory: deploy`.
+- **Docs**: `platform-implementation-plan.md` no longer links removed `enterprise-ui-study.md`.
+- Checks (macOS, this recheck): `contracts` **1 passed**; `unit` **65 passed**; `pnpm typecheck` **passed**; `integration` slice **`341 passed, 1 skipped`** (`pytest -m db`, ~77 min, exclusive `eea_test`, 2026-11-12).
+
+### Release readiness wave 4 — Docker Compose Linux deploy (OPS-01/04/05 partial)
+
+- [`deploy/docker-compose.yml`](../deploy/docker-compose.yml): PostgreSQL, migrate, API, worker, Next.js, Nginx; shared `objectstore` volume.
+- Images: [`deploy/Dockerfile.backend`](../deploy/Dockerfile.backend), [`deploy/Dockerfile.frontend`](../deploy/Dockerfile.frontend); [`deploy/nginx/eea-intranet.conf`](../deploy/nginx/eea-intranet.conf).
+- Ops scripts: `compose-up.sh`, `compose-migrate.sh`, `backup-eea.sh`, `restore-eea.sh`.
+- `/readyz` adds `semantic_gateway` degraded when LLM/MaaS unset; DB/object failures still 503.
+- CI job `deploy-compose`: `docker compose config` + `build` on Ubuntu.
+- Checks: `docker compose config` (local when Docker available). OPS-06 physical host sign-off still open.
+
+### Release readiness wave 3 — frontend FE-02/03/10/11/12 slice
+
+- **FE-10:** 链路报告页 [`chain-report-view.tsx`](../frontend/views/utility/chain-report-view.tsx) 接入 `POST/GET /api/v1/reports` 与 Markdown 下载预览；追溯工作台展示 `basis_freshness` 标签（[`basis-freshness.ts`](../frontend/lib/basis-freshness.ts)）。
+- **FE-02/03:** 信号列表读取 `X-Total-Count` 服务端分页、技术标签 `tag` 筛选；标签建议展示 `TagSuggestion.details` 折叠面板。
+- **FE-11（局部）:** 文档入库结果支持图块索引与章节关键词读取/重算（BE-12 API）。
+- **FE-12:** 新增 `pnpm typecheck`；`pnpm build` + `tsc --noEmit` 通过（macOS）。
+- 待续：Playwright E2E、FE-13 大规模 view 拆分；Agent UI 已接 SSE 重放与取消 API（非流式 token）。
+
+## 2026-11-11
+
+### BE-14 — Pydantic AI durable agent workflow (backend)
+
+- Single orchestration path via **Pydantic AI 2.63** (`app.services.agent_workflow.build_eea_agent`): typed `AgentDeps`, `AgentTurn`, seven registered tools, `DeferredToolRequests` for `apply_confirmed_patch`, citation ledger validation, and `ModelMessagesTypeAdapter` persistence on `eea_agent_session.model_messages_json`.
+- HTTP: `POST/GET /api/v1/agent/sessions`, messages, SSE (`Last-Event-ID`), run cancel, patch confirm/reject, memories — all gated by `get_operator_identity` (no caller `user_id`/`role`). Legacy `POST /api/v1/signals/{id}/assistant/messages` unchanged.
+- Migration [0013_agent_workflow](../backend/migrations/versions/0013_agent_workflow.py): sessions, runs, messages, SSE events, deferred patches, memory, document chunks/figures for RAG citations.
+- Dynamic instructions: `agent_instructions.build_instruction_addon` (project, page context, operator memory) injected per run; SSE events buffered until turn completion to avoid mid-run session corruption.
+- `draft_trace_report` traverses signal → theme → demand → function → landing → standards/assessment via [agent_trace.py](../backend/app/services/agent_trace.py).
+- Evidence: [agent API](../backend/app/api/v1/agent.py), [runtime](../backend/app/services/agent_runtime.py), [patches](../backend/app/services/agent_patches.py), [tests/test_agent_workflow.py](../backend/tests/test_agent_workflow.py), [tests/test_pydantic_ai_wiring.py](../backend/tests/test_pydantic_ai_wiring.py).
+- Checks (macOS, isolated PostgreSQL `eea_test`): `uv run pytest -q tests/test_agent_workflow.py tests/test_pydantic_ai_wiring.py` → **18 passed** (includes AT-AGT smoke: SSE replay, patch propose/confirm/duplicate/stale/expired/reject, session message JSON persistence, two-actor isolation, gateway unconfigured path). Optional live: `EEA_LLM_INTEGRATION=1 … test_agent_live.py`. Full backend suite not re-signed in this slice when concurrent long pytest jobs were holding the test DB. FE-11 UI, OPS-03 production identity, and Linux gateway SLO remain open.
+
+### LaunchDarkly — WBS 七环节能力进度标记（workflow flags）
+
+- Marked the four workflow flags that map to the six platform capabilities under review (环节一/四/五/六): Chinese descriptions, capability tags (`cap-*`), `impl-partial` / `wbs-workflow`, and custom properties `eea-capability-status=partial`, `eea-acceptance=open`, `eea-wbs-ref` (BE/REQ ids).
+- Flags (project **default**, targeting still off; code `variation_bool(..., default=True)` unchanged): [evidence-capture](https://app.launchdarkly.com/default/test/features/evidence-capture), [demand-function-mapping](https://app.launchdarkly.com/default/test/features/demand-function-mapping), [technology-decomposition](https://app.launchdarkly.com/default/test/features/technology-decomposition), [deployment-standards](https://app.launchdarkly.com/default/test/features/deployment-standards).
+- Implementation cross-check (no code change in this slice): server gates in [function_validation.py](../backend/app/services/function_validation.py) + [functions.py](../backend/app/api/v1/functions.py) (五步保存/发布、功能卡); [landing_points.py](../backend/app/api/v1/landing_points.py) (五域落脚点); [standards.py](../backend/app/api/v1/standards.py) (九宫格 NULL 留空); document ingest under BE-01/BE-12. Subsystem TODO BE-07/08/09/01 and eFuse/黄金集 acceptance remain open.
+- Checks: LaunchDarkly `update-flag` succeeded for the four flags above. Scoped integration re-run (`test_functions.py`, `test_standards.py`, `test_landing_points.py`) was **not** signed here: multiple concurrent local pytest jobs held `eea_test` / `.pg/eea_test_suite.lock`; prior delivery slices already recorded green function/standards/landing tests when the DB was exclusive.

@@ -4,17 +4,17 @@ EEA 前瞻技术扫描平台的**采集客户端**：在本机可见浏览器里
 
 瘦客户端原则见 [`../docs/platform-implementation-plan.md`](../docs/platform-implementation-plan.md) §7 与 [`TODO.md`](TODO.md)：客户端**不做** HTML→Markdown、不做文档解析、不打包 Chromium、不调用 LLM。
 
-页面采集优先使用 `POST /api/v1/capture/jobs`（`url` + `file` + 稳定 `submission_id`），随后轮询 `GET /api/v1/capture/jobs/{id}`，直到服务端返回成功、失败或取消。OpenAPI 缺少异步任务契约时，回退到同步 `/capture` 或旧 `/signals/capture`，不在 POST 结果不明时改投另一端点。开发机组件检查见 [`../docs/DEVELOPMENT-MAC.md`](../docs/DEVELOPMENT-MAC.md)，Windows 发布验收清单见 [`TODO.md`](TODO.md)。
+页面采集优先使用 `POST /api/v1/capture/jobs`（`url` + `file` + 稳定 `submission_id`），随后轮询 `GET /api/v1/capture/jobs/{id}`，直到服务端返回成功、失败或取消。OpenAPI 缺少异步任务契约时，回退到同步 `/capture` 或旧 `/signals/capture`，不在 POST 结果不明时改投另一端点。开发环境见 [`../README.md`](../README.md)。发布验收见 [`TODO.md`](TODO.md)。
 
 ---
 
 ## 构建
 
-需要 **Go ≥ 1.24**（`windigo@v0.2.6` 用到 `unicode/utf16.RuneLen`，Go 1.22 编译失败）。企网没有 Go module proxy，依赖已在本机模块缓存；如需新装工具链，可下载便携版并直接用其 `go.exe`（不必写系统 PATH）：
+按 `go.mod` 使用 **Go 1.26 或更新版本**。企业内网应使用已批准的工具链和模块来源；可将 Windows 便携工具链解压到 `.toolchain` 后直接调用其 `go.exe`（不必写系统 PATH）：
 
 ```bash
-curl -sSL --ssl-no-revoke -o go.zip https://mirrors.aliyun.com/golang/go1.24.13.windows-amd64.zip
-unzip -q go.zip -d .toolchain && rm go.zip
+# 将已取得的 Go 1.26 Windows 工具链 ZIP 解压到 .toolchain
+unzip -q go.zip -d .toolchain
 ```
 
 开发构建：
@@ -58,6 +58,7 @@ internal/cdp/        DevTools WebSocket（stdlib，无第三方依赖）
 internal/capture/    启动 Edge/Chrome、注入 SingleFile、取回归档
 internal/singlefile/ 内嵌的 SingleFile core（AGPL，见 scripts/vendor-singlefile.sh）
 internal/archive/    离线 HTML 的原链接推断
+internal/application/ 会话级 API、浏览器和队列构造与关闭
 internal/platform/   multipart 上传（capture / documents），绑定内网网卡
 internal/queue/      并发、重试、抓取/上传超时
 internal/netinfo/    物理网卡选择（跳过 VMnet/Hyper-V）

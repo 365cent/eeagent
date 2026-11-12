@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.identity import OperatorIdentity, get_operator_identity
 from app.db.base import get_db
+from app.platform.launchdarkly import DEMAND_FUNCTION_MAPPING, require_feature, track_workflow_success
 from app.models.models import DemandPoint, VehicleFunction, Vocab
 from app.schemas.schemas import FunctionCreate, FunctionOut, FunctionUpdate
 from app.services.audit import record_correction
@@ -16,7 +17,11 @@ from app.services.function_validation import (
     validate_reverse_trace,
 )
 
-router = APIRouter(prefix="/functions", tags=["functions"])
+router = APIRouter(
+    prefix="/functions",
+    tags=["functions"],
+    dependencies=[Depends(require_feature(DEMAND_FUNCTION_MAPPING))],
+)
 
 
 async def _ensure_demand_validated(
@@ -103,6 +108,9 @@ async def update_function(
     if f is None:
         raise HTTPException(404, "function not found")
     data = payload.model_dump(exclude_unset=True)
+    expected = data.pop("expected_updated_at", None)
+    if expected is not None and f.updated_at and expected < f.updated_at:
+        raise HTTPException(409, "功能记录已被他人更新，请刷新后重试")
     if "forward_trace" in data:
         error = validate_forward_trace(data["forward_trace"])
         if error:
@@ -178,4 +186,6 @@ async def update_function(
     elif data.get("published") is True:
         f.published = True
     await db.commit()
+    if f.published:
+        track_workflow_success(DEMAND_FUNCTION_MAPPING)
     return f
