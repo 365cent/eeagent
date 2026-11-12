@@ -184,7 +184,7 @@ This record keeps evidence for implementation slices removed from the remaining-
 - **FE-11**: Evidence assistant wires SSE replay (`agent-events.ts`), run cancel API, and `sessionStorage` session persistence per signal; still no Playwright E2E or in-run live token stream (backend buffers SSE until turn commit).
 - **CI**: `deploy-compose` copies `deploy/.env.compose.example` → `.env` before `docker compose config` + build; validate/build run with `working-directory: deploy`.
 - **Docs**: `platform-implementation-plan.md` no longer links removed `enterprise-ui-study.md`.
-- Checks (macOS, this recheck): `contracts` **1 passed**; `unit` **65 passed**; `pnpm typecheck` **passed**; `integration` slice **in progress** (`pytest -m db`, exclusive `eea_test`).
+- Checks (macOS, this recheck): `contracts` **1 passed**; `unit` **65 passed**; `pnpm typecheck` **passed**; `integration` slice **`341 passed, 1 skipped`** (`pytest -m db`, ~77 min, exclusive `eea_test`, 2026-11-12).
 
 ### Release readiness wave 4 — Docker Compose Linux deploy (OPS-01/04/05 partial)
 
