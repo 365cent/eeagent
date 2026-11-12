@@ -6,6 +6,7 @@ Revises: 0015_agent_run_usage
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 
 revision = "0016_release_foundation"
@@ -13,49 +14,29 @@ down_revision = "0015_agent_run_usage"
 branch_labels = None
 depends_on = None
 
+_ADD_COLUMNS = [
+    "ALTER TABLE eea_capture_job ADD COLUMN IF NOT EXISTS owner_subject TEXT",
+    "ALTER TABLE eea_capture_job ADD COLUMN IF NOT EXISTS cancel_requested_at TIMESTAMPTZ",
+    "ALTER TABLE eea_vehicle_function ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+    "ALTER TABLE eea_signal ADD COLUMN IF NOT EXISTS event_date_text TEXT",
+    "ALTER TABLE eea_signal ADD COLUMN IF NOT EXISTS event_date_precision TEXT",
+    "ALTER TABLE eea_demand_point ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT now()",
+    "ALTER TABLE eea_demand_point ADD COLUMN IF NOT EXISTS confirmed_at TIMESTAMPTZ",
+    "ALTER TABLE eea_demand_point ADD COLUMN IF NOT EXISTS confirmed_by_subject TEXT",
+    "ALTER TABLE eea_demand_point ADD COLUMN IF NOT EXISTS low_freq_strong_signal BOOLEAN NOT NULL DEFAULT false",
+    "ALTER TABLE eea_demand_point ADD COLUMN IF NOT EXISTS low_freq_strong_signal_reason TEXT",
+    "ALTER TABLE eea_correction_audit ADD COLUMN IF NOT EXISTS reason TEXT",
+    "ALTER TABLE eea_correction_audit ADD COLUMN IF NOT EXISTS model_version TEXT",
+    "ALTER TABLE eea_correction_audit ADD COLUMN IF NOT EXISTS rule_version TEXT",
+    "ALTER TABLE eea_correction_audit ADD COLUMN IF NOT EXISTS skill_version TEXT",
+    "ALTER TABLE eea_correction_audit ADD COLUMN IF NOT EXISTS score_source TEXT",
+]
+
 
 def upgrade() -> None:
-    op.add_column("eea_capture_job", sa.Column("owner_subject", sa.Text(), nullable=True))
-    op.add_column(
-        "eea_capture_job",
-        sa.Column("cancel_requested_at", sa.DateTime(timezone=True), nullable=True),
-    )
-
-    op.add_column(
-        "eea_vehicle_function",
-        sa.Column(
-            "updated_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
-            nullable=False,
-        ),
-    )
-
-    op.add_column("eea_signal", sa.Column("event_date_text", sa.Text(), nullable=True))
-    op.add_column("eea_signal", sa.Column("event_date_precision", sa.Text(), nullable=True))
-
-    op.add_column(
-        "eea_demand_point",
-        sa.Column(
-            "updated_at",
-            sa.DateTime(timezone=True),
-            server_default=sa.text("now()"),
-            nullable=False,
-        ),
-    )
-    op.add_column("eea_demand_point", sa.Column("confirmed_at", sa.DateTime(timezone=True), nullable=True))
-    op.add_column("eea_demand_point", sa.Column("confirmed_by_subject", sa.Text(), nullable=True))
-    op.add_column(
-        "eea_demand_point",
-        sa.Column("low_freq_strong_signal", sa.Boolean(), server_default="false", nullable=False),
-    )
-    op.add_column("eea_demand_point", sa.Column("low_freq_strong_signal_reason", sa.Text(), nullable=True))
-
-    op.add_column("eea_correction_audit", sa.Column("reason", sa.Text(), nullable=True))
-    op.add_column("eea_correction_audit", sa.Column("model_version", sa.Text(), nullable=True))
-    op.add_column("eea_correction_audit", sa.Column("rule_version", sa.Text(), nullable=True))
-    op.add_column("eea_correction_audit", sa.Column("skill_version", sa.Text(), nullable=True))
-    op.add_column("eea_correction_audit", sa.Column("score_source", sa.Text(), nullable=True))
+    bind = op.get_bind()
+    for stmt in _ADD_COLUMNS:
+        bind.execute(text(stmt))
 
     op.create_table(
         "eea_embedding_cache",
@@ -64,6 +45,7 @@ def upgrade() -> None:
         sa.Column("vocab_fingerprint", sa.CHAR(length=64), primary_key=True, nullable=False),
         sa.Column("vector_json", JSONB(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
+        if_not_exists=True,
     )
 
     op.create_table(
@@ -76,8 +58,14 @@ def upgrade() -> None:
         sa.Column("provenance", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.UniqueConstraint("signal_id", "url_normalized", name="uq_signal_source_url"),
+        if_not_exists=True,
     )
-    op.create_index("eea_signal_source_signal_idx", "eea_signal_source", ["signal_id"])
+    op.create_index(
+        "eea_signal_source_signal_idx",
+        "eea_signal_source",
+        ["signal_id"],
+        if_not_exists=True,
+    )
 
     op.create_table(
         "eea_stored_object_orphan",
@@ -85,6 +73,7 @@ def upgrade() -> None:
         sa.Column("reason", sa.Text(), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.text("now()"), nullable=False),
         sa.Column("resolved_at", sa.DateTime(timezone=True), nullable=True),
+        if_not_exists=True,
     )
 
     op.create_table(
@@ -105,6 +94,7 @@ def upgrade() -> None:
             "(demand_point_id IS NOT NULL) <> (landing_point_id IS NOT NULL)",
             name="ck_chain_report_target",
         ),
+        if_not_exists=True,
     )
 
     # Backfill primary signal sources from existing signals.
