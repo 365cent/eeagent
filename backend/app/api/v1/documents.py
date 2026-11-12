@@ -20,7 +20,11 @@ from app.core.config import get_settings
 from app.platform.launchdarkly import EVIDENCE_CAPTURE, require_feature, track_workflow_success
 from app.db.base import get_db
 from app.models.models import Document
-from app.schemas.schemas import DocumentDetail, DocumentRawOut
+from app.models.agent_models import DocumentFigure
+from app.schemas.schemas import DocumentDetail, DocumentFigureOut, DocumentKeywordOut, DocumentRawOut
+from app.services.agent_rag import ensure_document_index
+from app.services.objectstore import load_body
+from app.services.tagging import suggest_tech_tags, text_for_tagging
 from app.domains.evidence.document_pipeline import (
     doc_limits,
     document_raw_out,
@@ -240,3 +244,62 @@ async def reingest_document(document_id: uuid.UUID, db: AsyncSession = Depends(g
         )
     await _ingest(db, doc, data)
     return _detail(doc)
+
+
+@router.get("/{document_id}/figures", response_model=list[DocumentFigureOut])
+async def list_document_figures(document_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    doc = await _load(db, document_id)
+    await ensure_document_index(db, doc)
+    await db.commit()
+    rows = (
+        await db.execute(
+            select(DocumentFigure)
+            .where(DocumentFigure.document_id == document_id)
+            .order_by(DocumentFigure.figure_index)
+        )
+    ).scalars().all()
+    if not rows and doc.figure_count:
+        rows = [
+            DocumentFigure(
+                document_id=document_id,
+                figure_index=index,
+                caption=None,
+                review_status="ready",
+            )
+            for index in range(1, doc.figure_count + 1)
+        ]
+    return [
+        DocumentFigureOut(
+            figure_index=row.figure_index,
+            caption=row.caption,
+            review_status=row.review_status,
+        )
+        for row in rows
+    ]
+
+
+@router.get("/{document_id}/keywords", response_model=list[DocumentKeywordOut])
+async def list_document_keywords(document_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    doc = await _load(db, document_id)
+    await ensure_document_index(db, doc)
+    text = ""
+    if doc.canonical_md_object_key:
+        text = load_body(doc.canonical_md_object_key) or ""
+    if not text:
+        raise HTTPException(409, "document has no canonical text; ingest or retry first")
+    tags, source, top_score = await suggest_tech_tags(doc.filename or "", text)
+    return [
+        DocumentKeywordOut(
+            term=name,
+            score=top_score if index == 0 else None,
+            chunk_id=None,
+            source=source,
+        )
+        for index, name in enumerate(tags)
+    ]
+
+
+@router.post("/{document_id}/extract-keywords", response_model=list[DocumentKeywordOut])
+async def extract_document_keywords(document_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Recompute keyword candidates from canonical Markdown (same pipeline as GET keywords)."""
+    return await list_document_keywords(document_id, db)

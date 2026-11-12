@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import pytest
@@ -170,6 +171,60 @@ async def test_failed_job_retries_then_succeeds(client, fake_ingest):
     job = (await client.get(f"/api/v1/capture/jobs/{job_id}")).json()
     assert job["status"] == "succeeded"
     assert await _count_signals(client) == before + 1
+
+
+async def test_cancel_running_job_creates_no_signal(client, monkeypatch):
+    submission_id = uuid.uuid4()
+    job_url = "https://mp.weixin.qq.com/s/efuse-job-cancel-running"
+    created = await _create_job(
+        client,
+        submission_id=submission_id,
+        files={"file": ("page.html", ARCHIVE_HTML.encode("utf-8"), "text/html")},
+        data={"url": job_url},
+    )
+    assert created.status_code == 202
+    job_id = created.json()["id"]
+    before = await _count_signals(client)
+
+    hold = asyncio.Event()
+
+    from app.services import capture_jobs as cj
+
+    real_set_stage = cj._set_stage
+
+    async def patched_set_stage(job_id, worker_id, stage):
+        if stage == "processing":
+            hold.set()
+            await asyncio.sleep(5)
+        return await real_set_stage(job_id, worker_id, stage)
+
+    monkeypatch.setattr(cj, "_set_stage", patched_set_stage)
+
+    from app.domains.evidence import html_capture
+
+    async def block_html_after_cancel(*_a, **_kw):
+        raise AssertionError("ingest must not run once cooperative cancel is requested")
+
+    monkeypatch.setattr(html_capture, "_signal_from_html", block_html_after_cancel)
+
+    worker_id = make_worker_id()
+    claimed = await claim_next_job(worker_id)
+    assert claimed == uuid.UUID(job_id)
+
+    task = asyncio.create_task(run_claimed_job(claimed, worker_id))
+    await asyncio.wait_for(hold.wait(), timeout=8.0)
+    running = (await client.get(f"/api/v1/capture/jobs/{job_id}")).json()
+    assert running["status"] == "running"
+
+    cancelled = await client.post(f"/api/v1/capture/jobs/{job_id}/cancel")
+    assert cancelled.status_code == 200
+    assert cancelled.json()["cancel_requested_at"] is not None
+
+    await asyncio.wait_for(task, timeout=60)
+    job_resp = await client.get(f"/api/v1/capture/jobs/{job_id}")
+    assert job_resp.status_code == 200, job_resp.text
+    assert job_resp.json()["status"] == "cancelled"
+    assert await _count_signals(client) == before
 
 
 async def test_cancel_queued_job_creates_no_signal(client, fake_ingest):

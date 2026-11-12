@@ -6,6 +6,8 @@ app.api.v1.capture), the document path stubs ingest_document like
 tests/test_documents_raw.py does.
 """
 
+from types import SimpleNamespace
+
 import pytest
 
 from app.services.url_fetch import FetchedPage, FetchError
@@ -159,3 +161,35 @@ async def test_empty_file_without_url_is_422(client):
         "/api/v1/capture", files={"file": ("empty.html", b"", "text/html")}
     )
     assert response.status_code == 422
+
+
+async def test_url_only_rejected_in_production(client, monkeypatch):
+    monkeypatch.setattr(
+        "app.api.v1.capture.get_settings",
+        lambda: SimpleNamespace(
+            app_env="production",
+            capture_server_fetch_enabled=True,
+            doc_raw_upload_max_bytes=50_000_000,
+        ),
+    )
+
+    async def fail_fetch(url):
+        raise AssertionError("fetch_url must not run when production disables url-only capture")
+
+    monkeypatch.setattr("app.api.v1.capture.fetch_url", fail_fetch)
+    before = await _count_signals(client)
+    response = await client.post("/api/v1/capture", data={"url": PAGE_URL})
+    assert response.status_code == 422
+    assert "浏览器" in response.json()["detail"]
+    assert await _count_signals(client) == before
+
+
+async def test_html_capture_sets_event_date_fields(client):
+    response = await client.post(
+        "/api/v1/capture", data={"url": PAGE_URL}, files=_html_file()
+    )
+    assert response.status_code == 201, response.text
+    sig = response.json()["signal"]
+    assert sig.get("event_date_precision") in {"year", "month", "day", "unknown", None}
+    if sig.get("published_at"):
+        assert sig.get("event_date_text")

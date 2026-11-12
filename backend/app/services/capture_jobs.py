@@ -330,6 +330,9 @@ async def _execute_capture(job_id: uuid.UUID, worker_id: str) -> None:
             data, filename, mime, source_url = page.data, page.filename, page.content_type, page.final_url
 
         await _set_stage(job_id, worker_id, "processing")
+        if await _is_cancel_requested(job_id):
+            await _mark_cancelled(job_id, worker_id)
+            return
         # Bulk import batches: skip per-figure vision LLM (96 URLs × many figures would stall the queue).
         vision_captions = import_batch_id is None
         if _is_html(mime=mime, filename=filename):

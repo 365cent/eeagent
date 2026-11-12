@@ -149,6 +149,25 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Added [.github/workflows/ci.yml](../.github/workflows/ci.yml) (backend slices + frontend build/lint + Go `-short`).
 - Checks (macOS, branch `release/readiness-wave0`): `pytest_slices.sh contracts` **1 passed**; `unit` **66 passed**; `capture` **33 passed** (~7.5 min); OpenAPI snapshot **1 passed** after reports router. Full `integration` slice re-run in progress this session. Linux Actions postgres matrix and wave 2–5 UI/client/deploy acceptance remain open.
 
+### Release readiness wave 1 — backend BE-01…05 / BE-17 slice
+
+- **BE-01:** Cooperative cancel on running capture jobs (heartbeat + pre-processing gate); `cancel_requested_at` on `CaptureJobOut`; production URL-only rejection test; [`orphan_maintenance`](../backend/app/services/orphan_maintenance.py) CLI retained.
+- **BE-02:** `event_date_text` / `event_date_precision` derived on ingest via [`event_dates.py`](../backend/app/domains/evidence/event_dates.py); exposed on `SignalBase`.
+- **BE-04:** DB-backed embedding cache wired into optional `create_embeddings(..., db=)`; tag-suggestions `details` populated.
+- **BE-05:** Structured aggregation consistency gates in [`judgment.py`](../backend/app/services/judgment.py) + [`theme_match.py`](../backend/app/domains/evidence/theme_match.py); migration **0017** theme `source_count`; signal sources API; offline [`theme_clustering.py`](../backend/app/services/theme_clustering.py) report CLI.
+- **BE-17:** Demand serialization remains in domains; import-linter contracts kept.
+- Tests: production URL-only guard and event-date fields in [`test_capture_unified.py`](../backend/tests/test_capture_unified.py); cooperative running-job cancel in [`test_capture_jobs.py`](../backend/tests/test_capture_jobs.py).
+- Checks (macOS, branch `release/readiness-wave0`, this session): `contracts` **kept**; `unit` **65 passed**; `capture` **33 passed**; `openapi` **1 passed**; full `integration` slice running (`/tmp/eea-integration-wave1.log`). DOC-02 golden fixtures, OPS-03 production identity, and Linux worker lifecycle remain open for strict BE acceptance.
+
+### Release readiness wave 2 — trace freshness, documents, skills, reports
+
+- **BE-11:** `compute_basis_freshness` compares `DemandPoint.confirmed_at` to theme/evidence `Signal.updated_at` and blob readability (`fresh` / `stale` / `unconfirmed` / `unknown_untracked`).
+- **BE-12:** `GET/POST /api/v1/documents/{id}/figures` and `GET/POST …/keywords` (chunk index + tagging pipeline).
+- **BE-13:** `python -m app.services.skill_eval` fixture runner; existing `skills.py` declarative loader unchanged.
+- **BE-15:** Fixed chain report Markdown render (`build_signal_trace_markdown` tuple unpack); `test_chain_reports.py`.
+- OpenAPI snapshot adds document figure/keyword routes.
+- Checks (macOS): `unit` **65 passed**; `contracts` **kept**; `test_chain_reports` + trace freshness cases **3 passed** (isolated `eea_test`).
+
 ## 2026-11-11
 
 ### BE-14 — Pydantic AI durable agent workflow (backend)

@@ -166,6 +166,8 @@ class SignalBase(BaseModel):
     channel_code: str
     publisher: str | None
     published_at: datetime | None
+    event_date_text: str | None = None
+    event_date_precision: str | None = None
     value_chain_stage_code: str | None
     signal_type_code: str | None
     evolution_node_code: str | None
@@ -273,6 +275,19 @@ class DocumentDetail(DocumentRawOut):
     ingested_at: datetime | None = None
     has_canonical: bool = False
     ingest_error: str | None = None
+
+
+class DocumentFigureOut(BaseModel):
+    figure_index: int
+    caption: str | None = None
+    review_status: str
+
+
+class DocumentKeywordOut(BaseModel):
+    term: str
+    score: float | None = None
+    chunk_id: int | None = None
+    source: str = "heuristic"
 
 
 class AssistantChatTurn(BaseModel):
@@ -733,6 +748,7 @@ class CaptureJobOut(BaseModel):
     started_at: datetime | None = None
     heartbeat_at: datetime | None = None
     finished_at: datetime | None = None
+    cancel_requested_at: datetime | None = None
     signal_id: uuid.UUID | None = None
     error: str | None = None
     result: CaptureResult | None = None

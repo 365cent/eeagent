@@ -182,7 +182,7 @@ async def test_trace_from_landing_point_reaches_signals(client):
     assert trace["demand_review_status"] == "confirmed"
     assert trace["demand_cross_validation_conclusion"] == "通过"
     assert trace["function_published"] is True
-    assert trace["basis_freshness"] == "unknown_untracked"
+    assert trace["basis_freshness"] == "fresh"
     assert all(signal["is_archived"] is False for signal in trace["signals"])
 
 
@@ -288,7 +288,26 @@ async def test_trace_reports_empty_theme_and_dangling_evidence_links(client):
     assert trace["completeness"]["missing_stages"] == ["theme", "signals"]
     assert trace["completeness"]["unresolved_evidence_signal_ids"] == [missing_signal_id]
     assert trace["demand_review_status"] == "pending"
-    assert trace["basis_freshness"] == "unknown_untracked"
+    assert trace["basis_freshness"] == "unconfirmed"
+
+
+async def test_basis_freshness_turns_stale_after_signal_patch(client):
+    chain = await build_chain(client)
+    trace = (
+        await client.get(f"/api/v1/trace/landing-points/{chain['landing_point']['id']}")
+    ).json()
+    assert trace["basis_freshness"] == "fresh"
+
+    patched = await client.patch(
+        f"/api/v1/signals/{chain['signal']['id']}",
+        json={"excerpt": "Updated excerpt after demand confirmation."},
+    )
+    assert patched.status_code == 200, patched.text
+
+    trace = (
+        await client.get(f"/api/v1/trace/landing-points/{chain['landing_point']['id']}")
+    ).json()
+    assert trace["basis_freshness"] == "stale"
 
 
 async def test_trace_404_for_unknown_landing_point(client):

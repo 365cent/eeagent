@@ -86,5 +86,6 @@ async def _render_markdown(
             )
         ).scalar_one_or_none()
         if signal is not None:
-            body = await build_signal_trace_markdown(db, signal.id)
+            trace_md, _citations = await build_signal_trace_markdown(db, signal.id)
+            body = trace_md
     return header + (body or "_无可追溯信号_\n")

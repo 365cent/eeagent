@@ -83,9 +83,17 @@ def _validate_rerank_payload(data: Any) -> list[tuple[int, float]]:
 async def create_embeddings(
     texts: list[str],
     *,
+    db: "AsyncSession | None" = None,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> list[list[float]]:
     """Embed up to ``MAX_BATCH`` non-empty strings via MaaS ``/embeddings``."""
+    from app.services.embedding_cache import (
+        content_sha256,
+        load_cached_vectors,
+        store_cached_vectors,
+        vocab_fingerprint,
+    )
+
     settings = get_settings()
     url = settings.embedding_url
     if not url or not settings.semantic_api_key:
@@ -95,12 +103,34 @@ async def create_embeddings(
         return []
     if len(cleaned) > MAX_BATCH:
         raise ValueError(f"embedding batch exceeds {MAX_BATCH}")
+    digest = content_sha256("\n".join(cleaned))
+    model_version = settings.embedding_model
+    fp = vocab_fingerprint()
+    if db is not None:
+        cached = await load_cached_vectors(
+            db,
+            content_sha256=digest,
+            model_version=model_version,
+            vocab_fingerprint=fp,
+        )
+        if cached is not None:
+            return cached
     payload = {"model": settings.embedding_model, "input": cleaned if len(cleaned) > 1 else cleaned[0]}
     async with open_async_http_client(timeout=timeout) as client:
         resp = await client.post(url, headers=_headers(), json=payload)
     if resp.status_code >= 400:
         raise SemanticUpstreamError(resp.status_code, resp.text[:400] or resp.reason_phrase)
-    return _validate_embeddings_payload(resp.json())
+    vectors = _validate_embeddings_payload(resp.json())
+    if db is not None:
+        await store_cached_vectors(
+            db,
+            content_sha256=digest,
+            model_version=model_version,
+            vocab_fingerprint=fp,
+            vectors=vectors,
+        )
+        await db.commit()
+    return vectors
 
 
 async def _rerank_batch(

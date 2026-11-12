@@ -101,6 +101,7 @@ async def _capture_job_out(db: AsyncSession, job: CaptureJob) -> CaptureJobOut:
         started_at=job.started_at,
         heartbeat_at=job.heartbeat_at,
         finished_at=job.finished_at,
+        cancel_requested_at=job.cancel_requested_at,
         signal_id=job.signal_id,
         error=job.error,
         result=result,

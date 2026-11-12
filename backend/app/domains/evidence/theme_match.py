@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.judgment import select_best_theme
+from app.services.judgment import select_best_theme, structured_basis_consistent
 
 
 async def theme_display_tags(db: AsyncSession) -> dict[uuid.UUID, set[str]]:
@@ -18,4 +18,11 @@ async def theme_display_tags(db: AsyncSession) -> dict[uuid.UUID, set[str]]:
 
 async def match_theme(db: AsyncSession, tag_names: set[str]) -> tuple[uuid.UUID | None, str]:
     """REQ-SIG-08: match the signal's tags against every theme's display tags."""
-    return select_best_theme(await theme_display_tags(db), tag_names)
+    theme_tags = await theme_display_tags(db)
+    theme_id, reason = select_best_theme(theme_tags, tag_names)
+    if theme_id is None:
+        return None, reason
+    ok, basis_reason = structured_basis_consistent(theme_tags.get(theme_id, set()), tag_names)
+    if not ok:
+        return None, basis_reason
+    return theme_id, reason

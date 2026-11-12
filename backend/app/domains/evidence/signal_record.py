@@ -8,6 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domains.evidence.event_dates import event_date_from_published
 from app.domains.evidence.theme_match import match_theme
 from app.models.models import Signal, SignalTag
 from app.services.judgment import judge_stage
@@ -54,6 +55,7 @@ async def create_signal_record(
         value_chain_stage_code = judge_stage(title, snapshot_for_rules)
     url_norm = normalize_url(url)
     title, _dup_renamed = await disambiguate_title_for_url(db, title, url_norm)
+    event_text, event_precision = event_date_from_published(published_at)
     sig = Signal(
         title=title,
         url=url,
@@ -61,6 +63,8 @@ async def create_signal_record(
         channel_code=channel_code,
         publisher=publisher,
         published_at=published_at,
+        event_date_text=event_text,
+        event_date_precision=event_precision,
         value_chain_stage_code=value_chain_stage_code,
         signal_type_code=signal_type_code,
         evolution_node_code=evolution_node_code,
