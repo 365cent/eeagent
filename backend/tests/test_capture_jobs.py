@@ -95,7 +95,10 @@ async def test_html_job_creates_snapshot_signal(client):
     assert job["status"] == "succeeded"
     assert job["result"]["source"] == "html-snapshot"
     assert job["result"]["document"] is None
-    assert job["result"]["signal"]["snapshot_html_object_key"]
+    signal = job["result"]["signal"]
+    assert signal["snapshot_html_object_key"]
+    assert signal["value_chain_stage_code"]
+    assert len(signal["tags"]) >= 1
     assert await _count_signals(client) == before + 1
 
 

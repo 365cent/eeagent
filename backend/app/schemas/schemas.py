@@ -86,6 +86,23 @@ class ThemeCreate(RefCodeValidated):
     value_chain_stage_code: str | None = None
 
 
+class ThemeUpdate(RefCodeValidated):
+    working_name: str | None = None
+    value_chain_stage_code: str | None = None
+
+
+class ThemeNameSuggestionIn(BaseModel):
+    """Selected signals for a working-name suggestion. Nothing is written."""
+
+    signal_ids: list[uuid.UUID] = Field(min_length=1, max_length=24)
+
+
+class ThemeNameSuggestionOut(BaseModel):
+    working_name: str
+    value_chain_stage_code: str | None = None
+    source: Literal["llm", "fallback"]
+
+
 class ThemeOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
     id: uuid.UUID
@@ -103,6 +120,67 @@ class ThemeMetrics(BaseModel):
 class ThemeDetail(ThemeOut):
     metrics: ThemeMetrics | None = None
     display_tags: list[str] = []
+
+
+class TagDistributionItem(BaseModel):
+    """A technical-direction tag's support inside a sample or a proposed cluster."""
+
+    tag: str
+    support: int
+    cluster_share: float
+    corpus_share: float
+    lift: float
+
+
+class ClusterMemberOut(BaseModel):
+    signal_id: uuid.UUID
+    title: str
+    tags: list[str]
+    value_chain_stage_code: str | None
+    updated_at: datetime
+    source_host: str
+    assigned: bool = False
+
+
+class ThemeClusterProposal(BaseModel):
+    """One agglomerative tag family. Confirmation still creates or moves the theme."""
+
+    key: str
+    members: list[ClusterMemberOut]
+    shared_tags: list[str]
+    tag_distribution: list[TagDistributionItem]
+    cohesion: float
+    signal_count: int
+    source_count: int
+    value_chain_stage_code: str | None
+
+
+class SignalNeighborOut(BaseModel):
+    signal_id: uuid.UUID
+    title: str
+    tags: list[str]
+    similarity: float
+    shared_tags: list[str]
+    value_chain_stage_code: str | None
+    updated_at: datetime
+    source_host: str
+    assigned: bool = False
+
+
+class ThemeClusterReport(BaseModel):
+    """Live-tag clustering report. Groups are suggestions; the client confirms before writing."""
+
+    method: str
+    metric: str
+    linkage: str
+    distance_threshold: float
+    sample_size: int
+    unassigned_count: int
+    truncated: bool
+    silhouette: float | None
+    tag_distribution: list[TagDistributionItem]
+    clusters: list[ThemeClusterProposal]
+    neighbors: dict[str, list[SignalNeighborOut]]
 
 
 class SignalCreate(RefCodeValidated):
@@ -421,6 +499,8 @@ class DemandCreate(RefCodeValidated):
     cross_validation: dict | None = None
     time_series: list | None = None
     review_status: Literal["pending", "confirmed"] | None = None
+    low_freq_strong_signal: bool = False
+    low_freq_strong_signal_reason: str | None = None
 
 
 class DemandUpdate(RefCodeValidated):
@@ -430,6 +510,8 @@ class DemandUpdate(RefCodeValidated):
     cross_validation: dict | None = None
     time_series: list | None = None
     review_status: Literal["pending", "confirmed"] | None = None
+    low_freq_strong_signal: bool | None = None
+    low_freq_strong_signal_reason: str | None = None
 
 
 class DemandOut(BaseModel):
@@ -443,6 +525,8 @@ class DemandOut(BaseModel):
     time_series: list | None
     review_status: str | None
     created_at: datetime
+    low_freq_strong_signal: bool
+    low_freq_strong_signal_reason: str | None
     function_count: int = 0
     signal_frequency: int = 0
     source_count: int = 0
@@ -706,7 +790,7 @@ class TagSuggestion(BaseModel):
     )
     rerank_score: float | None = Field(
         default=None,
-        description="Top candidate relevance score when MaaS rerank refined jieba recall",
+        description="Top candidate relevance score when the configured rerank model refined jieba recall",
     )
 
 

@@ -2,6 +2,7 @@ package platform
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -27,5 +28,45 @@ func TestBearerAuthorizationHeader(t *testing.T) {
 	}
 	if auth != "Bearer upload-token-abc" {
 		t.Fatalf("Authorization = %q", auth)
+	}
+}
+
+func TestWhoAmIUsesVerifiedIdentity(t *testing.T) {
+	var path, auth string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path = r.URL.Path
+		auth = r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(Identity{Subject: "alice", Role: "researcher"})
+	}))
+	defer srv.Close()
+
+	client := NewWithOptions(srv.URL, 8, httpx.ClientOptions{}, "upload-token-abc")
+	identity, err := client.WhoAmI(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if path != "/api/v1/capture/whoami" {
+		t.Fatalf("path = %q", path)
+	}
+	if auth != "Bearer upload-token-abc" {
+		t.Fatalf("Authorization = %q", auth)
+	}
+	if identity.Subject != "alice" || identity.Role != "researcher" {
+		t.Fatalf("identity = %+v", identity)
+	}
+}
+
+func TestWhoAmIRejectsRevokedToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"detail":"capture upload token 无效或已撤销"}`, http.StatusUnauthorized)
+	}))
+	defer srv.Close()
+
+	client := NewWithOptions(srv.URL, 8, httpx.ClientOptions{}, "revoked")
+	_, err := client.WhoAmI(context.Background())
+	status, ok := err.(*StatusError)
+	if !ok || status.Code != http.StatusUnauthorized {
+		t.Fatalf("err = %v", err)
 	}
 }

@@ -3,7 +3,7 @@
 FastAPI + PostgreSQL 后端，实现《平台实施计划》第 3–8 节的推导链路：
 原始信号 → 技术主题 → 需求点 → 车辆功能 → 技术落脚点 → 部署标准 → 战略研判。
 
-- Schema：`docs/platform-implementation-plan.md` §4.1 基线 + 演进迁移（迁移由 Alembic 管理；0003 文档表、0005 访问留痕、0006 信号↔文档关联、0008 持久采集任务、0009 审计前后值、0010 功能卡与五个技术域词项、0011 需求五步证据链、0012 战略漏斗草稿；当前 head 为 0012_strategy_funnel）
+- Schema：`docs/platform-implementation-plan.md` §4.1 基线 + 演进迁移（迁移由 Alembic 管理；0003 文档表、0005 访问留痕、0006 信号↔文档关联、0008 持久采集任务、0009 审计前后值、0010 功能卡与五个技术域词项、0011 需求五步证据链、0012 战略漏斗草稿、0013 Agent 工作流、0014 全景导入、0015 Agent 用量、0016 发布基础、0017 主题来源计数、0018 采集凭据；当前 head 为 0018_capture_tokens）
 - API 文档（服务启动后）：http://127.0.0.1:8000/ 或 /docs（Swagger UI，deep link）、http://127.0.0.1:8000/openapi.json（OpenAPI schema）
 - 本地库：**Windows** 便携 PostgreSQL（`bootstrap.py` → `backend/.pg/`）；**macOS/Linux** 系统 PostgreSQL — 见根目录 [README.md](../README.md)
 
@@ -31,10 +31,11 @@ uv run python scripts/dev.py         # 前台 API + worker；Ctrl+C 结束
 
 ## 环境变量（可选）
 
-复制 `.env.example` → `.env`（`LLM_BASE_URL`、`LLM_API_KEY`、各 `*_MODEL`）。
+复制 `.env.example` → `.env`（`CHAT_BASE_URL` / `CHAT_API_KEY` / `CHAT_MODEL`，以及独立的 `EMBEDDING_*`、`RERANK_*`）。
+旧 `LLM_*` / `MAAS_*` 变量不再读取，升级时需迁移到上述九项配置。
 
 文档摄取相关：
-- `LLM_MODEL` 可留空（自动探测网关模型）；`VISION_MODEL` 可留空（自动 Qwen 3.8 → 3.6）
+- `CHAT_MODEL` 可留空（自动探测网关模型）；`VISION_MODEL` 可留空（自动 Qwen 3.8 → 3.6）
 - `DOC_RAW_UPLOAD_MAX_BYTES` / `DOC_INGEST_MAX_BYTES`：原始上传与 MarkItDown 解析上限，默认各 **120 MiB**（`125829120`）；超过解析上限只保留 blob（`ingest_status=skipped`）库端口等见 `app/core/config.py` 默认值（`DB_PORT`、`API_PORT`、`OBJECT_DIR`…）。
 
 ## 主要端点（`/api/v1`）
@@ -119,14 +120,14 @@ curl -X POST http://127.0.0.1:8000/api/v1/documents/raw \
 ```bash
 cd backend
 uv run pytest -q
-# 快检：./scripts/pytest_slices.sh unit  或  uv run pytest -m no_db -q
-# 切片：./scripts/pytest_slices.sh capture  （Windows 用 Git Bash/WSL）
-# 默认 EEA_PYTEST_LOCK=takeover — 摘陈旧锁后重试；严格独占用 fail，勿并行 TRUNCATE
+# 快检（无 PG/无锁）：./scripts/pytest_slices.sh unit  或  uv run pytest -m no_db -q
+# 切片：./scripts/pytest_slices.sh capture | contracts | agent  （Windows 用 Git Bash/WSL）
+# 集成：EEA_PYTEST_LOCK=fail ./scripts/pytest_slices.sh integration
 ```
 
 macOS/Linux 须先启动本机 PostgreSQL；见根目录 [README.md](../README.md)。
 
 - 测试通过 httpx `AsyncClient` + `ASGITransport` 直连 `app.main.app`（FastAPI 官方异步测试模式，anyio pytest 插件）。
 - 测试跑在**专用数据库 `eea_test`** 上（同一 PostgreSQL 实例），绝不触碰存放验收种子数据的 `eea` 库；`tests/conftest.py` 在首次导入 app 前设置 `DB_NAME=eea_test`（settings 经 `lru_cache` 缓存、引擎在导入期创建，覆盖必须先行），库不存在时自动创建并执行 Alembic 迁移。外部 PostgreSQL（`use-external-db`）环境下须自行启动数据库；仅 Windows 便携库布局可能在 PG 未就绪时尝试 `start_api.py`。
-- 每个用例前清空全部业务表并仅重播封闭词表种子（`eea_ref_code`），保证确定性与隔离；快照正文写入临时 `OBJECT_DIR`，会话结束自动清理。
+- 每个用例前清空业务表并补回五个技术域；`eea_ref_code` 仅在会话初始化时播种一次，以减少 TRUNCATE 开销。快照正文写入临时 `OBJECT_DIR`，会话结束自动清理。
 - 用例覆盖需求验收点：封闭词表校验（422 且零写入）、信号采集/筛选/详情/快照正文、标签词表与频次、主题归集与指标口径（排除已归档）、需求点交叉验证/人工复核门控、功能发布门控（正向+反向）、标准 3×3 网格与「明确留空」、战略研判版本链与筛选池准入、追溯链、审计留痕、总览计数，以及迁移产出的精确表/视图清单与存储级约束（部分唯一索引、生成列、复合主键）；另覆盖 OpenAPI 文档面（`/`、`/docs`、`/openapi.json` 与路径快照测试）。

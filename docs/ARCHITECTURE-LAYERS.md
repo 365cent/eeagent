@@ -18,7 +18,7 @@ HTTP 面统一为 `/api/v1`（见 `GET /openapi.json`）。采集默认 `POST /a
 
 | 目录 | 职责 |
 | --- | --- |
-| `app/platform` | DB session、分页、HTTP 辅助、错误形态、仓储抽象、证据/LLM 横切 |
+| `app/platform` | HTTP 辅助、错误形态、LLM 网关横切；配置/身份在 `app/core`，DB session 在 `app/db` |
 | `app/domains/<ctx>` | 领域实体、用例、与上下文相关的纯业务逻辑 |
 | `app/api` / `app/api/v1` | FastAPI 路由、请求/响应 DTO、依赖注入与权限门 |
 | `app/services` | 遗留服务层（逐步下沉到 domains 或 platform） |

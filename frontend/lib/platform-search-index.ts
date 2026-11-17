@@ -88,7 +88,7 @@ function buildDocuments(live: LivePlatformData): PlatformSearchDocument[] {
       title: theme.name,
       subtitle: theme.note,
       body: `${theme.count} 信号 ${theme.sources} 来源`,
-      route: { view: 'topics' },
+      route: { view: 'signals', query: { theme_id: theme.id } },
     })
   }
 
@@ -96,11 +96,11 @@ function buildDocuments(live: LivePlatformData): PlatformSearchDocument[] {
     docs.push({
       id: `demand-${demand.key}`,
       kind: 'demand',
-      viewKey: 'topics',
+      viewKey: 'demands',
       title: demand.name,
       subtitle: `${demand.stage} · ${demand.status}`,
       body: demand.evidence,
-      route: { view: 'topics' },
+      route: { view: 'demands', id: demand.key },
     })
   }
 
@@ -112,7 +112,7 @@ function buildDocuments(live: LivePlatformData): PlatformSearchDocument[] {
       title: landing.name,
       subtitle: `${landing.domain} · ${landing.category}`,
       body: `${landing.role} ${landing.standards}`,
-      route: { view: 'technology' },
+      route: { view: 'traceDetail', id: landing.key },
     })
   }
 

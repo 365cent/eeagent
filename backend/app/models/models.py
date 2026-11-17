@@ -222,6 +222,27 @@ class CaptureJob(Base):
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class CaptureToken(Base):
+    """Server-issued capture upload credential; only the SHA-256 digest is stored."""
+
+    __tablename__ = "eea_capture_token"
+    __table_args__ = (
+        UniqueConstraint("token_sha256", name="uq_capture_token_sha256"),
+        Index("eea_capture_token_subject_idx", "subject"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    subject: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[str] = mapped_column(Text, nullable=False, default="researcher", server_default="researcher")
+    label: Mapped[str | None] = mapped_column(Text)
+    token_sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_by: Mapped[str] = mapped_column(Text, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    revoked_by: Mapped[str | None] = mapped_column(Text)
+
+
 class PanoramaImportBatch(Base):
     __tablename__ = "eea_panorama_import_batch"
     __table_args__ = (

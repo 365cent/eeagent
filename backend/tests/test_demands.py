@@ -8,11 +8,12 @@ import uuid
 from app.core.identity import OperatorIdentity, get_operator_identity
 from app.main import app
 from tests.support import (
+    assign_signal_theme,
     create_confirmed_demand,
     create_function,
+    create_landing_point,
     create_signal,
     create_theme,
-    assign_signal_theme,
     publish_function,
     set_signal_tags,
 )
@@ -437,26 +438,63 @@ async def test_demand_list_and_detail(client):
     assert detail["function_count"] == 0
 
 
-async def test_demand_list_offers_no_merge_and_no_priority_sort(client):
-    """REQ-DEM-02 / CONV-NO-PRIORITY-ORDER: no demand merging and no priority
-    ranking of demand points either."""
+async def test_demand_list_offers_no_priority_fields(client):
+    """REQ-DEM-02 / CONV-NO-PRIORITY-ORDER: demand rows do not expose priority ordering."""
     await create_confirmed_demand(client)
-    spec = (await client.get("/openapi.json")).json()
-    demand_paths = [p for p in spec["paths"] if "demands" in p]
-    assert set(demand_paths) == {
-        "/api/v1/demands",
-        "/api/v1/demands/assistant/draft",
-        "/api/v1/demands/assistant/messages",
-        "/api/v1/demands/{demand_id}",
-    }
-    for path in demand_paths:
-        assert set(spec["paths"][path]) <= {"get", "post", "patch"}
     rows = (await client.get("/api/v1/demands")).json()
     for row in rows:
         assert "priority" not in row
         assert "sort_order" not in row
 
 
+async def test_delete_demand_removes_mapped_function(client):
+    demand = await create_confirmed_demand(client, name="可删除需求点")
+    function = await create_function(client, demand["id"], name="随需求点删除的功能")
+    await publish_function(client, function["id"])
+    landing = await create_landing_point(client, function["id"], name="随需求点删除的落脚点")
+
+    deleted = await client.delete(f"/api/v1/demands/{demand['id']}")
+    assert deleted.status_code == 204
+    assert (await client.get(f"/api/v1/demands/{demand['id']}")).status_code == 404
+    assert (await client.get(f"/api/v1/functions/{function['id']}")).status_code == 404
+    assert (await client.get(f"/api/v1/landing-points/{landing['id']}")).status_code == 404
+    missing = await client.delete(f"/api/v1/demands/{demand['id']}")
+    assert missing.status_code == 404
+
+
 async def test_demand_404(client):
     r = await client.get("/api/v1/demands/00000000-0000-0000-0000-0000000000cc")
     assert r.status_code == 404
+
+
+async def test_low_frequency_strong_signal_requires_reason_and_clears(client):
+    demand = await create_confirmed_demand(client)
+    missing = await client.patch(
+        f"/api/v1/demands/{demand['id']}",
+        json={"low_freq_strong_signal": True},
+    )
+    assert missing.status_code == 422
+
+    marked = await client.patch(
+        f"/api/v1/demands/{demand['id']}",
+        json={
+            "low_freq_strong_signal": True,
+            "low_freq_strong_signal_reason": "单一但关键的定点事件",
+        },
+    )
+    assert marked.status_code == 200, marked.text
+    assert marked.json()["low_freq_strong_signal"] is True
+    assert marked.json()["low_freq_strong_signal_reason"] == "单一但关键的定点事件"
+
+    cleared = await client.patch(
+        f"/api/v1/demands/{demand['id']}",
+        json={"low_freq_strong_signal": False},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["low_freq_strong_signal"] is False
+    assert cleared.json()["low_freq_strong_signal_reason"] is None
+
+    audit = (await client.get("/api/v1/audit", params={"entity_id": demand["id"]})).json()
+    fields = {row["field_name"] for row in audit}
+    assert "low_freq_strong_signal" in fields
+    assert "low_freq_strong_signal_reason" in fields

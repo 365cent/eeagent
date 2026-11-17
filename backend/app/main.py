@@ -19,6 +19,7 @@ from app.api.v1 import (
     agent,
     platform_features,
     capture,
+    capture_tokens,
     imports,
     demands,
     documents,
@@ -105,6 +106,7 @@ def create_app() -> FastAPI:
     app.include_router(overview.router, prefix="/api/v1")
     app.include_router(vocab.router, prefix="/api/v1")
     app.include_router(capture.router, prefix="/api/v1")
+    app.include_router(capture_tokens.router, prefix="/api/v1")
     app.include_router(imports.router, prefix="/api/v1")
     app.include_router(signals.router, prefix="/api/v1")
     app.include_router(documents.router, prefix="/api/v1")
@@ -143,7 +145,11 @@ def create_app() -> FastAPI:
             except Exception:
                 db_ready = False
         core_ready = db_ready and storage_ready
-        llm_configured = bool(settings.llm_base_url_normalized or settings.semantic_api_key)
+        llm_configured = bool(
+            (settings.chat_base_url_normalized and settings.chat_api_key_value)
+            or (settings.embedding_url and settings.embedding_api_key_value)
+            or (settings.rerank_url and settings.rerank_api_key_value)
+        )
         semantic = "ok" if llm_configured else "degraded"
         status = "ready" if core_ready else "not_ready"
         if core_ready and semantic == "degraded":

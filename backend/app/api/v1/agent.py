@@ -61,7 +61,7 @@ async def create_session(
 async def list_sessions(
     db: AsyncSession = Depends(get_db),
     actor: OperatorIdentity = Depends(get_operator_identity),
-    limit: int = Query(50, le=200),
+    limit: int = Query(50, ge=1, le=200),
 ):
     rows = (
         await db.execute(
@@ -98,7 +98,7 @@ async def list_session_messages(
     session_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
     actor: OperatorIdentity = Depends(get_operator_identity),
-    limit: int = Query(200, le=500),
+    limit: int = Query(200, ge=1, le=500),
 ):
     await get_owned_session(db, session_id, actor)
     rows = (

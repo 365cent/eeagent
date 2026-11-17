@@ -4,7 +4,7 @@ import os
 
 import pytest
 
-pytestmark = [pytest.mark.anyio, pytest.mark.live_maas]
+pytestmark = [pytest.mark.anyio, pytest.mark.live_semantic]
 
 
 @pytest.mark.skipif(os.environ.get("EEA_LLM_INTEGRATION") != "1", reason="set EEA_LLM_INTEGRATION=1")

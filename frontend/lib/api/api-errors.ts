@@ -6,6 +6,9 @@ export function formatEeaApiError(status: number, body: string, requestPath?: st
       const parsed = JSON.parse(detail) as { detail?: unknown }
       if (typeof parsed.detail === 'string') {
         detail = parsed.detail
+      } else if (parsed.detail && typeof parsed.detail === 'object' && !Array.isArray(parsed.detail)) {
+        const message = (parsed.detail as { message?: unknown }).message
+        if (typeof message === 'string' && message.trim()) detail = message
       } else if (Array.isArray(parsed.detail)) {
         detail = parsed.detail
           .map((item) => (typeof item === 'object' && item && 'msg' in item ? String((item as { msg: string }).msg) : String(item)))

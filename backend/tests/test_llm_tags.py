@@ -21,9 +21,9 @@ pytestmark = pytest.mark.anyio
 
 def _settings(**overrides):
     base = dict(
-        llm_base_url_normalized="http://gateway.invalid/v1",
-        llm_api_key="test-key",
-        llm_model="deepseek-v4-flash-hw",
+        chat_base_url_normalized="http://gateway.invalid/v1",
+        chat_api_key_value="test-key",
+        chat_model_value="deepseek-v4-flash-hw",
     )
     base.update(overrides)
     return types.SimpleNamespace(**base)
@@ -98,14 +98,14 @@ async def test_test_model_custom_output_args_roundtrip(monkeypatch):
     assert result.tech_tags == ["域控制器"]
 
 
-async def test_empty_llm_model_returns_none_then_jieba_fallback(monkeypatch):
+async def test_empty_chat_model_returns_none_then_jieba_fallback(monkeypatch):
     """No resolvable chat model → None; jieba path still works."""
     from app.services.tagging import suggest_tags
 
     async def no_chat_model():
         return None
 
-    monkeypatch.setattr(llm, "get_settings", lambda: _settings(llm_model=""))
+    monkeypatch.setattr(llm, "get_settings", lambda: _settings(chat_model_value=""))
     monkeypatch.setattr(llm, "_chat_model_id", no_chat_model)
     assert await suggest_tags_with_llm("eFuse", "eFuse eFuse 智能配电") is None
     # the caller's jieba fallback still produces tags

@@ -1,14 +1,16 @@
 # Backend 实施清单
 
-更新：2026-11-09。范围：原始 Word 七环节、已决 REQ、文档与 Agent 扩展，直至 Linux 内网生产验收。项目顺序见 [总清单](../TODO.md)，逐条来源与验收见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。
+更新：2026-11-17。范围：原始 Word 七环节、已决 REQ、文档与 Agent 扩展，直至 Linux 内网生产验收。项目顺序见 [总清单](../TODO.md)，逐条来源与验收见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。
 
 ## 执行约定与现状
 
 任务均为剩余工作；“部分实现”不等于通过验收。每次交付更新任务状态及证据链接，完成后从剩余任务移至交付记录。依赖 ID 由总清单统一索引。代码和测试存在可证明实现范围，本次文档整理未运行应用测试，不沿用旧版通过数量。
 
-已存在：FastAPI 路由、SQLAlchemy 实体、0001–0012 迁移（0007 为同步采集幂等键，0008 为持久采集任务，0009 为审计前后值，0010 为功能卡字段及五域词项，0011 为需求五步证据链，0012 为战略漏斗草稿）、Word/PDF 摄取与图像视觉描述、规则和 LLM 建议、人工编辑审计、需求/功能/标准/评分 API。当前代码已包含身份来源校验、需求/功能复核门控、功能正反向发布门控与标准格审计切片；这些仍需各子任务规定的权限、并发、浏览器和目标平台验收。剩余缺口包括语义分类质量、需求/标准/战略页面完整体验、稳定身份代理集成、持久会话/引用、运行任务取消与对象清理、Linux 生产验证。
+已存在：FastAPI 路由、SQLAlchemy 实体、0001–0018 迁移（0007 为同步采集幂等键，0008 为持久采集任务，0009 为审计前后值，0010 为功能卡字段及五域词项，0011 为需求五步证据链，0012 为战略漏斗草稿，0013 为 Agent 工作流，0014 为全景导入，0015 为 Agent 用量，0016 为发布基础，0017 为主题来源计数，0018 为采集凭据）、Word/PDF 摄取与图像视觉描述、规则和 LLM 建议、人工编辑审计、需求/功能/标准/评分 API。当前代码已包含身份来源校验、需求/功能复核门控、功能正反向发布门控与标准格审计切片；这些仍需各子任务规定的权限、并发、浏览器和目标平台验收。剩余缺口包括语义分类质量、需求/标准/战略页面完整体验、稳定身份代理集成、持久会话/引用、运行任务取消与对象清理、Linux 生产验证。
 
 沿用 Python/FastAPI/PostgreSQL/Pydantic AI。正文与归档使用对象键；新增结构走 Alembic，禁止修改已发布迁移。升级测试须覆盖空库和已有数据。服务端角色与操作者可信来源由 OPS-03 定义，不能信任请求体自报角色。
+
+2026-11-17 最近切片：主题写入身份/审计、正文修补审计、低频强信号 API、chat/embedding/rerank 独立环境与真实网关验证、语义 RAG、服务端采集凭据（0018）。父任务验收仍未关闭；具体证据见[交付记录](../docs/DELIVERY-RECORD.md)。
 
 ## BE-01 统一采集与可靠任务
 
@@ -34,6 +36,7 @@
 - 来源：Word §2.1–2.2、图2-1-1/2-1-2/2-2；REQ-SIG-03…11；WBS 1.3.2。
 - 入口：[signals.py](app/api/v1/signals.py)、[schemas.py](app/schemas/schemas.py)、[html_snapshot.py](app/services/html_snapshot.py)。
 - 统一 metadata、采集时间、实际事件时间与发布时间语义；未知日期不补成当天（`event_date_text`/`event_date_precision` 已在共享 `create_signal_record` 写入）。保留原文、原链接与派生正文；正文修补留版本/审计。
+- 已交付正文修补审计切片：`PATCH /signals/{id}` 的 `body_text` 保存新对象，并在 `CorrectionAudit` 记录旧/新 object key 与 SHA-256；旧正文对象仍可读取。
 - 在服务端约束五种证据状态及两种演进节点；没有可读且已落盘的快照不能标已留存。待人工复核表示已有证据但分类/归集未确认。
 - 完成检索标题、发布主体、摘要与技术标签，以及来源/渠道/环节/状态/主题筛选。保留列表兼容形状，通过响应总数头提供分页总量。
 - 归档后禁止新自动推导和自动覆盖，历史链路仍可读；恢复后需要重新复核。补正文后按规则更新状态，禁止仅修改状态制造成功。
@@ -46,6 +49,7 @@
 - 来源：Word §2.2–2.4；REQ-RULE-02、REQ-AGT-02/04；WBS 1.3.3、1.7.1。
 - 入口：[audit.py](app/services/audit.py)、[session.py](app/api/v1/session.py)、[models.py](app/models/models.py)。
 - 统一服务端 operator subject/role；研究者与方法论/词表管理员权限由服务器角色映射决定。IP 访问日志不充当身份认证。
+- 已交付主题写入身份与审计切片：创建/修改/删除均使用服务端 operator；记录 created、working_name、value_chain_stage_code、deleted 的前后值与操作者。
 - 对分类、标签、主题、需求复核、映射发布、落脚点角色、标准与战略变更记录原值/新值/人员/时间/理由；保存机器值及模型、规则、skill 版本和分数来源。
 - 保存字段级人工确认状态，自动重算只生成差异建议；显式人工提交才覆盖。自动动作也记录来源，禁止 auto-aggregate 无痕覆盖人工主题。
 - 对更新使用版本/条件写入检测过期提交，返回 409；审计与业务更新同事务，无变化不重复审计。
@@ -58,6 +62,7 @@
 - 入口：[tagging.py](app/services/tagging.py)、[judgment.py](app/services/judgment.py)、[llm.py](app/services/llm.py)、[config.py](app/core/config.py)；新增 embedding/rerank 服务。
 - 采用已有计划的 TF-IDF + TextRank 召回、标题加权、embedding 近义合并、rerank 精排；保留离线规则/jieba 回退，标签数量随内容变化。
 - 网关批量最多 16、限制并发、超时和退避；校验空响应、索引、向量维度和有限数值。无配置时返回不可用状态和降级理由。
+- 已交付独立语义网关与索引校验：chat、embedding、rerank 分别读取 `CHAT_*`、`EMBEDDING_*`、`RERANK_*` 的 URL/key/model，旧 `LLM_*`/`MAAS_*` 已移除；实际网关 embedding 返回 4096 维，rerank 正常；embedding 按 `data[].index` 排序后返回。
 - 新增内容哈希+模型版本的 JSONB 向量缓存，numpy 余弦；词表/主题内容变化失效。直接声明所用依赖，不能依赖开发机偶然安装。
 - 阈值可配置，0.85 仅作旧方案初始实验值，生产阈值由黄金集确认。保留能力边界，不新增向量服务或 pgvector。
 - 入库、建议、auto-tag 共用同一服务。POST /signals/{id}/auto-tag 返回三维建议、分数/理由；已人工确认字段默认不写。
@@ -83,6 +88,7 @@
 - [ ] P0 · 部分实现 · 依赖 BE-02、BE-03；BE-05 为自动建议前置，手工流程可先实现。
 - 全景工作簿导入仅建立待复核需求，不自动填写交叉验证结论或确认；下游功能须经正常人工流程。旧数据可运行 `python -m app.services.panorama_review_report` 输出待人工核查的候选记录；标记仅为启发式，不能证明来源或自动修改历史。
 - 已新增五步逐项引用门控；只接受同一来源主题下已留存信号。确认时再次校验至少两条不同 URL、发布主体和渠道的留存信号，且每条有技术标签、标签组合有差异；仅 taxonomy_admin/platform_admin 可确认。下游功能创建/发布与技术落脚点新增/编辑会重新核验当前证据。修改已确认需求会退回复核并撤销下游发布。FE-05 工作台切片已交付；真实时序与业务交叉验证质量验收仍依赖 DOC-04。
+- 已交付低频强信号 API：创建/修改/详情暴露 `low_freq_strong_signal` 与理由；标记为 true 必须填写理由，取消标记会清空理由，变更写入审计。
 - 来源：Word §2.3；REQ-DEM-01/04/06/07/09/10/11/12/13/15；WBS 1.3.4。
 - 入口：[demands.py](app/api/v1/demands.py)、[schemas.py](app/schemas/schemas.py)、[test_demands.py](tests/test_demands.py)。
 - 用类型化 JSON 保存事实识别、频率共识、相似性分析、利益相关方归因、系统级命名五步及引用；保持主题与需求两表。
@@ -186,6 +192,7 @@
 - 入口：[agent_workflow.py](app/services/agent_workflow.py)、[agent_runtime.py](app/services/agent_runtime.py)、[api/v1/agent.py](app/api/v1/agent.py)；遗留 [`/signals/{id}/assistant/messages`](app/api/v1/signals.py) 保持兼容。
 - 单一 Pydantic AI 编排；新增 sessions/messages 持久化和 SSE，支持重连、取消、错误结束；使用已安装版本支持的序列化 API。
 - 注册 search_evidence/search_rag/suggest_tags/suggest_theme/propose_patch/apply_confirmed_patch/draft_trace_report；不暴露 shell、任意 SQL 或文件路径。
+ - 已接入语义 RAG：关键词命中优先；未命中时对文档 chunk 做 embedding + cosine 排序，再用 rerank 精排；embedding/rerank 失败返回明确降级状态。
 - 引用最少到信号或文档 chunk，图块带 figure_index；验证引用真实存在。检索过滤用户可见范围。
 - 变更单保存基准版本、字段差异、理由和待确认状态；确认只应用所展示差异一次，过期需重新生成；拒绝不写业务数据。
 - 用户/项目记忆单独存储、可查看删除，不能把主数据更正自动当私人事实；所有会话与记忆检查归属。

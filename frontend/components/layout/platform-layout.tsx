@@ -23,8 +23,6 @@ import {
 import { utilityPageTitle } from '@/config/utility-pages'
 import { recordVisit } from '@/lib/api/eea-api'
 import type { NavigateFn } from '@/types/platform'
-import { useClientReady } from '@/hooks/use-client-ready'
-import { PlatformLayoutFallback } from '@/components/layout/platform-layout-fallback'
 
 type PlatformLayoutProps = {
   activeMenu: string
@@ -106,7 +104,6 @@ export function PlatformLayout({
     return decorate
   }, [])
 
-  const proLayoutReady = useClientReady()
   const [searchOpen, setSearchOpen] = useState(false)
   const openSearch = useCallback(() => setSearchOpen(true), [])
   const closeSearch = useCallback(() => setSearchOpen(false), [])
@@ -236,7 +233,7 @@ export function PlatformLayout({
                   false
                 )
               }
-              contentStyle={{ padding: 0, background: 'var(--eea-surface-main)' }}
+              contentStyle={{ padding: 0, background: 'var(--eea-surface-canvas, #f5f7fa)' }}
             >
               {mainSurface}
             </ProLayout>
@@ -244,26 +241,20 @@ export function PlatformLayout({
 
   return (
     <ProConfigProvider>
-        <div
-          className={`app-shell pro-shell pro-layout-side ${isDark ? 'dark-mode' : 'light-mode'} ${layoutReady ? 'layout-ready' : 'layout-pending'} ${isMobile && !collapsed ? 'mobile-nav-open' : ''}${proLayoutReady ? '' : ' pro-shell-fallback-chrome'}`}
-          data-color-scheme={colorScheme}
-        >
-          {isMobile && !collapsed && (
-            <button
-              type="button"
-              className="mobile-nav-backdrop"
-              aria-label="关闭导航"
-              onClick={() => onCollapse(true)}
-            />
-          )}
-          {proLayoutReady ? (
-            proLayoutChrome
-          ) : (
-            <PlatformLayoutFallback collapsed={collapsed} isMobile={isMobile}>
-              {mainSurface}
-            </PlatformLayoutFallback>
-          )}
-        </div>
+      <div
+        className={`app-shell pro-shell pro-layout-side ${isDark ? 'dark-mode' : 'light-mode'} ${layoutReady ? 'layout-ready' : 'layout-pending'} ${isMobile && !collapsed ? 'mobile-nav-open' : ''}`}
+        data-color-scheme={colorScheme}
+      >
+        {isMobile && !collapsed && (
+          <button
+            type="button"
+            className="mobile-nav-backdrop"
+            aria-label="关闭导航"
+            onClick={() => onCollapse(true)}
+          />
+        )}
+        {proLayoutChrome}
+      </div>
     </ProConfigProvider>
   )
 }

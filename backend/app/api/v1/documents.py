@@ -147,7 +147,8 @@ async def get_canonical_markdown(
     return Response(content=data, media_type="text/markdown; charset=utf-8")
 
 
-@router.api_route("/{document_id}/preview.pdf", methods=["GET", "HEAD"])
+@router.get("/{document_id}/preview.pdf")
+@router.head("/{document_id}/preview.pdf", include_in_schema=False)
 async def get_document_pdf_preview(
     request: Request,
     document_id: uuid.UUID,

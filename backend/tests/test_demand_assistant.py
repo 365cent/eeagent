@@ -29,6 +29,43 @@ def test_signal_to_bot_uses_excerpt_not_summary():
     assert bot.title == "芯粒 SoC 架构"
 
 
+async def test_demand_assistant_draft_deterministic(client):
+    theme = await create_theme(client)
+    sig_a = await create_signal(
+        client,
+        title="信号甲",
+        body_text="区域控制器配电拓扑变化。",
+        evidence_status_code="retained",
+        url="https://example.com/demand-a",
+    )
+    sig_b = await create_signal(
+        client,
+        title="信号乙",
+        body_text="eFuse 智能配电量产推进。",
+        evidence_status_code="retained",
+        url="https://other.example/demand-b",
+        publisher="测试媒体乙",
+    )
+    await assign_signal_theme(client, sig_a["id"], theme["id"])
+    await assign_signal_theme(client, sig_b["id"], theme["id"])
+
+    r = await client.post(
+        "/api/v1/demands/assistant/draft",
+        json={
+            "source_tech_theme_id": theme["id"],
+            "use_llm": False,
+            "selected_signal_ids": [sig_a["id"], sig_b["id"]],
+        },
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["source_tech_theme_id"] == theme["id"]
+    assert body["source"] == "deterministic"
+    assert body["derivation_trace"]["steps"]
+    assert len(body["derivation_trace"]["steps"]) == 5
+    assert body["cross_validation"]["evidence_signal_ids"]
+
+
 async def test_demand_assistant_messages_survives_bot_mapping(client, monkeypatch):
     theme = await create_theme(client)
     sig_a = await create_signal(

@@ -26,6 +26,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2.1.6",
     "uvicorn[standard]>=0.54.0",
     "reportlab>=5.1.0",
+    "scikit-learn>=1.6",
 ]
 
 [build-system]
@@ -66,8 +67,9 @@ forbidden_modules = ["app.api"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+addopts = ["--import-mode=importlib"]
 markers = [
-    "live_maas: hits real MaaS when MAAS_API_* is set in .env",
+    "live_semantic: hits the real chat/embedding/rerank gateways when configured",
     "no_db: no eea_test lock, migrate, or per-test TRUNCATE",
     "db: integration test using eea_test (default)",
 ]

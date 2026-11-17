@@ -2,13 +2,49 @@ import { getEeaApiBase } from '@/lib/api/config'
 import { formatEeaApiError } from '@/lib/api/api-errors'
 
 export class EeaApiError extends Error {
+  readonly code?: string
+  readonly demandIds: string[]
+
   constructor(
     readonly status: number,
     message: string,
+    extra?: { code?: string; demandIds?: string[] },
   ) {
     super(message)
     this.name = 'EeaApiError'
+    this.code = extra?.code
+    this.demandIds = extra?.demandIds ?? []
   }
+}
+
+export function eeaErrorMessage(err: unknown, fallback = '操作失败'): string {
+  if (err instanceof EeaApiError) return err.message
+  if (err instanceof Error && err.message.trim()) return err.message
+  const text = String(err).trim()
+  return text || fallback
+}
+
+function readEeaErrorExtra(body: string): { code?: string; demandIds?: string[] } {
+  if (!body.trim().startsWith('{')) return {}
+  try {
+    const parsed = JSON.parse(body) as { detail?: unknown }
+    const detail = parsed.detail
+    if (!detail || typeof detail !== 'object' || Array.isArray(detail)) return {}
+    const record = detail as { code?: unknown; demand_ids?: unknown }
+    const demandIds = Array.isArray(record.demand_ids)
+      ? record.demand_ids.filter((item): item is string => typeof item === 'string' && item.length > 0)
+      : []
+    return {
+      code: typeof record.code === 'string' ? record.code : undefined,
+      demandIds,
+    }
+  } catch {
+    return {}
+  }
+}
+
+function throwEeaApiError(response: Response, body: string, path: string): never {
+  throw new EeaApiError(response.status, formatEeaApiError(response.status, body, path), readEeaErrorExtra(body))
 }
 
 export async function eeaFetchWithMeta<T>(
@@ -25,7 +61,7 @@ export async function eeaFetchWithMeta<T>(
   })
   if (!response.ok) {
     const body = await response.text().catch(() => '')
-    throw new EeaApiError(response.status, formatEeaApiError(response.status, body, path))
+    throwEeaApiError(response, body, path)
   }
   if (response.status === 204) {
     return { data: undefined as T, headers: response.headers }
@@ -46,7 +82,7 @@ export async function eeaFetch<T>(path: string, init?: RequestInit): Promise<T> 
 
   if (!response.ok) {
     const body = await response.text().catch(() => '')
-    throw new EeaApiError(response.status, formatEeaApiError(response.status, body, path))
+    throwEeaApiError(response, body, path)
   }
 
   if (response.status === 204) {
@@ -68,7 +104,7 @@ export async function eeaFetchText(path: string, init?: RequestInit): Promise<st
   })
   if (!response.ok) {
     const body = await response.text().catch(() => '')
-    throw new EeaApiError(response.status, formatEeaApiError(response.status, body, path))
+    throwEeaApiError(response, body, path)
   }
   return response.text()
 }

@@ -2,12 +2,12 @@
 
 Keys stay server-side; callers pass message lists only.
 
-`LLM_MODEL` may stay empty: the gateway is then asked for its model list and
+`CHAT_MODEL` may stay empty: the gateway is then asked for its model list and
 each chat-capable candidate is verified with one minimal completion (single
 "ping" turn, `max_tokens=1`) before it is used. The pick is cached briefly so
 one request does not re-probe every candidate.
 
-Vision uses the same `LLM_BASE_URL` and `LLM_API_KEY` as chat
+Vision uses the same `CHAT_BASE_URL` and `CHAT_API_KEY` as chat
 (`…/chat/completions` with image parts). `VISION_MODEL` wins when set; otherwise
 the gateway list is searched for Qwen 3.8 then 3.6 (ids change over time).
 """
@@ -31,7 +31,7 @@ _CACHE_TTL_SECONDS = 600.0
 
 
 class LLMNotConfiguredError(RuntimeError):
-    """LLM_BASE_URL is unset."""
+    """CHAT_BASE_URL is unset."""
 
 
 class LLMNoModelError(RuntimeError):
@@ -74,9 +74,9 @@ DEFAULT_CHAT_MODEL_ATTEMPTS = 3
 
 
 def configured_chat_model(settings=None) -> str:
-    """``LLM_MODEL`` from settings when set (including gateway ids such as ``auto``)."""
+    """``CHAT_MODEL`` from settings when set (including gateway ids such as ``auto``)."""
     settings = settings or get_settings()
-    return (settings.llm_model or "").strip()
+    return (settings.chat_model_value or "").strip()
 
 
 def _cached(kind: str) -> str | None:
@@ -92,23 +92,23 @@ def _remember(kind: str, model: str) -> str:
 
 
 def llm_configured() -> bool:
-    return bool(get_settings().llm_base_url_normalized)
+    return bool(get_settings().chat_base_url_normalized)
 
 
 def _headers() -> dict[str, str]:
     settings = get_settings()
     headers = {"Content-Type": "application/json"}
-    if settings.llm_api_key:
-        headers["Authorization"] = f"Bearer {settings.llm_api_key}"
+    if settings.chat_api_key_value:
+        headers["Authorization"] = f"Bearer {settings.chat_api_key_value}"
     return headers
 
 
 async def list_models(*, timeout: float = 15.0) -> list[str]:
     """Gateway model ids, in the order the gateway returns them."""
     settings = get_settings()
-    base = settings.llm_base_url_normalized
+    base = settings.chat_base_url_normalized
     if not base:
-        raise LLMNotConfiguredError("LLM_BASE_URL must be set in backend/.env")
+        raise LLMNotConfiguredError("CHAT_BASE_URL must be set in backend/.env")
     async with open_async_http_client(timeout=timeout) as client:
         resp = await client.get(f"{base}/models", headers=_headers())
     if resp.status_code >= 400:
@@ -151,7 +151,7 @@ def upstream_from_pydantic_ai(exc: BaseException) -> LLMUpstreamError:
 
 
 async def build_chat_model_chain(max_models: int = DEFAULT_CHAT_MODEL_ATTEMPTS) -> list[str]:
-    """Models to try: ``LLM_MODEL`` first when set, else probed default, then `/models` list."""
+    """Models to try: ``CHAT_MODEL`` first when set, else probed default, then `/models` list."""
     settings = get_settings()
     models = await list_models()
     candidates = chat_candidates(models)
@@ -185,7 +185,7 @@ async def _probe_chat(model: str, *, timeout: float = 20.0) -> bool:
     try:
         async with open_async_http_client(timeout=timeout) as client:
             resp = await client.post(
-                f"{settings.llm_base_url_normalized}/chat/completions",
+                f"{settings.chat_base_url_normalized}/chat/completions",
                 headers=_headers(),
                 json=payload,
             )
@@ -325,15 +325,15 @@ async def chat_completion(
     task: str = "chat",
     caller_attempt: int = 1,
 ) -> tuple[str, str]:
-    """Return (assistant_text, served_model) via ``LLM_BASE_URL`` OpenAI chat API.
+    """Return (assistant_text, served_model) via ``CHAT_BASE_URL`` OpenAI chat API.
 
     Each model attempt logs provider usage when the response includes it.
     The request body stays model, messages, temperature, and max_tokens.
     """
     settings = get_settings()
-    base = settings.llm_base_url_normalized
+    base = settings.chat_base_url_normalized
     if not base:
-        raise LLMNotConfiguredError("LLM_BASE_URL must be set in backend/.env")
+        raise LLMNotConfiguredError("CHAT_BASE_URL must be set in backend/.env")
     timeout = 120.0 if max_tokens <= 1200 else 180.0
     attempts = max(1, max_model_attempts)
     chain = await build_chat_model_chain(max_models=attempts)

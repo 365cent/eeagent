@@ -47,8 +47,11 @@ import type {
   TagSuggestion,
   ThemeAggregatePreview,
   ThemeAssignmentPayload,
+  ThemeClusterReport,
   ThemeCreatePayload,
   ThemeDetail,
+  ThemeNameSuggestion,
+  ThemeUpdatePayload,
   TraceChain,
   VocabOut,
   VocabUsageOut,
@@ -60,6 +63,9 @@ import type {
   StrategyFunnelPatchPayload,
   CaptureJobOut,
   CaptureResult,
+  CaptureTokenCreated,
+  CaptureTokenCreatePayload,
+  CaptureTokenOut,
   ChainReportOut,
   AgentSessionOut,
   AgentMessageRecord,
@@ -104,11 +110,37 @@ export function fetchThemes() {
   return eeaFetch<ThemeDetail[]>('/themes')
 }
 
+export function fetchThemeClusterReport() {
+  return eeaFetch<ThemeClusterReport>('/themes/cluster-report')
+}
+
+export function suggestThemeName(signalIds: string[]) {
+  return eeaFetch<ThemeNameSuggestion>('/themes/name-suggestion', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ signal_ids: signalIds }),
+  })
+}
+
 export function createTheme(payload: ThemeCreatePayload) {
   return eeaFetch<ThemeDetail>('/themes', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+  })
+}
+
+export function updateTheme(themeId: string, payload: ThemeUpdatePayload) {
+  return eeaFetch<ThemeDetail>(`/themes/${encodeURIComponent(themeId)}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function deleteTheme(themeId: string) {
+  return eeaFetch<void>(`/themes/${encodeURIComponent(themeId)}`, {
+    method: 'DELETE',
   })
 }
 
@@ -181,6 +213,12 @@ export function postDemandAssistantMessage(
       history,
       selected_signal_ids: selectedSignalIds,
     }),
+  })
+}
+
+export function deleteDemand(demandId: string) {
+  return eeaFetch<void>(`/demands/${encodeURIComponent(demandId)}`, {
+    method: 'DELETE',
   })
 }
 
@@ -355,6 +393,24 @@ export function retryCaptureJob(jobId: string) {
 
 export function cancelCaptureJob(jobId: string) {
   return eeaFetch<CaptureJobOut>(`/capture/jobs/${encodeURIComponent(jobId)}/cancel`, {
+    method: 'POST',
+  })
+}
+
+export function fetchCaptureTokens() {
+  return eeaFetch<CaptureTokenOut[]>('/capture/tokens')
+}
+
+export function issueCaptureToken(payload: CaptureTokenCreatePayload) {
+  return eeaFetch<CaptureTokenCreated>('/capture/tokens', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function revokeCaptureToken(tokenId: string) {
+  return eeaFetch<CaptureTokenOut>(`/capture/tokens/${encodeURIComponent(tokenId)}/revoke`, {
     method: 'POST',
   })
 }

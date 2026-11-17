@@ -1,8 +1,7 @@
-"""iFlytek MaaS Embedding & Rerank HTTP client (BE-04).
+"""OpenAI-compatible embedding and rerank HTTP client (BE-04).
 
-Chat completions use ``llm_base_url``; vectors and rerank use ``maas_api_base_url``
-and ``maas_api_key`` so the Spark/MaaS host is independent of the OpenAI-style
-LLM proxy.
+Embedding uses ``EMBEDDING_BASE_URL`` / ``EMBEDDING_API_KEY`` and rerank uses
+``RERANK_BASE_URL`` / ``RERANK_API_KEY``. No legacy aliases are read.
 """
 from __future__ import annotations
 
@@ -18,13 +17,22 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 MAX_BATCH = 16
 
 
-def semantic_configured() -> bool:
+def embedding_configured() -> bool:
     settings = get_settings()
-    return bool(settings.embedding_url and settings.semantic_api_key)
+    return bool(settings.embedding_url and settings.embedding_api_key_value)
+
+
+def rerank_configured() -> bool:
+    settings = get_settings()
+    return bool(settings.rerank_url and settings.rerank_api_key_value)
+
+
+def semantic_configured() -> bool:
+    return embedding_configured() or rerank_configured()
 
 
 class SemanticNotConfiguredError(RuntimeError):
-    """MAAS base URL or API key is unset."""
+    """Embedding or rerank gateway URL/key is unset."""
 
 
 class SemanticUpstreamError(RuntimeError):
@@ -34,10 +42,9 @@ class SemanticUpstreamError(RuntimeError):
         self.detail = detail
 
 
-def _headers() -> dict[str, str]:
-    settings = get_settings()
+def _headers(api_key: str) -> dict[str, str]:
     headers = {"Content-Type": "application/json"}
-    key = settings.semantic_api_key
+    key = api_key.strip()
     if key:
         headers["Authorization"] = f"Bearer {key}"
     return headers
@@ -49,17 +56,23 @@ def _validate_embeddings_payload(data: Any) -> list[list[float]]:
     rows = data.get("data")
     if not isinstance(rows, list) or not rows:
         raise SemanticUpstreamError(502, "embedding response missing data[]")
-    vectors: list[list[float]] = []
+    indexed: list[tuple[int, list[float]]] = []
     for row in rows:
         if not isinstance(row, dict):
             raise SemanticUpstreamError(502, "embedding row is not an object")
+        idx = row.get("index")
+        if not isinstance(idx, int) or idx < 0:
+            raise SemanticUpstreamError(502, "embedding row missing index")
         vec = row.get("embedding")
         if not isinstance(vec, list) or not vec:
             raise SemanticUpstreamError(502, "embedding vector missing or empty")
         if not all(isinstance(x, (int, float)) and math.isfinite(float(x)) for x in vec):
             raise SemanticUpstreamError(502, "embedding vector has non-finite values")
-        vectors.append([float(x) for x in vec])
-    return vectors
+        indexed.append((idx, [float(x) for x in vec]))
+    indexed.sort(key=lambda item: item[0])
+    if [idx for idx, _ in indexed] != list(range(len(indexed))):
+        raise SemanticUpstreamError(502, "embedding response indexes are incomplete or duplicated")
+    return [vec for _, vec in indexed]
 
 
 def _validate_rerank_payload(data: Any) -> list[tuple[int, float]]:
@@ -86,7 +99,7 @@ async def create_embeddings(
     db: "AsyncSession | None" = None,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> list[list[float]]:
-    """Embed up to ``MAX_BATCH`` non-empty strings via MaaS ``/embeddings``."""
+    """Embed up to ``MAX_BATCH`` non-empty strings via the configured ``/embeddings`` gateway."""
     from app.services.embedding_cache import (
         content_sha256,
         load_cached_vectors,
@@ -96,8 +109,8 @@ async def create_embeddings(
 
     settings = get_settings()
     url = settings.embedding_url
-    if not url or not settings.semantic_api_key:
-        raise SemanticNotConfiguredError("MAAS_API_BASE_URL and MAAS_API_KEY must be set")
+    if not url or not settings.embedding_api_key_value:
+        raise SemanticNotConfiguredError("EMBEDDING_BASE_URL and EMBEDDING_API_KEY must be set")
     cleaned = [t.strip() for t in texts if t and t.strip()]
     if not cleaned:
         return []
@@ -117,10 +130,12 @@ async def create_embeddings(
             return cached
     payload = {"model": settings.embedding_model, "input": cleaned if len(cleaned) > 1 else cleaned[0]}
     async with open_async_http_client(timeout=timeout) as client:
-        resp = await client.post(url, headers=_headers(), json=payload)
+        resp = await client.post(url, headers=_headers(settings.embedding_api_key_value), json=payload)
     if resp.status_code >= 400:
         raise SemanticUpstreamError(resp.status_code, resp.text[:400] or resp.reason_phrase)
     vectors = _validate_embeddings_payload(resp.json())
+    if len(vectors) != len(cleaned):
+        raise SemanticUpstreamError(502, "embedding response count does not match input count")
     if db is not None:
         await store_cached_vectors(
             db,
@@ -143,7 +158,7 @@ async def _rerank_batch(
 ) -> list[tuple[int, float]]:
     settings = get_settings()
     payload = {"model": settings.rerank_model, "query": query, "documents": documents}
-    resp = await client.post(url, headers=_headers(), json=payload)
+    resp = await client.post(url, headers=_headers(settings.rerank_api_key_value), json=payload)
     if resp.status_code >= 400:
         raise SemanticUpstreamError(resp.status_code, resp.text[:400] or resp.reason_phrase)
     return _validate_rerank_payload(resp.json())
@@ -155,11 +170,11 @@ async def rerank(
     *,
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> list[tuple[int, float]]:
-    """Score document relevance for ``query`` via MaaS ``/rerank``."""
+    """Score document relevance for ``query`` via the configured ``/rerank`` gateway."""
     settings = get_settings()
     url = settings.rerank_url
-    if not url or not settings.semantic_api_key:
-        raise SemanticNotConfiguredError("MAAS_API_BASE_URL and MAAS_API_KEY must be set")
+    if not url or not settings.rerank_api_key_value:
+        raise SemanticNotConfiguredError("RERANK_BASE_URL and RERANK_API_KEY must be set")
     q = query.strip()
     docs = [d.strip() for d in documents if d and d.strip()]
     if not q or not docs:

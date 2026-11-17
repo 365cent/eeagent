@@ -17,5 +17,6 @@
   "singlefile_extension_path": "",
   "ca_cert_path": "",
   "auth_token_env": "EEA_CAPTURE_TOKEN",
-  "auth_token_file": ""
+  "auth_token_file": "",
+  "auth_token_credential": ""
 }

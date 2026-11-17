@@ -11,7 +11,7 @@ router = APIRouter(prefix="/llm", tags=["llm"])
 
 @router.get("/status", response_model=LlmStatusOut)
 async def llm_status() -> LlmStatusOut:
-    """Configured ``LLM_MODEL``, or probed default when unset (no secrets)."""
+    """Configured ``CHAT_MODEL``, or probed default when unset (no secrets)."""
     settings = get_settings()
     model = configured_chat_model(settings) or None
     if not model and llm_configured():

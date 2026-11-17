@@ -3,9 +3,11 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -14,6 +16,7 @@ import (
 	"eea/capture/internal/application"
 	"eea/capture/internal/capture"
 	"eea/capture/internal/config"
+	"eea/capture/internal/credential"
 	"eea/capture/internal/importdrain"
 	"eea/capture/internal/netinfo"
 	"eea/capture/internal/platform"
@@ -23,7 +26,7 @@ import (
 // Run dispatches a subcommand; it returns a process exit code.
 func Run(args []string, out io.Writer, version string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(out, "usage: capture [upload|doctor|version]")
+		fmt.Fprintln(out, "usage: capture [upload|auth|doctor|version]")
 		return 2
 	}
 	switch args[0] {
@@ -31,6 +34,8 @@ func Run(args []string, out io.Writer, version string) int {
 		return runUpload(args[1:], out)
 	case "doctor":
 		return runDoctor(args[1:], out)
+	case "auth":
+		return runAuth(args[1:], out)
 	case "version":
 		fmt.Fprintf(out, "capture %s\n", version)
 		return 0
@@ -54,6 +59,9 @@ func usage(out io.Writer) {
   capture upload --resume       resume persisted unfinished jobs
   capture upload --drain-server   process server URL batches (awaiting_client)
   capture doctor                check browser and API
+  capture auth set              store capture token in Windows Credential Manager
+  capture auth status           show token source
+  capture auth clear            remove the stored capture token
   capture version`)
 
 }
@@ -209,6 +217,86 @@ func runUpload(args []string, out io.Writer) int {
 	return 0
 }
 
+func runAuth(args []string, out io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(out, "usage: capture auth set|clear|status [--target name] [--config-dir dir]")
+		return 2
+	}
+	action := args[0]
+	fs := flag.NewFlagSet("auth "+action, flag.ContinueOnError)
+	fs.SetOutput(out)
+	target := fs.String("target", "eea-capture", "Windows Credential Manager target name")
+	configDir := fs.String("config-dir", "", "directory holding config.json")
+	if err := fs.Parse(args[1:]); err != nil {
+		return 2
+	}
+	if strings.TrimSpace(*target) == "" {
+		fmt.Fprintln(out, "auth target must not be empty")
+		return 2
+	}
+	dir := *configDir
+	if dir == "" {
+		dir, _ = os.Getwd()
+	}
+	switch action {
+	case "set":
+		data, err := io.ReadAll(io.LimitReader(os.Stdin, 1<<20))
+		if err != nil {
+			fmt.Fprintf(out, "read token: %v\n", err)
+			return 1
+		}
+		token := strings.TrimSpace(string(data))
+		if token == "" {
+			fmt.Fprintln(out, "token is empty; pipe it on stdin, e.g. Get-Content token.txt | capture.exe auth set")
+			return 2
+		}
+		if err := credential.Write(*target, token); err != nil {
+			fmt.Fprintf(out, "store credential: %v\n", err)
+			return 1
+		}
+		cfg, err := config.Load(dir)
+		if err != nil {
+			fmt.Fprintf(out, "config: %v\n", err)
+			return 1
+		}
+		cfg.AuthTokenCredential = *target
+		if err := config.Save(dir, cfg); err != nil {
+			fmt.Fprintf(out, "save config: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(out, "stored capture token in Credential Manager target %q\n", *target)
+	case "clear":
+		if err := credential.Delete(*target); err != nil {
+			fmt.Fprintf(out, "delete credential: %v\n", err)
+			return 1
+		}
+		cfg, err := config.Load(dir)
+		if err != nil {
+			fmt.Fprintf(out, "config: %v\n", err)
+			return 1
+		}
+		if cfg.AuthTokenCredential == *target {
+			cfg.AuthTokenCredential = ""
+			if err := config.Save(dir, cfg); err != nil {
+				fmt.Fprintf(out, "save config: %v\n", err)
+				return 1
+			}
+		}
+		fmt.Fprintf(out, "removed Credential Manager target %q\n", *target)
+	case "status":
+		cfg, err := config.Load(dir)
+		if err != nil {
+			fmt.Fprintf(out, "config: %v\n", err)
+			return 1
+		}
+		fmt.Fprintf(out, "auth_token %s\n", cfg.AuthTokenSource())
+	default:
+		fmt.Fprintf(out, "unknown auth action %q\n", action)
+		return 2
+	}
+	return 0
+}
+
 func runDoctor(args []string, out io.Writer) int {
 	fs := flag.NewFlagSet("doctor", flag.ContinueOnError)
 	fs.SetOutput(out)
@@ -271,6 +359,17 @@ func runDoctor(args []string, out io.Writer) int {
 		return 1
 	}
 	fmt.Fprintln(out, "capture       ok")
+	identity, err := api.WhoAmI(ctx)
+	if err != nil {
+		var status *platform.StatusError
+		if errors.As(err, &status) && status.Code == http.StatusUnauthorized {
+			fmt.Fprintln(out, "auth          rejected (token 无效或已撤销)")
+		} else {
+			fmt.Fprintf(out, "auth          failed (%v)\n", err)
+		}
+		return 1
+	}
+	fmt.Fprintf(out, "auth          ok (%s, %s)\n", identity.Subject, identity.Role)
 
 	fmt.Fprintf(out, "capture_archive %s\n", cfg.CaptureArchive)
 	stageDir := filepath.Join(filepath.Dir(profile), "extensions", "singlefile")

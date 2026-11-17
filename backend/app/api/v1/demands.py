@@ -53,7 +53,11 @@ async def create_demand(payload: DemandCreate, db: AsyncSession = Depends(get_db
     )
     if trace_error:
         raise HTTPException(422, trace_error)
+    if payload.low_freq_strong_signal and not (payload.low_freq_strong_signal_reason or "").strip():
+        raise HTTPException(422, "低频强信号必须填写理由")
     values = payload.model_dump(exclude={"review_status"})
+    if not payload.low_freq_strong_signal:
+        values["low_freq_strong_signal_reason"] = None
     d = DemandPoint(**values, review_status="pending")
     db.add(d)
     await db.commit()
@@ -129,6 +133,12 @@ async def update_demand(
     if d is None:
         raise HTTPException(404, "demand not found")
     data = payload.model_dump(exclude_unset=True)
+    proposed_low_freq = data.get("low_freq_strong_signal", d.low_freq_strong_signal)
+    proposed_reason = data.get("low_freq_strong_signal_reason", d.low_freq_strong_signal_reason)
+    if proposed_low_freq and not (proposed_reason or "").strip():
+        raise HTTPException(422, "低频强信号必须填写理由")
+    if not proposed_low_freq:
+        data["low_freq_strong_signal_reason"] = None
     if data.get("review_status") == "confirmed" and actor.role not in {
         "taxonomy_admin",
         "platform_admin",
@@ -206,3 +216,68 @@ async def update_demand(
             vehicle_function.published = False
     await db.commit()
     return await _enrich(db, d)
+
+
+@router.delete("/{demand_id}", status_code=204)
+async def delete_demand(
+    demand_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_operator_identity),
+):
+    """Remove a demand point and the vehicle functions derived from it."""
+    demand = await db.get(DemandPoint, demand_id)
+    if demand is None:
+        raise HTTPException(404, "demand not found")
+    await db.execute(
+        text(
+            """
+            DELETE FROM eea_strategic_funnel
+            WHERE tech_landing_point_id IN (
+                SELECT lp.id
+                FROM eea_tech_landing_point AS lp
+                JOIN eea_vehicle_function AS fn ON fn.id = lp.vehicle_function_id
+                WHERE fn.demand_point_id = :demand_id
+            )
+            """
+        ),
+        {"demand_id": demand.id},
+    )
+    landing_ids = """
+        SELECT lp.id
+        FROM eea_tech_landing_point AS lp
+        JOIN eea_vehicle_function AS fn ON fn.id = lp.vehicle_function_id
+        WHERE fn.demand_point_id = :demand_id
+    """
+    await db.execute(
+        text(f"DELETE FROM eea_deployment_standard WHERE tech_landing_point_id IN ({landing_ids})"),
+        {"demand_id": demand.id},
+    )
+    await db.execute(
+        text(f"DELETE FROM eea_strategic_assessment WHERE tech_landing_point_id IN ({landing_ids})"),
+        {"demand_id": demand.id},
+    )
+    await db.execute(
+        text(f"DELETE FROM eea_tech_landing_point WHERE id IN ({landing_ids})"),
+        {"demand_id": demand.id},
+    )
+    await db.execute(
+        text("DELETE FROM eea_vehicle_function WHERE demand_point_id = :demand_id"),
+        {"demand_id": demand.id},
+    )
+    await db.execute(
+        text("DELETE FROM eea_chain_report WHERE demand_point_id = :demand_id"),
+        {"demand_id": demand.id},
+    )
+    await record_correction(
+        db,
+        "demand_point",
+        demand.id,
+        "deleted",
+        {"name": demand.name},
+        None,
+        actor,
+        reason="删除需求点",
+    )
+    await db.delete(demand)
+    await db.commit()
+    track_workflow_success(DEMAND_EXTRACTION)

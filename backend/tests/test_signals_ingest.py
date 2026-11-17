@@ -4,6 +4,7 @@ REQ-TAG-01/02/03/04/05, sig-local-collect-submit, CONV-CLOSED-VOCAB)."""
 
 import pytest
 
+from app.services.objectstore import load_body
 from tests.support import SUPPLY_CHAIN_BODY, create_signal
 
 pytestmark = pytest.mark.anyio
@@ -62,6 +63,25 @@ async def test_create_signal_label_forms_normalize_to_codes(client):
     assert sig["signal_type_code"] == "technology"
     assert sig["evolution_node_code"] == "nomination_validation"
     assert sig["evidence_status_code"] == "retained"
+
+
+async def test_patch_body_keeps_old_version_and_audit(client):
+    sig = await create_signal(client, body_text="旧正文")
+    old_sha = sig["body_sha256"]
+    patched = await client.patch(
+        f"/api/v1/signals/{sig['id']}",
+        json={"body_text": "新正文"},
+    )
+    assert patched.status_code == 200, patched.text
+    new_sha = patched.json()["body_sha256"]
+    assert new_sha != old_sha
+
+    audit = (await client.get("/api/v1/audit", params={"entity_id": sig["id"]})).json()
+    row = next(r for r in audit if r["field_name"] == "body_text")
+    assert row["old_value"]["sha256"] == old_sha
+    assert row["new_value"]["sha256"] == new_sha
+    assert row["old_value"]["object_key"] != row["new_value"]["object_key"]
+    assert load_body(row["old_value"]["object_key"]) == "旧正文"
 
 
 async def test_unknown_channel_is_rejected_and_creates_nothing(client):

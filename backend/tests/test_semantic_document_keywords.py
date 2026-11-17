@@ -1,7 +1,7 @@
 """Document embedding and keyword rerank (BE-04 probe).
 
-Default tests mock MaaS HTTP. With ``MAAS_API_BASE_URL`` and ``MAAS_API_KEY`` in
-``backend/.env``, ``test_live_document_embedding_and_keyword_rerank`` hits the real gateway.
+Default tests mock HTTP. With ``EMBEDDING_*`` and ``RERANK_*`` in
+``backend/.env``, ``test_live_document_embedding_and_keyword_rerank`` hits the real gateways.
 
 Run:
   uv run pytest tests/test_semantic_document_keywords.py -q
@@ -20,7 +20,7 @@ from app.core.config import get_settings
 from app.services import semantic_api
 from app.services.tagging import suggest_tags
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.no_db]
 
 FIXTURE = Path(__file__).resolve().parent / "fixtures" / "semantic_sample.md"
 SAMPLE_DOCUMENT = FIXTURE.read_text(encoding="utf-8")
@@ -63,8 +63,8 @@ async def test_document_chunks_embedding_parsed(monkeypatch):
     async def fake_open(**_kwargs):
         yield FakeClient()
 
-    monkeypatch.setenv("MAAS_API_BASE_URL", "https://maas.example.com/v2")
-    monkeypatch.setenv("MAAS_API_KEY", "test-key")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "https://embed.example.com/v1")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "embed-key")
     get_settings.cache_clear()
     monkeypatch.setattr(semantic_api, "open_async_http_client", fake_open)
 
@@ -110,8 +110,8 @@ async def test_rerank_batches_more_than_sixteen_candidates(monkeypatch):
     async def fake_open(**_kwargs):
         yield FakeClient()
 
-    monkeypatch.setenv("MAAS_API_BASE_URL", "https://maas.example.com/v2")
-    monkeypatch.setenv("MAAS_API_KEY", "test-key")
+    monkeypatch.setenv("RERANK_BASE_URL", "https://rerank.example.com/v1")
+    monkeypatch.setenv("RERANK_API_KEY", "rerank-key")
     get_settings.cache_clear()
     monkeypatch.setattr(semantic_api, "open_async_http_client", fake_open)
 
@@ -153,8 +153,8 @@ async def test_keyword_rerank_orders_jieba_candidates(monkeypatch):
     async def fake_open(**_kwargs):
         yield FakeClient()
 
-    monkeypatch.setenv("MAAS_API_BASE_URL", "https://maas.example.com/v2")
-    monkeypatch.setenv("MAAS_API_KEY", "test-key")
+    monkeypatch.setenv("RERANK_BASE_URL", "https://rerank.example.com/v1")
+    monkeypatch.setenv("RERANK_API_KEY", "rerank-key")
     get_settings.cache_clear()
     monkeypatch.setattr(semantic_api, "open_async_http_client", fake_open)
 
@@ -166,11 +166,16 @@ async def test_keyword_rerank_orders_jieba_candidates(monkeypatch):
     assert top_score == pytest.approx(1.0)
 
 
-@pytest.mark.live_maas
+@pytest.mark.live_semantic
 async def test_live_document_embedding_and_keyword_rerank():
     settings = get_settings()
-    if not settings.embedding_url or not settings.semantic_api_key:
-        pytest.skip("MAAS_API_BASE_URL and MAAS_API_KEY required for live test")
+    if not (
+        settings.embedding_url
+        and settings.embedding_api_key_value
+        and settings.rerank_url
+        and settings.rerank_api_key_value
+    ):
+        pytest.skip("EMBEDDING_* and RERANK_* are required for the live test")
 
     vectors = await semantic_api.create_embeddings([SAMPLE_DOCUMENT[:800]])
     assert len(vectors) == 1

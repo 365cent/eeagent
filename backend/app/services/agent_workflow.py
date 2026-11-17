@@ -43,11 +43,11 @@ from app.core.config import get_settings
 async def build_eea_agent(*, model: OpenAIChatModel | None = None) -> Agent[AgentDeps, AgentRunOutput]:
     if model is None:
         settings = get_settings()
-        base = settings.llm_base_url_normalized
+        base = settings.chat_base_url_normalized
         if not base:
-            raise LLMNotConfiguredError("LLM_BASE_URL must be set in backend/.env")
+            raise LLMNotConfiguredError("CHAT_BASE_URL must be set in backend/.env")
         chosen = await resolve_chat_model()
-        model = build_model(chosen, base_url=base, api_key=settings.llm_api_key)
+        model = build_model(chosen, base_url=base, api_key=settings.chat_api_key_value)
 
     agent: Agent[AgentDeps, AgentRunOutput] = Agent(
         model,

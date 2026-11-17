@@ -25,9 +25,9 @@ MODELS = [
 
 def _settings(**overrides):
     base = dict(
-        llm_base_url_normalized="http://gateway.invalid/v1",
-        llm_api_key="",
-        llm_model="",
+        chat_base_url_normalized="http://gateway.invalid/v1",
+        chat_api_key_value="",
+        chat_model_value="",
         vision_model="",
     )
     base.update(overrides)
@@ -89,15 +89,15 @@ async def test_resolve_chat_model_fails_when_no_candidate_answers(monkeypatch):
 
 
 def test_configured_chat_model_passes_through_env_id():
-    assert gw.configured_chat_model(_settings(llm_model="auto")) == "auto"
-    assert gw.configured_chat_model(_settings(llm_model="fixed-model")) == "fixed-model"
+    assert gw.configured_chat_model(_settings(chat_model_value="auto")) == "auto"
+    assert gw.configured_chat_model(_settings(chat_model_value="fixed-model")) == "fixed-model"
 
 
 async def test_configured_model_short_circuits_probe(monkeypatch):
-    monkeypatch.setattr(gw, "get_settings", lambda: _settings(llm_model="fixed-model"))
+    monkeypatch.setattr(gw, "get_settings", lambda: _settings(chat_model_value="fixed-model"))
 
     async def explode():
-        raise AssertionError("list_models must not be called when LLM_MODEL is set")
+        raise AssertionError("list_models must not be called when CHAT_MODEL is set")
 
     monkeypatch.setattr(gw, "list_models", explode)
     assert await gw.resolve_chat_model() == "fixed-model"
@@ -114,11 +114,13 @@ async def test_resolve_vision_model_uses_gateway_list(monkeypatch):
     assert await gw.resolve_vision_model(force=True) == "Qwen3.6-35B"
 
 
-async def test_maas_embedding_and_rerank(monkeypatch):
+async def test_embedding_and_rerank_use_separate_gateways(monkeypatch):
     from contextlib import asynccontextmanager
 
-    monkeypatch.setenv("MAAS_API_BASE_URL", "https://maas.example.com/v2")
-    monkeypatch.setenv("MAAS_API_KEY", "test-key")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "https://embed.example.com/v1")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "embed-key")
+    monkeypatch.setenv("RERANK_BASE_URL", "https://rerank.example.com/v1")
+    monkeypatch.setenv("RERANK_API_KEY", "rerank-key")
     get_settings.cache_clear()
 
     class FakeClient:
@@ -132,10 +134,13 @@ async def test_maas_embedding_and_rerank(monkeypatch):
             return None
 
         async def post(self, url, headers=None, json=None):
-            assert headers and headers["Authorization"] == "Bearer test-key"
             if url.endswith("/embeddings"):
+                assert headers["Authorization"] == "Bearer embed-key"
+                assert json["model"] == get_settings().embedding_model
                 return httpx.Response(200, json={"data": [{"index": 0, "embedding": [0.1, 0.2]}]})
             if url.endswith("/rerank"):
+                assert headers["Authorization"] == "Bearer rerank-key"
+                assert json["model"] == get_settings().rerank_model
                 return httpx.Response(
                     200,
                     json={"results": [{"index": 0, "relevance_score": 0.5}]},
@@ -149,3 +154,61 @@ async def test_maas_embedding_and_rerank(monkeypatch):
     monkeypatch.setattr(semantic_api, "open_async_http_client", fake_open_client)
     assert await semantic_api.create_embeddings(["hello"]) == [[0.1, 0.2]]
     assert await semantic_api.rerank("q", ["a"]) == [(0, 0.5)]
+
+
+async def test_separate_chat_embedding_rerank_envs(monkeypatch):
+    monkeypatch.setenv("CHAT_BASE_URL", "https://chat.example.com/v1")
+    monkeypatch.setenv("CHAT_API_KEY", "chat-key")
+    monkeypatch.setenv("CHAT_MODEL", "chat-model")
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "https://embed.example.com/v1")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "embed-key")
+    monkeypatch.setenv("RERANK_BASE_URL", "https://rerank.example.com/v1")
+    monkeypatch.setenv("RERANK_API_KEY", "rerank-key")
+    get_settings.cache_clear()
+    try:
+        settings = get_settings()
+        assert settings.chat_base_url_normalized == "https://chat.example.com/v1"
+        assert settings.chat_api_key_value == "chat-key"
+        assert settings.chat_model_value == "chat-model"
+        assert settings.embedding_url == "https://embed.example.com/v1/embeddings"
+        assert settings.embedding_api_key_value == "embed-key"
+        assert settings.rerank_url == "https://rerank.example.com/v1/rerank"
+        assert settings.rerank_api_key_value == "rerank-key"
+    finally:
+        get_settings.cache_clear()
+
+
+async def test_embedding_vectors_follow_response_index(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    monkeypatch.setenv("EMBEDDING_BASE_URL", "https://embed.example.com/v1")
+    monkeypatch.setenv("EMBEDDING_API_KEY", "embed-key")
+    get_settings.cache_clear()
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *args):
+            return None
+
+        async def post(self, url, headers=None, json=None):
+            return httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {"index": 1, "embedding": [2.0]},
+                        {"index": 0, "embedding": [1.0]},
+                    ]
+                },
+            )
+
+    @asynccontextmanager
+    async def fake_open(**_kwargs):
+        yield FakeClient()
+
+    monkeypatch.setattr(semantic_api, "open_async_http_client", fake_open)
+    try:
+        assert await semantic_api.create_embeddings(["a", "b"]) == [[1.0], [2.0]]
+    finally:
+        get_settings.cache_clear()

@@ -2,6 +2,64 @@
 
 This record keeps evidence for implementation slices removed from the remaining-work TODOs. A slice does not close its parent task; acceptance stays open until the subsystem TODO criteria and required platform evidence pass.
 
+## 2026-11-17
+
+### BE-14/BE-04 — semantic RAG retrieval
+
+- `search_rag` now keeps exact keyword hits, then falls back to document-chunk embeddings when keywords miss. It cosine-ranks up to 120 chunks and sends the top 32 to the configured rerank model before returning citations.
+- Embedding and rerank failures degrade explicitly: rerank failure keeps embedding order; embedding failure returns a semantic-unavailable reason instead of pretending a match.
+- Evidence: [RAG service](../backend/app/services/agent_rag.py) and [semantic RAG tests](../backend/tests/test_agent_rag_semantic.py).
+- Checks: `uv run pytest -q tests/test_agent_rag_semantic.py` passed (2 tests); `uv run pytest -q tests/test_agent_workflow.py` passed (13 tests).
+
+### BE-04 — strict separate semantic gateway envs
+
+- Chat, embedding and rerank read separate `CHAT_*`, `EMBEDDING_*` and `RERANK_*` URL/key/model variables only. Legacy `LLM_*` and `MAAS_*` names were removed; existing `.env` files must migrate.
+- Embedding responses are ordered by their `data[].index` and rejected when indexes are missing, duplicated or incomplete, so returned vectors stay aligned with input order.
+- Evidence: [config](../backend/app/core/config.py), [semantic client](../backend/app/services/semantic_api.py), and [tests](../backend/tests/test_llm_gateway_models.py).
+- Checks: `uv run pytest -q tests/test_llm_gateway_models.py tests/test_semantic_document_keywords.py tests/test_llm_tags.py tests/test_llm_usage.py tests/test_tech_tag_pipeline.py` passed (31 tests, including the live semantic test). `tests/test_document_ingest.py` passed (13 tests). `uv run pytest -m no_db -q` passed (87 tests). A live probe returned one 4096-dimensional embedding and rerank scores `0.8439` / `0.0759`.
+
+
+### CC-03 — capture credential storage and verification slice
+
+- Added `GET /api/v1/capture/whoami` on the capture router. It returns the verified subject and role from the existing Bearer-token or trusted-proxy identity path; an unknown or revoked Bearer token returns 401.
+- Added `platform.Client.WhoAmI` and wired `capture doctor` to print `auth ok (subject, role)`, `auth rejected` for a 401, or `auth failed` for transport/other errors. Doctor still prints the redacted token source and enterprise CA path.
+- Added `auth_token_credential`, Windows Credential Manager read/write/delete, and `capture auth set|clear|status`. `auth set` reads the token from stdin, stores it under the configured target, and writes only the target name to `config.json`. Precedence is env, then Credential Manager, then file.
+- Evidence: [capture route](../backend/app/api/v1/capture.py), [identity resolver](../backend/app/core/capture_identity.py), [client method](../client/internal/platform/client.go), [doctor](../client/internal/cli/cli.go), [credential store](../client/internal/credential/credential_windows.go), [config](../client/internal/config/config.go), and [client TODO remainder](../client/TODO.md#cc-03-linux-服务连接与凭据).
+- Checks: `go test -short ./...`, `go vet ./internal/...`, and `go test -v ./internal/credential` passed on Windows. `capture auth set/status/clear` passed end to end against a temporary config directory. `uv run pytest -q tests/test_capture_unified.py -m no_db` passed (3 tests: test actor, configured Bearer token, revoked token). The no-DB marker avoids the shared `eea_test` lock because this endpoint has no database dependency.
+- Build: `go build -trimpath -ldflags "-s -w -H=windowsgui" -o dist/capture.exe ./cmd/capture` passed; the release binary printed `auth_token credential` with a stored test credential and cleared it afterward.
+- Remaining: Linux TLS/reverse-proxy path exercise and acceptance of wrong-CA/wrong-address/proxy-path diagnostics.
+
+### Server-issued capture tokens — CC-03 server slice
+
+- Added `eea_capture_token` with subject, role, label, SHA-256 digest, expiry, and revocation fields; migration `0018_capture_tokens` creates the table additively.
+- Added admin `POST/GET /api/v1/capture/tokens` and `POST /api/v1/capture/tokens/{id}/revoke`. The raw token is returned once; only its digest is stored. Audit rows record issue and revoke operations.
+- Capture identity now accepts environment static tokens first, then database-issued `eea_` tokens; revoked, expired, or unknown tokens return 401.
+- Evidence: [model](../backend/app/models/models.py), [migration](../backend/migrations/versions/0018_capture_tokens.py), [service](../backend/app/services/capture_tokens.py), [router](../backend/app/api/v1/capture_tokens.py), and [identity resolver](../backend/app/core/capture_identity.py).
+- Checks: `alembic upgrade head` passed on a disposable `eea_test_cc03` database. ASGI issue → whoami → list → revoke → whoami(401) and expired-token → whoami(401) passed; the stored digest was 64 hex characters and the row was revoked. `uv run pytest -q tests/test_capture_tokens.py` passed (3 tests on shared `eea_test`). `uv run pytest -m no_db -q` passed (81 tests). `alembic check` still reports pre-existing index drift in agent/capture/signal indexes; it did not flag `eea_capture_token`.
+
+
+### BE-02 — body repair audit and version slice
+
+- `PATCH /api/v1/signals/{id}` with `body_text` now writes a `body_text` correction audit record containing the old and new content-addressed object keys and SHA-256 hashes before replacing the signal body.
+- Old bodies remain in the object store by content-addressed key, so the audit record can retrieve the prior text without a separate version table.
+- Evidence: [signal update](../backend/app/api/v1/signals.py) and [body repair test](../backend/tests/test_signals_ingest.py).
+- Checks: the targeted test passed (`1 passed`, including test-DB migration); it verifies the old body is still readable from the object store.
+
+
+### BE-06 — low-frequency strong-signal API slice
+
+- Demand create/update/read now expose `low_freq_strong_signal` and `low_freq_strong_signal_reason`. Setting the flag requires a non-empty reason; clearing it clears the reason. Both changes are audited.
+- Evidence: [demand API](../backend/app/api/v1/demands.py), [schemas](../backend/app/schemas/schemas.py), and [test](../backend/tests/test_demands.py).
+- Checks: targeted test passed (`1 passed`, 162s including test setup/LLM fallback latency); it covers missing-reason rejection, marking, clearing, returned fields, and audit rows.
+
+
+### BE-03 — theme write identity and audit slice
+
+- Theme create/update/delete now require the server-resolved operator identity. Create records a `created` audit entry; edits record old/new working name and value-chain stage; delete records the removed theme values before unassigning signals.
+- Evidence: [themes API](../backend/app/api/v1/themes.py) and [theme tests](../backend/tests/test_themes.py).
+- Checks: `uv run pytest -q tests/test_themes.py` passed (16 tests).
+
+
 ## 2026-11-05
 
 ### BE-01 — capture idempotency and durable worker slice
@@ -118,7 +176,7 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 ### BE-03 / BE-05 / FE-03 / FE-04 — batch 2 signal edit guards slice
 
-- Tag suggestions respect `eea_correction_audit` (`protected_fields`, `degraded_reason`). Mutations accept `expected_updated_at` → **409** when stale. Theme overlap preview + stricter auto-aggregate guards. MaaS embedding/rerank client + config placeholders. Frontend editors send `updated_at` and refetch on conflict.
+- Tag suggestions respect `eea_correction_audit` (`protected_fields`, `degraded_reason`). Mutations accept `expected_updated_at` → **409** when stale. Theme overlap preview + stricter auto-aggregate guards. Embedding/rerank client + config placeholders. Frontend editors send `updated_at` and refetch on conflict.
 - Evidence: [tagging_guard.py](../backend/app/services/tagging_guard.py), [signals.py](../backend/app/api/v1/signals.py), [semantic_api.py](../backend/app/services/semantic_api.py), evidence UI under `frontend/components/evidence/`.
 - Checks: macOS `eea_test` full backend suite **314 passed, 1 skipped**; frontend `next build` passed. BE-04 pipeline integration, OPS-03 gates, and DOC-04 business evidence remain open.
 
@@ -191,7 +249,7 @@ This record keeps evidence for implementation slices removed from the remaining-
 - [`deploy/docker-compose.yml`](../deploy/docker-compose.yml): PostgreSQL, migrate, API, worker, Next.js, Nginx; shared `objectstore` volume.
 - Images: [`deploy/Dockerfile.backend`](../deploy/Dockerfile.backend), [`deploy/Dockerfile.frontend`](../deploy/Dockerfile.frontend); [`deploy/nginx/eea-intranet.conf`](../deploy/nginx/eea-intranet.conf).
 - Ops scripts: `compose-up.sh`, `compose-migrate.sh`, `backup-eea.sh`, `restore-eea.sh`.
-- `/readyz` adds `semantic_gateway` degraded when LLM/MaaS unset; DB/object failures still 503.
+- `/readyz` adds `semantic_gateway` degraded when model gateways are unset; DB/object failures still 503.
 - CI job `deploy-compose`: `docker compose config` + `build` on Ubuntu.
 - Checks: `docker compose config` (local when Docker available). OPS-06 physical host sign-off still open.
 

@@ -104,14 +104,14 @@ async def suggest_tags_with_rerank(
     limit: int = 6,
     recall_limit: int = TAG_RECALL_LIMIT,
 ) -> tuple[list[str], str, float | None]:
-    """Jieba recall then optional MaaS rerank (BE-04); falls back to frequency order."""
+    """Jieba recall then optional configured rerank (BE-04); falls back to frequency order."""
     candidates = suggest_tags(text, limit=recall_limit)
     if not candidates:
         return [], "jieba-frequency", None
     from app.services import semantic_api
 
     query = text.strip()[:1200]
-    if not query or not semantic_api.semantic_configured():
+    if not query or not semantic_api.rerank_configured():
         return candidates[:limit], "jieba-frequency", None
     try:
         scores = await semantic_api.rerank(query, candidates)

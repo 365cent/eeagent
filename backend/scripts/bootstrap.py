@@ -17,9 +17,16 @@ Daily start after bootstrap:  uv run python scripts/dev.py
 import os
 import subprocess
 import sys
+import time
 import urllib.request
 import zipfile
 from pathlib import Path
+
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except (OSError, ValueError):
+        pass
 
 # log4cxx "No appender could be found for logger (SGEPLog...)" noise is printed
 # by a DLL the corporate endpoint software injects into every process on this
@@ -35,9 +42,13 @@ from scripts._dev_env import ensure_object_dir, load_dotenv_file  # noqa: E402
 EXTERNAL_DB_MARKER = ROOT / ".pg" / "use-external-db"
 
 
+def step(message: str) -> None:
+    print(message, flush=True)
+
+
 def run(cmd: list[str], **kw) -> None:
     cmd = [str(c) for c in cmd]
-    print(">", " ".join(cmd))
+    print(">", " ".join(cmd), flush=True)
     if sys.platform == "win32" and kw.get("capture_output") is not True:
         kw.pop("capture_output", None)
         proc = subprocess.Popen(
@@ -52,7 +63,7 @@ def run(cmd: list[str], **kw) -> None:
         for line in proc.stdout:
             if any(marker in line for marker in _NOISE):
                 continue
-            print(line, end="")
+            print(line, end="", flush=True)
         proc.stdout.close()
         if proc.wait() != 0:
             raise SystemExit(f"command failed (exit {proc.returncode}): {' '.join(cmd)}")
@@ -77,13 +88,14 @@ PG_DB = os.environ.get("DB_NAME", "eea")
 
 def download() -> None:
     if BIN.exists():
+        step(f"portable PostgreSQL binaries: ok ({BIN.parent})")
         return
     ZIP.parent.mkdir(exist_ok=True)
     if not ZIP.exists():
-        print(f"downloading PostgreSQL {PG_VERSION} portable binaries...")
-        print(PG_URL)
+        step(f"downloading PostgreSQL {PG_VERSION} portable binaries...")
+        step(PG_URL)
         urllib.request.urlretrieve(PG_URL, ZIP)
-    print("extracting...")
+    step("extracting PostgreSQL archive...")
     with zipfile.ZipFile(ZIP) as z:
         z.extractall(PG_DIR)
     ZIP.unlink(missing_ok=True)
@@ -91,7 +103,9 @@ def download() -> None:
 
 def initdb() -> None:
     if DATA.exists():
+        step(f"postgres data directory: ok ({DATA})")
         return
+    step("initializing postgres data directory (first run)...")
     run(
         [
             BIN / "initdb",
@@ -110,11 +124,30 @@ def _pwfile() -> str:
     return str(f)
 
 
-def run_quiet(cmd: list[str], env: dict | None = None) -> subprocess.CompletedProcess:
+def run_quiet(
+    cmd: list[str],
+    env: dict | None = None,
+    *,
+    timeout: float = 120,
+) -> subprocess.CompletedProcess:
     """Captured run that also swallows the injected-DLL noise."""
-    r = subprocess.run(
-        [str(c) for c in cmd], capture_output=True, text=True, env=env
-    )
+    try:
+        r = subprocess.run(
+            [str(c) for c in cmd],
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=timeout,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise SystemExit(
+            f"timed out after {timeout}s: {' '.join(str(c) for c in cmd)}\n"
+            "If another bootstrap is running, wait for it or stop the stuck process and retry."
+        ) from exc
+    if r.stdout:
+        r.stdout = "\n".join(
+            l for l in r.stdout.splitlines() if not any(m in l for m in _NOISE)
+        )
     if r.stderr:
         r.stderr = "\n".join(
             l for l in r.stderr.splitlines() if not any(m in l for m in _NOISE)
@@ -122,13 +155,94 @@ def run_quiet(cmd: list[str], env: dict | None = None) -> subprocess.CompletedPr
     return r
 
 
-def start() -> None:
-    r = run_quiet([BIN / "pg_ctl", "-D", DATA, "status"])
-    if r.returncode == 0:
-        print("postgres already running")
+def _print_captured(cmd: list[str], result: subprocess.CompletedProcess) -> None:
+    print(">", " ".join(str(c) for c in cmd), flush=True)
+    for chunk in (result.stdout, result.stderr):
+        if chunk:
+            print(chunk, flush=True)
+
+
+def _hint_postgres_log(log_file: Path) -> None:
+    if not log_file.is_file():
         return
-    run([BIN / "pg_ctl", "-D", DATA, "-o", f"-p {PG_PORT} -h 127.0.0.1", "-w", "start"])
-    _pwfile_cleanup()
+    lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()
+    tail = lines[-25:]
+    if not tail:
+        return
+    step(f"--- last lines of {log_file} ---")
+    for line in tail:
+        if any(marker in line for marker in _NOISE):
+            continue
+        print(line, flush=True)
+
+
+def postgres_is_ready() -> bool:
+    """True when the server accepts connections (preferred over pg_ctl status on Windows)."""
+    try:
+        r = subprocess.run(
+            [str(BIN / "pg_isready"), "-h", "127.0.0.1", "-p", str(PG_PORT), "-q"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=15,
+        )
+    except subprocess.TimeoutExpired:
+        return False
+    return r.returncode == 0
+
+
+def start() -> None:
+    step(f"checking postgres on 127.0.0.1:{PG_PORT}...")
+    if postgres_is_ready():
+        step("postgres already running")
+        _pwfile_cleanup()
+        return
+
+    log_file = PG_DIR / "postgres.log"
+    cmd = [
+        BIN / "pg_ctl",
+        "-D",
+        DATA,
+        "-l",
+        str(log_file),
+        "-o",
+        f"-p {PG_PORT} -h 127.0.0.1",
+        "-w",
+        "start",
+    ]
+    # Never pipe pg_ctl start on Windows: the postmaster can fill the pipe and deadlock
+    # bootstrap (stdout streaming) or hang communicate() (capture_output=True).
+    step("starting postgres...")
+    print(">", " ".join(str(c) for c in cmd), flush=True)
+    try:
+        r = subprocess.run(
+            [str(c) for c in cmd],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired:
+        _hint_postgres_log(log_file)
+        raise SystemExit(
+            "pg_ctl start timed out after 120s; see log above. "
+            "Stop any stuck postgres.exe or re-run bootstrap."
+        ) from None
+
+    if r.returncode != 0:
+        _hint_postgres_log(log_file)
+        raise SystemExit(f"pg_ctl start failed (exit {r.returncode})")
+
+    deadline = time.monotonic() + 30
+    while time.monotonic() < deadline:
+        if postgres_is_ready():
+            step("postgres started")
+            _pwfile_cleanup()
+            return
+        time.sleep(0.25)
+
+    _hint_postgres_log(log_file)
+    raise SystemExit("postgres did not accept connections after start")
 
 
 def _pwfile_cleanup() -> None:
@@ -136,6 +250,7 @@ def _pwfile_cleanup() -> None:
 
 
 def create_db() -> None:
+    step(f"ensuring database '{PG_DB}' exists...")
     env = dict(os.environ, PGPASSWORD=PG_PASSWORD)
     q = f"SELECT 1 FROM pg_database WHERE datname='{PG_DB}'"
     r = run_quiet(
@@ -148,6 +263,7 @@ def create_db() -> None:
     if r.returncode != 0:
         sys.exit(f"psql failed: {r.stderr}")
     if "1" not in r.stdout:
+        step(f"creating database '{PG_DB}'...")
         run(
             [
                 BIN / "createdb", "-h", "127.0.0.1", "-p", str(PG_PORT),
@@ -155,6 +271,8 @@ def create_db() -> None:
             ],
             env=env,
         )
+    else:
+        step(f"database '{PG_DB}': ok")
 
 
 def bootstrap_external_postgres() -> None:
@@ -220,11 +338,14 @@ def migrate_and_seed() -> None:
     # may not have uv (env convention: scripts run under whatever interpreter
     # started them). `uv run python scripts/bootstrap.py` still works — its
     # sys.executable is the same venv interpreter.
+    step("running alembic migrations...")
     run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=ROOT)
+    step("seeding reference data...")
     run([sys.executable, "-m", "app.seed"], cwd=ROOT)
 
 
 if __name__ == "__main__":
+    step("EEA backend bootstrap")
     if sys.platform == "win32":
         download()
         initdb()
@@ -233,4 +354,4 @@ if __name__ == "__main__":
     else:
         bootstrap_external_postgres()
     migrate_and_seed()
-    print("\nbootstrap complete. start the API with:  uv run python scripts/dev.py")
+    step("\nbootstrap complete. start the API with:  uv run python scripts/dev.py")

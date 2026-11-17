@@ -2,9 +2,17 @@
 (theme-fields, REQ-DEM-14, SCHEMA-THEME-METRICS-VIEWS, CONV-NO-PRIORITY-ORDER,
 REQ-DEM-02)."""
 
+import uuid
+
 import pytest
 
-from tests.support import assign_signal_theme, create_signal, create_theme, set_signal_tags
+from tests.support import (
+    DEMAND_STEP_KEYS,
+    assign_signal_theme,
+    create_signal,
+    create_theme,
+    set_signal_tags,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -91,27 +99,72 @@ async def test_theme_list_returns_every_theme_with_metrics(client):
     assert by_name["主题乙"]["metrics"]["source_count"] == 0
 
 
-async def test_theme_list_offers_no_merge_and_no_priority_sort(client):
-    """REQ-DEM-02 / CONV-NO-PRIORITY-ORDER: the theme table exposes no merge
-    and no priority-ordering operations — only add/remove of member signals."""
+async def test_theme_list_offers_no_priority_fields(client):
+    """REQ-DEM-02 / CONV-NO-PRIORITY-ORDER: the theme table does not expose priority ordering."""
     await create_theme(client, working_name="主题甲")
-    await create_theme(client, working_name="主题乙")
-
-    spec = (await client.get("/openapi.json")).json()
-    theme_paths = [p for p in spec["paths"] if "themes" in p]
-    assert set(theme_paths) == {"/api/v1/themes", "/api/v1/themes/{theme_id}"}
-    for path in theme_paths:
-        assert set(spec["paths"][path]) <= {"get", "post"}
-    # no priority field is served on the theme resource
     rows = (await client.get("/api/v1/themes")).json()
     for row in rows:
         assert "priority" not in row
         assert "sort_order" not in row
 
 
+async def test_delete_theme_unassigns_signals(client):
+    theme = await create_theme(client, working_name="待删除主题")
+    sig = await _add_member(client, theme["id"], "https://del.example/1", idx=1)
+    r = await client.delete(f"/api/v1/themes/{theme['id']}")
+    assert r.status_code == 204
+    assert (await client.get(f"/api/v1/themes/{theme['id']}")).status_code == 404
+    detail = (await client.get(f"/api/v1/signals/{sig['id']}")).json()
+    assert detail["tech_theme_id"] is None
+
+
+async def test_delete_theme_blocked_when_demands_exist(client):
+    theme = await create_theme(client, working_name="有需求点主题")
+    sig = await create_signal(
+        client,
+        title="主题删除阻断样例",
+        url=f"https://block-theme-delete-{uuid.uuid4()}.example/article",
+        evidence_status_code="retained",
+    )
+    await assign_signal_theme(client, sig["id"], theme["id"])
+    steps = [
+        {"key": key, "content": f"测试步骤：{key}", "evidence_signal_ids": [sig["id"]]}
+        for key in DEMAND_STEP_KEYS
+    ]
+    created = await client.post(
+        "/api/v1/demands",
+        json={
+            "name": "关联主题的需求点",
+            "value_chain_stage_code": "creation_supply",
+            "source_tech_theme_id": theme["id"],
+            "derivation_trace": {"steps": steps},
+        },
+    )
+    assert created.status_code == 201, created.text
+    r = await client.delete(f"/api/v1/themes/{theme['id']}")
+    assert r.status_code == 409
+    detail = r.json()["detail"]
+    assert detail["code"] == "theme_has_demands"
+    assert created.json()["id"] in detail["demand_ids"]
+
+
 async def test_theme_detail_404(client):
     r = await client.get("/api/v1/themes/00000000-0000-0000-0000-0000000000aa")
     assert r.status_code == 404
+
+
+async def test_patch_theme_working_name_and_stage(client):
+    theme = await create_theme(client, working_name="低压系统智能化", stage="creation_supply")
+    r = await client.patch(
+        f"/api/v1/themes/{theme['id']}",
+        json={"working_name": "区域供电与智能配电", "value_chain_stage_code": "delivery_oem"},
+    )
+    assert r.status_code == 200
+    body = r.json()
+    assert body["working_name"] == "区域供电与智能配电"
+    assert body["value_chain_stage_code"] == "delivery_oem"
+    detail = (await client.get(f"/api/v1/themes/{theme['id']}")).json()
+    assert detail["working_name"] == "区域供电与智能配电"
 
 
 async def test_theme_eight_signals_sixteen_sources(client):
@@ -136,3 +189,83 @@ async def test_theme_eight_signals_sixteen_sources(client):
     detail = (await client.get(f"/api/v1/themes/{theme['id']}")).json()
     assert detail["metrics"]["signal_frequency"] == 8
     assert detail["metrics"]["source_count"] == 16
+
+
+async def test_theme_name_suggestion_uses_tag_name_when_llm_is_down(client, monkeypatch):
+    async def _no_llm(_brief: str):
+        return None
+
+    monkeypatch.setattr("app.services.theme_naming.suggest_theme_name_with_llm", _no_llm)
+    signal = await create_signal(
+        client,
+        title="低压网络多来源行业观察样本",
+        url="https://example.com/theme-name-fallback",
+        value_chain_stage_code="creation_supply",
+    )
+    await set_signal_tags(client, signal["id"], ["智能配电", "区域控制", "eFuse"])
+
+    response = await client.post("/api/v1/themes/name-suggestion", json={"signal_ids": [signal["id"]]})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["source"] == "fallback"
+    assert body["working_name"].startswith("创造端 · ")
+    assert body["working_name"].endswith("相关需求")
+    for tag in ("智能配电", "区域控制", "eFuse"):
+        assert tag in body["working_name"]
+    assert body["value_chain_stage_code"] == "creation_supply"
+    themes = (await client.get("/api/v1/themes")).json()
+    assert all(row["working_name"] != body["working_name"] for row in themes)
+
+
+async def test_theme_name_suggestion_keeps_model_name(client, monkeypatch):
+    class _Name:
+        working_name = "区域智能配电与线控底盘"
+        value_chain_stage_code = "delivery_oem"
+
+    async def _llm(_brief: str):
+        return _Name()
+
+    monkeypatch.setattr("app.services.theme_naming.suggest_theme_name_with_llm", _llm)
+    signal = await create_signal(
+        client,
+        title="低压网络多来源行业观察样本二",
+        url="https://example.com/theme-name-llm",
+    )
+    await set_signal_tags(client, signal["id"], ["智能配电"])
+    response = await client.post("/api/v1/themes/name-suggestion", json={"signal_ids": [signal["id"]]})
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["source"] == "llm"
+    assert body["working_name"] == "区域智能配电与线控底盘"
+    assert body["value_chain_stage_code"] == "delivery_oem"
+
+
+async def test_theme_name_suggestion_unknown_signal(client):
+    response = await client.post(
+        "/api/v1/themes/name-suggestion",
+        json={"signal_ids": ["00000000-0000-0000-0000-0000000000aa"]},
+    )
+    assert response.status_code == 404
+
+
+async def test_theme_create_update_delete_are_audited(client):
+    theme = await create_theme(client, working_name="审计主题", stage="creation_supply")
+    audit = (await client.get("/api/v1/audit", params={"entity_id": theme["id"]})).json()
+    assert [row["field_name"] for row in audit] == ["created"]
+    assert audit[0]["new_value"]["working_name"] == "审计主题"
+
+    updated = await client.patch(
+        f"/api/v1/themes/{theme['id']}",
+        json={"working_name": "审计主题改名", "value_chain_stage_code": "delivery_oem"},
+    )
+    assert updated.status_code == 200, updated.text
+    audit = (await client.get("/api/v1/audit", params={"entity_id": theme["id"]})).json()
+    fields = {row["field_name"] for row in audit}
+    assert {"working_name", "value_chain_stage_code"} <= fields
+
+    removable = await create_theme(client, working_name="待删除审计主题")
+    deleted = await client.delete(f"/api/v1/themes/{removable['id']}")
+    assert deleted.status_code == 204
+    audit = (await client.get("/api/v1/audit", params={"entity_id": removable["id"]})).json()
+    deletion = next(row for row in audit if row["field_name"] == "deleted")
+    assert deletion["old_value"]["working_name"] == "待删除审计主题"

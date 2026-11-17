@@ -40,6 +40,7 @@ import psycopg  # noqa: E402
 import pytest  # noqa: E402
 from alembic import command  # noqa: E402
 from alembic.config import Config as AlembicConfig  # noqa: E402
+from alembic.script import ScriptDirectory  # noqa: E402
 from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy import create_engine, text  # noqa: E402
 
@@ -64,16 +65,19 @@ _ADMIN_DSN = (
     f"user={SETTINGS.db_user} password={SETTINGS.db_password} dbname=postgres"
 )
 
+# ``eea_ref_code`` is session-seeded once; per-test cleanup only rewinds mutable business data.
 _TRUNCATE_SQL = text(
     "TRUNCATE TABLE eea_agent_event, eea_agent_message, eea_agent_patch, eea_agent_run, eea_agent_memory, "
     "eea_agent_session, eea_document_chunk, eea_document_figure, "
     "eea_chain_report, eea_embedding_cache, eea_signal_source, eea_stored_object_orphan, "
     "eea_panorama_import_url, eea_panorama_import_batch, "
     "eea_access_log, eea_capture_job, eea_document, eea_signal_tag, eea_signal, eea_correction_audit, "
+    "eea_capture_token, "
     "eea_strategic_assessment, eea_strategic_funnel, eea_deployment_standard, eea_tech_landing_point, "
-    "eea_vehicle_function, eea_demand_point, eea_tech_theme, eea_vocab, "
-    "eea_ref_code CASCADE"
+    "eea_vehicle_function, eea_demand_point, eea_tech_theme, eea_vocab CASCADE"
 )
+
+_DOMAIN_VOCAB = ("软件", "硬件", "通信", "电源与能源管理", "工具")
 
 # loop-independent cleanup connection (sync psycopg) — see scripts/bootstrap.py
 # for how the live stack creates databases; the test DB is created the same way
@@ -95,19 +99,10 @@ _TEST_LOCK_FILE = None
 
 
 def _lock_mode() -> str:
-    """Cross-process exclusivity for ``eea_test`` TRUNCATE isolation.
-
-    Default ``takeover``: eea_test is disposable; a stale or abandoned lock file
-    must not block the next run (unlink and retry). Use ``fail`` in CI when strict
-    mutual exclusion is required.
-    """
+    """``fail`` = CI strict; ``skip`` = fast local no_db alongside integration; default steals stale locks."""
     raw = os.environ.get("EEA_PYTEST_LOCK", "takeover").strip().lower()
-    if raw in ("block", "wait"):
-        return "block"
     if raw in ("skip", "none", "0"):
         return "skip"
-    if raw in ("takeover", "steal", "force"):
-        return "takeover"
     if raw == "fail":
         return "fail"
     return "takeover"
@@ -122,57 +117,44 @@ def _write_lock_owner(lock_file) -> None:
 
 def _acquire_suite_lock() -> None:
     global _TEST_LOCK_FILE
-    mode = _lock_mode()
-    if mode == "skip":
+    if _lock_mode() == "skip":
         return
     _TEST_LOCK_PATH.parent.mkdir(parents=True, exist_ok=True)
-    attempts = 3 if mode == "takeover" else 1
-    non_blocking = mode in ("fail", "takeover")
-    last_blocking: BlockingIOError | None = None
-    for attempt in range(attempts):
+    non_blocking = _lock_mode() == "fail"
+    for attempt in range(2 if _lock_mode() == "takeover" else 1):
         _TEST_LOCK_FILE = open(_TEST_LOCK_PATH, "a+")
         try:
             if "msvcrt" in sys.modules:
-                if non_blocking:
-                    msvcrt.locking(_TEST_LOCK_FILE.fileno(), msvcrt.LK_NBLCK, 1)
-                else:
-                    msvcrt.locking(_TEST_LOCK_FILE.fileno(), msvcrt.LK_LOCK, 1)
-            else:  # POSIX
-                flags = fcntl.LOCK_EX
-                if non_blocking:
-                    flags |= fcntl.LOCK_NB
+                lock_flag = msvcrt.LK_NBLCK if non_blocking else msvcrt.LK_LOCK
+                msvcrt.locking(_TEST_LOCK_FILE.fileno(), lock_flag, 1)
+            else:
+                flags = fcntl.LOCK_EX | (fcntl.LOCK_NB if non_blocking else 0)
                 fcntl.flock(_TEST_LOCK_FILE.fileno(), flags)
             _write_lock_owner(_TEST_LOCK_FILE)
             return
-        except BlockingIOError as exc:
-            last_blocking = exc
+        except BlockingIOError:
             _TEST_LOCK_FILE.close()
             _TEST_LOCK_FILE = None
-            if mode == "takeover" and attempt < attempts - 1:
+            if attempt == 0 and _lock_mode() == "takeover":
                 try:
                     _TEST_LOCK_PATH.unlink(missing_ok=True)
                 except OSError:
                     pass
                 time.sleep(0.05)
                 continue
-            break
+            pytest.exit(
+                f"eea_test 已被其它 pytest 会话占用 ({_TEST_LOCK_PATH})。\n"
+                "  快检: uv run pytest -m no_db -q  或  scripts/pytest_slices.sh unit\n"
+                "  集成独占: EEA_PYTEST_LOCK=fail",
+                returncode=2,
+            )
         except OSError as exc:  # pragma: no cover - platform edge cases
             _TEST_LOCK_FILE.close()
             _TEST_LOCK_FILE = None
             pytest.exit(
-                f"eea_test 会话互斥锁获取失败 ({_TEST_LOCK_PATH}): {exc}\n"
-                "B6 门禁要求独占执行：先关掉其它正在跑的 pytest 会话再试。",
+                f"eea_test 会话互斥锁获取失败 ({_TEST_LOCK_PATH}): {exc}",
                 returncode=1,
             )
-    if last_blocking is not None:
-        pytest.exit(
-            f"eea_test 已被其它 pytest 会话占用 ({_TEST_LOCK_PATH})。\n"
-            "  快检（无 PostgreSQL、无互斥锁）: uv run pytest -m no_db -q\n"
-            "  指定切片: ./scripts/pytest_slices.sh capture | platform\n"
-            "  默认 EEA_PYTEST_LOCK=takeover 会摘除陈旧锁后重试；并行 TRUNCATE 仍可能死锁。\n"
-            "  等待占用结束: EEA_PYTEST_LOCK=block；严格独占: EEA_PYTEST_LOCK=fail。",
-            returncode=2,
-        )
 
 
 def _item_needs_db(item: pytest.Item) -> bool:
@@ -235,6 +217,8 @@ def _prepared_test_db(request: pytest.FixtureRequest):
             )
     _create_test_db()
     _run_migrations()
+    with _SYNC_ENGINE.begin() as conn:
+        _seed_reference_data(conn)
     yield
     shutil.rmtree(_OBJECT_DIR, ignore_errors=True)
     # the OS releases the lock when the session process exits; close the
@@ -262,22 +246,25 @@ def _create_test_db() -> None:
             conn.execute(f'CREATE DATABASE "{TEST_DB_NAME}"')
 
 
+def _current_revision() -> str | None:
+    with _SYNC_ENGINE.connect() as conn:
+        try:
+            return conn.execute(text("SELECT version_num FROM alembic_version")).scalar_one_or_none()
+        except Exception:
+            return None
+
+
 def _run_migrations() -> None:
     cfg = AlembicConfig()
     cfg.set_main_option("script_location", str(BACKEND_ROOT / "migrations"))
+    head = ScriptDirectory.from_config(cfg).get_current_head()
+    if head is not None and _current_revision() == head:
+        return
     command.upgrade(cfg, "head")
 
 
-@pytest.fixture(autouse=True)
-def _clean_database(request: pytest.FixtureRequest):
-    """Deterministic isolation: every test starts from empty tables plus the
-    closed reference vocabularies — the only fixture data each test needs."""
-    if not _item_needs_db(request.node):
-        yield
-        return
-    _ensure_app_imported()
-    with _SYNC_ENGINE.begin() as conn:
-        conn.execute(_TRUNCATE_SQL)
+def _seed_reference_data(conn) -> None:
+    if conn.execute(text("SELECT 1 FROM eea_ref_code LIMIT 1")).first() is None:
         for domain, items in REF_CODES.items():
             for item in items:
                 conn.execute(
@@ -292,14 +279,28 @@ def _clean_database(request: pytest.FixtureRequest):
                         "alias": item[2] if len(item) > 2 else None,
                     },
                 )
-        for domain_name in ("软件", "硬件", "通信", "电源与能源管理", "工具"):
-            conn.execute(
-                text(
-                    "INSERT INTO eea_vocab (id, kind, name) "
-                    "VALUES (gen_random_uuid(), 'domain', :name)"
-                ),
-                {"name": domain_name},
-            )
+
+
+def _reseed_domain_vocab(conn) -> None:
+    conn.execute(
+        text(
+            "INSERT INTO eea_vocab (id, kind, name) "
+            "SELECT gen_random_uuid(), 'domain', name FROM unnest(CAST(:names AS text[])) AS name"
+        ),
+        {"names": list(_DOMAIN_VOCAB)},
+    )
+
+
+@pytest.fixture(autouse=True)
+def _clean_database(request: pytest.FixtureRequest):
+    """Each db test starts from empty business tables; closed ref codes persist for the session."""
+    if not _item_needs_db(request.node):
+        yield
+        return
+    _ensure_app_imported()
+    with _SYNC_ENGINE.begin() as conn:
+        conn.execute(_TRUNCATE_SQL)
+        _reseed_domain_vocab(conn)
     yield
 
 

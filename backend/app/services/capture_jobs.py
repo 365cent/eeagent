@@ -269,10 +269,7 @@ async def _mark_succeeded(job_id: uuid.UUID, worker_id: str, signal_id: uuid.UUI
 
 
 async def _execute_capture(job_id: uuid.UUID, worker_id: str) -> None:
-    # Import the established pipeline lazily to avoid a router/service cycle.
-    from app.domains.capture.document_path import _document_path
-    from app.domains.capture.submission import _is_html
-    from app.domains.evidence.html_capture import _signal_from_html
+    from app.domains.capture.ingest import ingest_capture_payload, on_capture_job_signal_created
 
     if await _is_cancel_requested(job_id):
         await _mark_cancelled(job_id, worker_id)
@@ -304,10 +301,7 @@ async def _execute_capture(job_id: uuid.UUID, worker_id: str) -> None:
             batch_id = job.import_batch_id
             await db.commit()
             await _mark_succeeded(job_id, worker_id, signal_id)
-            if batch_id is not None:
-                from app.services.panorama_import_hooks import on_import_capture_job_succeeded
-
-                await on_import_capture_job_succeeded(batch_id, job_id, signal_id)
+            await on_capture_job_signal_created(batch_id, job_id, signal_id)
             return
 
         await db.commit()
@@ -333,40 +327,24 @@ async def _execute_capture(job_id: uuid.UUID, worker_id: str) -> None:
         if await _is_cancel_requested(job_id):
             await _mark_cancelled(job_id, worker_id)
             return
-        # Bulk import batches: skip per-figure vision LLM (96 URLs × many figures would stall the queue).
-        vision_captions = import_batch_id is None
-        if _is_html(mime=mime, filename=filename):
-            signal = await _signal_from_html(
-                db,
-                url=source_url or f"eea://capture/html/{submission_id}",
-                data=data,
-                channel_code=channel_code,
-                html_label="file",
-                capture_submission_id=submission_id,
-                capture_submission_sha256=fingerprint,
-                figure_vision_captions=vision_captions,
-            )
-        else:
-            signal, _ = await _document_path(
-                db,
-                data=data,
-                filename=filename,
-                mime=mime,
-                source_url=source_url,
-                publisher=publisher,
-                source_label=source_label,
-                channel_code=channel_code,
-                capture_submission_id=submission_id,
-                capture_submission_sha256=fingerprint,
-                vision_captions=False,
-            )
+        figure_vision = import_batch_id is None
+        signal, _ = await ingest_capture_payload(
+            db,
+            data=data,
+            source_url=source_url,
+            filename=filename,
+            mime=mime,
+            channel_code=channel_code,
+            publisher=publisher,
+            source_label=source_label,
+            capture_submission_id=submission_id,
+            capture_submission_sha256=fingerprint,
+            figure_vision_captions=figure_vision,
+            document_vision_captions=False,
+        )
         signal_id = signal.id
         await _mark_succeeded(job_id, worker_id, signal_id)
-        if import_batch_id is not None:
-            from app.services.panorama_import_hooks import on_import_capture_job_succeeded
-
-            await on_import_capture_job_succeeded(import_batch_id, job_id, signal_id)
-        return
+        await on_capture_job_signal_created(import_batch_id, job_id, signal_id)
 
 
 async def run_claimed_job(job_id: uuid.UUID, worker_id: str) -> None:

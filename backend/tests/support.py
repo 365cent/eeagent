@@ -172,6 +172,7 @@ async def create_function(client, demand_id, name="全节点智能配电", **ove
 async def create_landing_point(
     client, function_id, name="智能保险丝（eFuse）", domain="硬件", role="执行层硬件"
 ) -> dict:
+    """POST landing point; call ``publish_function`` first — unpublished functions are rejected."""
     r = await client.post(
         "/api/v1/landing-points",
         json={

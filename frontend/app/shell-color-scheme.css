@@ -36,9 +36,22 @@
   --eea-header-bg: color-mix(in srgb, var(--eea-surface-main) 90%, transparent);
 }
 
+.app-shell.dark-mode .dashboard-content,
+.app-shell[data-color-scheme='dark'] .dashboard-content {
+  background-color: var(--eea-surface-main);
+}
+
 .app-shell[data-color-scheme='light'],
 .app-shell.light-mode {
   color-scheme: light;
+
+  --eea-surface-main: #ffffff;
+  --eea-surface-canvas: #f5f7fa;
+  --eea-surface-elevated: #ffffff;
+  --eea-text-primary: rgba(0, 0, 0, 0.88);
+  --eea-text-secondary: rgba(0, 0, 0, 0.45);
+  --eea-border-subtle: #eaeaea;
+  --eea-header-bg: color-mix(in srgb, var(--eea-surface-main) 95%, transparent);
 }
 
 @media (prefers-color-scheme: dark) {

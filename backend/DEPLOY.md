@@ -20,7 +20,7 @@ cd backend
 python -m venv .venv                      # 服务器需 Python 3.12+
 .venv\Scripts\python -m pip install -U pip
 .venv\Scripts\pip install -e .
-copy .env.example .env                    # 填 LLM_BASE_URL / LLM_API_KEY（LLM_MODEL 留空自动选）
+copy .env.example .env                    # 填 CHAT_* / EMBEDDING_* / RERANK_* 三组配置
 .venv\Scripts\python scripts\bootstrap.py # 便携 PostgreSQL + 建库 + 迁移 + 种子数据
 .venv\Scripts\python scripts\start_api.py # 后台启动，日志 backend/.pg/api.log
 ```

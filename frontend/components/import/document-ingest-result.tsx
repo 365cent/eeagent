@@ -27,7 +27,7 @@ import {
   createSignal,
 } from '@/lib/api/eea-api'
 import type { DocumentDetail, DocumentRawOut } from '@/lib/api/types'
-import { EeaApiError } from '@/lib/api/client'
+import { eeaErrorMessage } from '@/lib/api/client'
 import { documentCanonicalUrl } from '@/lib/api/client'
 import { useQueryClient } from '@tanstack/react-query'
 import { eeaQueryKeys } from '@/hooks/use-eea-queries'
@@ -69,7 +69,7 @@ export function DocumentIngestResult({ doc, filename, onUpdated, onNavigate }: D
       const md = await fetchDocumentCanonicalMd(current.id)
       setPreviewMd(md)
     } catch (err) {
-      const detail = err instanceof EeaApiError ? err.message : String(err)
+      const detail = eeaErrorMessage(err)
       messageApi.error(detail || '无法加载 canonical Markdown')
       setPreviewOpen(false)
     } finally {
@@ -85,7 +85,7 @@ export function DocumentIngestResult({ doc, filename, onUpdated, onNavigate }: D
       onUpdated?.(detail)
       messageApi.success(documentSummaryLine(detail))
     } catch (err) {
-      const detail = err instanceof EeaApiError ? err.message : String(err)
+      const detail = eeaErrorMessage(err)
       messageApi.error(detail || '重新解析失败')
     } finally {
       setRetryBusy(false)
@@ -93,13 +93,9 @@ export function DocumentIngestResult({ doc, filename, onUpdated, onNavigate }: D
   }
 
   const refreshMeta = async () => {
-    try {
-      const detail = await fetchDocument(current.id)
-      setCurrent(detail)
-      onUpdated?.(detail)
-    } catch {
-      /* ignore */
-    }
+    const detail = await fetchDocument(current.id)
+    setCurrent(detail)
+    onUpdated?.(detail)
   }
 
   const loadFigures = async () => {
@@ -110,7 +106,7 @@ export function DocumentIngestResult({ doc, filename, onUpdated, onNavigate }: D
         rows.map((row) => `图 ${row.figure_index} · ${row.review_status}${row.caption ? ` · ${row.caption}` : ''}`),
       )
     } catch (err) {
-      const detail = err instanceof EeaApiError ? err.message : String(err)
+      const detail = eeaErrorMessage(err)
       messageApi.error(detail || '图块列表加载失败')
     } finally {
       setKeywordsBusy(false)
@@ -123,7 +119,7 @@ export function DocumentIngestResult({ doc, filename, onUpdated, onNavigate }: D
       const rows = recompute ? await extractDocumentKeywords(current.id) : await fetchDocumentKeywords(current.id)
       setKeywordTerms(rows.map((row) => row.term))
     } catch (err) {
-      const detail = err instanceof EeaApiError ? err.message : String(err)
+      const detail = eeaErrorMessage(err)
       messageApi.error(detail || '章节关键词加载失败')
     } finally {
       setKeywordsBusy(false)
@@ -143,7 +139,7 @@ export function DocumentIngestResult({ doc, filename, onUpdated, onNavigate }: D
       messageApi.success('已保存为信号（默认无主题，请在证据详情指定主题）')
       onNavigate?.(`singal/${sig.id}`)
     } catch (err) {
-      const detail = err instanceof EeaApiError ? err.message : String(err)
+      const detail = eeaErrorMessage(err)
       messageApi.error(detail || '保存为信号失败')
     } finally {
       setSaveSignalBusy(false)

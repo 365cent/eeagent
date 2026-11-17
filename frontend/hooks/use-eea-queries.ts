@@ -52,10 +52,11 @@ export function useRefCodeMaps(enabled = true) {
   return { ...query, maps }
 }
 
-export function useOverviewStats() {
+export function useOverviewStats(enabled = true) {
   return useQuery({
     queryKey: eeaQueryKeys.overview,
     queryFn: fetchOverview,
+    enabled,
   })
 }
 
@@ -77,14 +78,17 @@ export function useSignalsList(params: ListSignalsParams = { limit: 200 }, enabl
   return { ...query, rows, total: query.data?.total ?? 0, maps }
 }
 
-export function useSignalsListFiltered(filters: {
-  query?: string
-  stageChip?: string
-  themeId?: string
-  tag?: string
-  offset?: number
-  limit?: number
-}) {
+export function useSignalsListFiltered(
+  filters: {
+    query?: string
+    stageChip?: string
+    themeId?: string
+    tag?: string
+    offset?: number
+    limit?: number
+  },
+  enabled = true,
+) {
   const params = useMemo(
     () =>
       buildListSignalsParams({
@@ -97,7 +101,7 @@ export function useSignalsListFiltered(filters: {
       }),
     [filters.query, filters.stageChip, filters.themeId, filters.tag, filters.offset, filters.limit],
   )
-  return useSignalsList(params)
+  return useSignalsList(params, enabled)
 }
 
 export function useVocabUsage(kind = 'tech_tag') {

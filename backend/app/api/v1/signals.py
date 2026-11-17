@@ -34,15 +34,13 @@ from app.schemas.schemas import (
     ThemeAggregatePreview,
     ThemeAssignment,
 )
-from app.domains.evidence.channel import _infer_channel_code
-from app.domains.evidence.document_pipeline import document_title as _document_title
+from app.domains.capture.document_path import create_signal_from_document
 from app.domains.evidence.html_capture import _signal_from_html
 from app.domains.evidence.signal_queries import find_signal, get_signal_detail, signal_out as _to_out
 from app.domains.evidence.signal_record import create_signal_record as _create_signal_record
 from app.domains.evidence.theme_match import match_theme as _match_theme, theme_display_tags
 from app.services.audit import record_correction
-from app.services.body_excerpt import lead_excerpt_from_markdown, resolve_signal_excerpt
-from app.services.doc_summary import build_document_body_summary, excerpt_from_canonical
+from app.services.body_excerpt import resolve_signal_excerpt
 from app.services.html_snapshot import (
     enrich_snapshot_figures,
     figure_data_urls,
@@ -148,8 +146,8 @@ async def list_signals(
         False,
         description="When false and evidence_status is unset, archived signals are omitted from the list.",
     ),
-    limit: int = Query(50, le=200),
-    offset: int = 0,
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
 ):
     q = (
         select(Signal)
@@ -186,17 +184,6 @@ async def list_signals(
     return [_to_out(s) for s in rows]
 
 
-def _document_summary_body(document: Document) -> str:
-    """S1-3 正文策略：文档来源信号默认写入摘要（文件名 + 标题 + 讲稿摘录），
-    不把整份 canonical Markdown 灌入 body_text。"""
-    canonical = ""
-    if document.canonical_md_object_key:
-        data = load_bytes(document.canonical_md_object_key)
-        if data is not None:
-            canonical = data.decode("utf-8", errors="replace")
-    return build_document_body_summary(document.filename or "", canonical)
-
-
 @router.post("", response_model=SignalDetail, status_code=201)
 async def create_signal(payload: SignalCreate, db: AsyncSession = Depends(get_db)):
     document = None
@@ -205,22 +192,30 @@ async def create_signal(payload: SignalCreate, db: AsyncSession = Depends(get_db
         if document is None:
             raise HTTPException(404, "document not found")
     if document is not None:
-        # S1-3 文档来源：title/url/body 有服务端默认值，body 是摘要而非 canonical 全文
-        title = payload.title or _document_title(document)
-        url = payload.url or f"eea://document/{document.id}"
-        body_text = payload.body_text or _document_summary_body(document)
-        canonical_for_excerpt = ""
-        if document.canonical_md_object_key:
-            data = load_bytes(document.canonical_md_object_key)
-            if data is not None:
-                canonical_for_excerpt = data.decode("utf-8", errors="replace")
-        if payload.excerpt:
-            excerpt = payload.excerpt
-        elif canonical_for_excerpt:
-            excerpt = excerpt_from_canonical(title, canonical_for_excerpt)
-        else:
-            excerpt = lead_excerpt_from_markdown(title, body_text)
-        published_at = payload.published_at or document.created_at
+        sig, _ = await create_signal_from_document(
+            db,
+            filename=document.filename,
+            mime=document.mime,
+            source_url=payload.url,
+            document=document,
+            title=payload.title,
+            body_text=payload.body_text,
+            excerpt=payload.excerpt,
+            published_at=payload.published_at,
+            channel_code=payload.channel_code,
+            evidence_status_code=(
+                payload.evidence_status_code
+                if "evidence_status_code" in payload.model_fields_set
+                else None
+            ),
+            value_chain_stage_code=payload.value_chain_stage_code,
+            signal_type_code=payload.signal_type_code,
+            evolution_node_code=payload.evolution_node_code,
+            publisher=payload.publisher,
+            source_label=payload.source_label,
+            ingest=False,
+        )
+        return await get_signal(sig.id, db)
     else:
         if not payload.title or not payload.url:
             raise HTTPException(422, "title 与 url 必填；或改传 document_id 走文档来源路径")
@@ -252,7 +247,6 @@ async def create_signal(payload: SignalCreate, db: AsyncSession = Depends(get_db
         source_label=payload.source_label,
         excerpt=excerpt,
         body_text=body_text,
-        document_id=document.id if document is not None else None,
     )
     return await get_signal(sig.id, db)
 
@@ -444,8 +438,8 @@ async def signal_assistant_message(
     except LLMNotConfiguredError as exc:
         raise HTTPException(
             503,
-            "LLM 未配置：请在 backend/.env 设置 LLM_BASE_URL（及 LLM_API_KEY）后重启 API；"
-            "LLM_MODEL 可留空，网关会自动挑选可用模型",
+            "LLM 未配置：请在 backend/.env 设置 CHAT_BASE_URL（及 CHAT_API_KEY）后重启 API；"
+            "CHAT_MODEL 可留空，网关会自动挑选可用模型",
         ) from exc
     except LLMNoModelError as exc:
         raise HTTPException(
@@ -455,7 +449,7 @@ async def signal_assistant_message(
         try:
             mid = await resolve_chat_model()
         except Exception:
-            mid = get_settings().llm_model or "unknown"
+            mid = get_settings().chat_model_value or "unknown"
         raise HTTPException(
             502, f"LLM 上游错误 ({exc.status}, 模型 {mid}): {exc.detail}"
         ) from exc
@@ -499,8 +493,8 @@ async def signal_studio(
         except LLMNotConfiguredError as exc:
             raise HTTPException(
                 503,
-                "LLM 未配置：请在 backend/.env 设置 LLM_BASE_URL（及 LLM_API_KEY）后重启 API；"
-                "LLM_MODEL 可留空，网关会自动挑选可用模型",
+                "LLM 未配置：请在 backend/.env 设置 CHAT_BASE_URL（及 CHAT_API_KEY）后重启 API；"
+                "CHAT_MODEL 可留空，网关会自动挑选可用模型",
             ) from exc
         except LLMNoModelError as exc:
             raise HTTPException(
@@ -627,8 +621,25 @@ async def update_signal(
         setattr(s, field, value)
     if body_text:
         # REQ-SIG-11: PATCH pasted body persists to the object store as well
-        s.body_object_key = save_body(body_text)
-        s.body_sha256 = sha256_text(body_text)
+        new_key = save_body(body_text)
+        new_sha = sha256_text(body_text)
+        old_body = (
+            {"object_key": s.body_object_key, "sha256": s.body_sha256}
+            if s.body_object_key or s.body_sha256
+            else None
+        )
+        await record_correction(
+            db,
+            "signal",
+            s.id,
+            "body_text",
+            old_body,
+            {"object_key": new_key, "sha256": new_sha},
+            actor,
+            reason="修补正文",
+        )
+        s.body_object_key = new_key
+        s.body_sha256 = new_sha
         s.captured_at = func.now()
     await db.commit()
     return await get_signal(signal_id, db)
@@ -731,7 +742,7 @@ async def tag_suggestions(
         suggest_tags_with_llm(s.title, llm_body[:6000]),
     )
     settings = get_settings()
-    llm_configured = bool(settings.llm_base_url_normalized)
+    llm_configured = bool(settings.chat_base_url_normalized)
     from app.services import semantic_api
 
     stage = (

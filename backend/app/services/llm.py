@@ -1,17 +1,17 @@
 """LLM tag suggestions via Pydantic AI (WBS 1.3.1 / TODO.md W3).
 
 LLM-first with silent jieba fallback (TODO.md W3: "jieba 保留作 fallback"):
-every failure mode — `LLM_MODEL` unset, gateway unreachable, timeout, invalid
+every failure mode — `CHAT_MODEL` unset, gateway unreachable, timeout, invalid
 structured output — returns None so no exception ever reaches the request
 path; callers keep the jieba result (app/api/v1/signals.py integration).
 
 The model points at the enterprise OpenAI-compatible gateway from
-`app/core/config.py` (`llm_base_url_normalized` + `llm_api_key` + `llm_model`).
-Chat, tag pick, and excerpt use ``LLM_BASE_URL`` + ``LLM_API_KEY``. ``LLM_MODEL``
+`app/core/config.py` (`chat_base_url_normalized` + `chat_api_key_value` + `chat_model_value`).
+Chat, tag pick, and excerpt use ``CHAT_BASE_URL`` + ``CHAT_API_KEY``. ``CHAT_MODEL``
 may be empty: ``llm_gateway.resolve_chat_model`` picks a working chat model from
 ``GET /models``. Vision figure captions use the **same** gateway via
 ``VISION_MODEL`` (or auto Qwen 3.8/3.6 on that host). Embedding/rerank stay on
-``MAAS_API_*``.
+separate `EMBEDDING_*` / `RERANK_*` settings.
 
 Tests stub the model with pydantic-ai's TestModel/FunctionModel
 (tests/test_llm_tags.py) — no real endpoint is ever contacted.
@@ -34,6 +34,7 @@ from app.services.llm_prompts import (
     CANDIDATE_TAG_RULES,
     EXCERPT_RULES,
     TAG_SUGGESTION_RULES,
+    THEME_NAME_RULES,
 )
 from app.services.llm_usage import (
     http_status_of,
@@ -134,7 +135,7 @@ async def _run_logged(agent: Agent, text: str, task: str):
 
 async def _chat_model_id() -> str | None:
     settings = get_settings()
-    if not settings.llm_base_url_normalized:
+    if not settings.chat_base_url_normalized:
         return None
     explicit = configured_chat_model(settings)
     if explicit:
@@ -204,7 +205,7 @@ async def pick_tech_tags_from_candidates(
     max_tags: int = 9,
 ) -> list[str] | None:
     """LLM narrows reranked jieba pool to ≤ max_tags; None when LLM unavailable."""
-    if not get_settings().llm_base_url_normalized:
+    if not get_settings().chat_base_url_normalized:
         return None
     pool = [c for c in candidates if not is_low_quality_tag(c)]
     if not pool:
@@ -233,10 +234,10 @@ async def pick_tech_tags_from_candidates(
 async def suggest_tags_with_llm(title: str, body: str) -> LLMTagSuggestion | None:
     """Structured tag suggestion, or None on any failure (jieba stays in charge).
 
-    Never raises: unset LLM_MODEL/LLM_BASE_URL, network/timeout errors and
+    Never raises: unset CHAT_MODEL/CHAT_BASE_URL, network/timeout errors and
     invalid structured output all log a warning and return None.
     """
-    if not get_settings().llm_base_url_normalized:
+    if not get_settings().chat_base_url_normalized:
         return None
     text = f"标题: {title.strip()}\n\n正文:\n{body.strip()[:6000]}" if body.strip() else title.strip()
     try:
@@ -279,9 +280,62 @@ async def _build_excerpt_agent() -> Agent[None, LLMExcerpt] | None:
     )
 
 
+class LLMThemeName(BaseModel):
+    """Working name for a theme the user has not saved yet."""
+
+    working_name: str
+    value_chain_stage_code: str | None = None
+
+    @field_validator("working_name", mode="after")
+    @classmethod
+    def _clean_name(cls, v: str) -> str:
+        v = re.sub(r"\s+", " ", v).strip().strip("\"'「」")
+        if len(v) < 4:
+            raise ValueError("theme name too short")
+        return v[:120]
+
+    @field_validator("value_chain_stage_code", mode="before")
+    @classmethod
+    def _soft_stage(cls, v: str | None) -> str | None:
+        if v is None or v == "" or v == "null":
+            return None
+        try:
+            return _closed_code("value_chain_stage", str(v))
+        except ValueError:
+            return None
+
+
+async def _build_theme_name_agent() -> Agent[None, LLMThemeName] | None:
+    model_id = await _chat_model_id()
+    if not model_id:
+        return None
+    stages = "; ".join(f"{c}: {l}" for c, l in zip(codes("value_chain_stage"), labels("value_chain_stage")))
+    return Agent(
+        OpenAIChatModel(model_id, provider=gateway_openai_provider()),
+        output_type=LLMThemeName,
+        system_prompt=THEME_NAME_RULES + "\n价值链环节（code: label）: " + stages,
+        model_settings={"timeout": 25},
+    )
+
+
+async def suggest_theme_name_with_llm(brief: str) -> LLMThemeName | None:
+    """Structured theme name, or None when the gateway is down or the answer is unusable."""
+    if not get_settings().chat_base_url_normalized:
+        return None
+    try:
+        agent = await _build_theme_name_agent()
+        if agent is None:
+            return None
+        result = await _run_logged(agent, brief, "theme_name")
+        return result.output
+    except Exception as exc:  # noqa: BLE001 — naming must fall back to the tag title
+        logger.warning("LLM 主题名建议失败，回退标签名: %s: %s", type(exc).__name__, exc)
+        return None
+
+
 async def suggest_excerpt_with_llm(title: str, body: str) -> str | None:
     """Article excerpt for the evidence sidebar, or None on any failure."""
-    if not get_settings().llm_base_url_normalized:
+    if not get_settings().chat_base_url_normalized:
         return None
     if not body.strip() and not title.strip():
         return None

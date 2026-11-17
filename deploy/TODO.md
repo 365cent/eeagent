@@ -1,6 +1,6 @@
 # Linux 内网生产实施清单
 
-更新：2026-11-05。本目录承载部署实施及后续实际配置；已有 API/Next 前台服务单元模板与配置说明，但**尚未交付经 Linux 验证的安装脚本或上线产物**。项目顺序见 [总清单](../TODO.md)，业务验收见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。模板入口：[部署说明](README.md)。
+更新：2026-11-17。本目录承载部署实施及后续实际配置；已有 API/Next 前台服务单元模板与配置说明，但**尚未交付经 Linux 验证的安装脚本或上线产物**。项目顺序见 [总清单](../TODO.md)，业务验收见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。模板入口：[部署说明](README.md)。
 
 默认单主机方案：**Docker Compose**（`deploy/docker-compose.yml`）— PostgreSQL、迁移任务、API、worker、Next、Nginx；持久卷 `pgdata` 与 `objectstore`。systemd 单元仍作非容器备选；Compose 为 README 主路径。Worker 与 API 共享对象目录；Linux 客户环境验收仍属 OPS-06。
 
@@ -26,12 +26,13 @@
 
 ## OPS-03 TLS、可信身份与权限
 
-- [ ] P0 · 未开始 · 身份/角色契约与演示配置可先设计；实际域名、证书和用户映射依赖 DOC-02。BE-03、CC-03、FE-12 是共同实现/验收方，不是前置依赖。
+- [ ] P0 · 部分实现 · 服务端 capture token 表/API（0018）与客户端 Windows Credential Manager 已交付；Linux TLS、代理身份与撤检验收仍开放。实际域名、证书和用户映射依赖 DOC-02。BE-03、CC-03、FE-12 是共同实现/验收方，不是前置依赖。
 - 来源：REQ-RULE-02、REQ-AGT-04/05；WBS 1.2.5/1.6。
 - 设单一 HTTPS 入口：页面及 /api/v1 同源转发，TLS 使用企业可信 CA；API/数据库/worker 仅内部监听。
 - 反向代理完成可部署的认证并写入受信 subject/role；剥离客户端同名头，应用仅接受受控代理来源。具体认证方式和会话撤销方式需在环境登记。
 - 研究者执行采集与自身任务；方法论/词表管理员执行分类/归集复核和业务确认；运维执行运行维护。默认拒绝未知角色；IP 访问记录不授予权限。
 - 对用户签发可撤销、带过期时间/作用域的 capture 凭据，只允许上传与其任务查询；服务端保存安全校验材料，客户端使用 Windows 凭据存储。
+- 已交付：`/api/v1/capture/tokens` 签发/列表/撤销，数据库仅存 SHA-256；客户端 `capture auth set/status/clear` 使用 Windows Credential Manager；模型网关配置已拆为 `CHAT_*` / `EMBEDDING_*` / `RERANK_*`。
 - CORS 限定实际部署来源；按认证方式落实 CSRF 防护，禁止公开信任任意私网来源或请求体中的操作者身份。
 - 验收：未登录/伪造头/错误角色/过期 token/跨用户任务均被拒绝；真实用户操作写入准确身份，不因重启丢失映射。
 

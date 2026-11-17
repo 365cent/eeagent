@@ -29,6 +29,12 @@ export function platformThemeForScheme(scheme: ShellColorScheme): ThemeConfig {
     token: {
       ...platformTokens,
       colorBgLayout: surface.surfaceCanvas,
+      colorBgContainer: surface.surfaceElevated,
+      colorBgElevated: surface.surfaceElevated,
+      colorText: surface.textPrimary,
+      colorTextSecondary: surface.textSecondary,
+      colorBorder: surface.borderSubtle,
+      colorSplit: surface.borderSubtle,
     },
   }
 }

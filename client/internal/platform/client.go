@@ -150,6 +150,21 @@ type Document struct {
 	Size   int64  `json:"size"`
 }
 
+// Identity is the server-verified capture principal used by doctor.
+type Identity struct {
+	Subject string `json:"subject"`
+	Role    string `json:"role"`
+}
+
+// WhoAmI verifies the configured capture credential with the backend.
+func (c *Client) WhoAmI(ctx context.Context) (*Identity, error) {
+	var identity Identity
+	if err := c.doJSON(ctx, http.MethodGet, "/api/v1/capture/whoami", "", nil, &identity); err != nil {
+		return nil, err
+	}
+	return &identity, nil
+}
+
 // Capture uploads the captured URL and self-contained HTML. It prefers the
 // unified endpoint when OpenAPI advertises it and uses the legacy endpoint
 // only when that capability is absent. It never retries through another route
@@ -675,7 +690,9 @@ func (c *Client) doJSON(ctx context.Context, method, path, contentType string, p
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Content-Type", contentType)
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
 	req.Header.Set("Accept", "application/json")
 	c.authorize(req)
 	resp, err := c.http.Do(req)

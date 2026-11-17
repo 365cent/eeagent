@@ -105,6 +105,7 @@ import { SignalCorrectionAudit } from '@/components/evidence/signal-correction-a
 import { SignalThemeAssign } from '@/components/evidence/signal-theme-assign'
 import { TopicsView } from '@/components/topics/topics-view'
 import { CreateTopicForm } from '@/components/topics/create-topic-form'
+import { DemandsView } from '@/components/topics/demands-view'
 import { VocabKnowledgePanel } from '@/components/topics/vocab-knowledge-panel'
 import { PlatformEmptyState, signalsTableLocale } from '@/components/shared/empty-state'
 import { useSignalTablePagination } from '@/lib/signal-table-pagination'
@@ -115,6 +116,8 @@ import { querySurfaceState } from '@/hooks/use-query-surface'
 import { NewSignalImportPage } from '@/components/import/new-signal-import'
 import { WorkflowStudio } from '@/components/workflow-studio'
 import { ChainReportView } from '@/views/utility/chain-report-view'
+import { PlatformSearchPage } from '@/components/search/platform-search-page'
+import { ResearchRemindersPage } from '@/components/reminders/research-reminders-page'
 import { PlatformSettingsPage } from '@/views/utility/platform-settings-page'
 import { ProfilePage } from '@/views/utility/profile-page'
 import { ArchivedSignalsView } from '@/views/evidence/archived-signals-view'
@@ -730,7 +733,17 @@ function PlaceholderView({ config }: { config: (typeof utilityPages)[string] }) 
   return <ProCard className="page-placeholder" bordered={false} boxShadow><div className="placeholder-icon"><SettingOutlined /></div><Title level={3}>{config.title}</Title><Text type="secondary">{config.description}</Text><Tag color="default">暂不可用</Tag><Text type="secondary">当前没有可用的服务端数据或操作接口。</Text></ProCard>
 }
 
-export function UtilityView({ page, onNavigate, signalId }: { page: keyof typeof utilityPages; onNavigate: NavigateFn; signalId: string }) {
+export function UtilityView({
+  page,
+  onNavigate,
+  signalId,
+  themeId,
+}: {
+  page: keyof typeof utilityPages
+  onNavigate: NavigateFn
+  signalId: string
+  themeId?: string
+}) {
   const config = utilityPages[page]
   const isCreateTopic = page === 'createTopic'
   const isReport = page === 'report'
@@ -760,8 +773,21 @@ export function UtilityView({ page, onNavigate, signalId }: { page: keyof typeof
   if (isCreateTopic) {
     return (
       <>
-        <PageHeader eyebrow={config.eyebrow} title={config.title} description="创建一个研究主题，之后在信号详情中把证据归集进来。" />
+        <PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} />
         <CreateTopicForm onNavigate={onNavigate} />
+      </>
+    )
+  }
+  if (page === 'demands') {
+    return (
+      <>
+        <PageHeader
+          eyebrow={config.eyebrow}
+          title={config.title}
+          description={config.description}
+          action={<Button onClick={() => onNavigate('topics')}>返回主题</Button>}
+        />
+        <DemandsView focusDemandId={signalId || undefined} sourceThemeId={themeId} />
       </>
     )
   }
@@ -794,7 +820,15 @@ export function UtilityView({ page, onNavigate, signalId }: { page: keyof typeof
     return (
       <>
         <PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} />
-        <PlaceholderView config={config} />
+        <PlatformSearchPage onNavigate={onNavigate} />
+      </>
+    )
+  }
+  if (page === 'reminders') {
+    return (
+      <>
+        <PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} />
+        <ResearchRemindersPage onNavigate={onNavigate} />
       </>
     )
   }
@@ -816,18 +850,19 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
   const [themeFilter, setThemeFilter] = useState<string | undefined>()
   const [stage, setStage] = useState('全部环节')
   const routeKeys = useMemo(() => new Set([...ALL_VIEW_KEYS, 'overview']), [])
-  const overviewQuery = useOverviewStats()
+  const loadOverviewShell = activeMenu === 'overview'
+  const overviewQuery = useOverviewStats(loadOverviewShell)
   const overview = overviewQuery.data
   const { showOverviewBanner } = usePlatformNotifications()
   const refCodesQuery = useRefCodeMaps()
-  const signalsQuery = useSignalsListFiltered({ query, stageChip: stage })
+  const signalsQuery = useSignalsListFiltered({ query, stageChip: stage }, loadOverviewShell)
   const {
     rows: cachedSignals,
     isFetching: signalsFetching,
     isError: signalsQueryError,
     refetch: refetchSignals,
   } = signalsQuery
-  const themeQuery = useThemeRows()
+  const themeQuery = useThemeRows(loadOverviewShell)
   const themeRows = themeQuery.rows
   const refCodesBootstrapping = !refCodesQuery.isSuccess && !refCodesQuery.isError
   const signalsError = signalsQueryError || refCodesQuery.isError
@@ -942,6 +977,7 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
   const primaryMenuSelectedKeys = useMemo(() => {
     if (isMainMenuRoute(activeMenu)) return [activeMenu]
     if (activeMenu === 'archived') return ['signals']
+    if (activeMenu === 'demands' || activeMenu === 'createTopic') return ['topics']
     return []
   }, [activeMenu])
 
@@ -995,7 +1031,14 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
               {activeMenu === 'trace' && <TraceView onNavigate={navigate} />}
               {activeMenu === 'technology' && <TechnologyView />}
               {activeMenu === 'strategy' && <StrategyView />}
-              {utilityPages[activeMenu] && <UtilityView page={activeMenu as keyof typeof utilityPages} onNavigate={navigate} signalId={activeSignalId} />}
+              {utilityPages[activeMenu] && (
+                <UtilityView
+                  page={activeMenu as keyof typeof utilityPages}
+                  onNavigate={navigate}
+                  signalId={activeSignalId}
+                  themeId={themeFilter}
+                />
+              )}
             </div>
             ) : (
             <div className="content-wrap">

@@ -1,13 +1,13 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { App as AntApp, Alert, Button, Card, Collapse, Input, Select, Space, Spin, Table, Tag, Typography } from 'antd'
 import { DemandDraftAssistant } from '@/components/topics/demand-draft-assistant'
 import { DemandSignalLibrary } from '@/components/topics/demand-signal-library'
 import { PlatformEmptyState } from '@/components/shared/empty-state'
 import { EeaApiError } from '@/lib/api/client'
-import { createDemand, fetchDemands, fetchRefCodes, fetchSignals, fetchThemes, patchDemand } from '@/lib/api/eea-api'
+import { createDemand, deleteDemand, fetchDemands, fetchRefCodes, fetchSignals, fetchThemes, patchDemand } from '@/lib/api/eea-api'
 import type {
   DemandCreatePayload,
   DemandDerivationStep,
@@ -295,10 +295,19 @@ type DemandPointWorkbenchProps = {
   /** When false, render without outer Card (for Drawer shell). */
   showCard?: boolean
   onDirtyChange?: (dirty: boolean) => void
+  /** Open this demand when the list loads, for example after a blocked theme delete. */
+  initialDemandId?: string
+  /** Limit the list to demands that still use this theme as their source. */
+  sourceThemeId?: string
 }
 
-export function DemandPointWorkbench({ showCard = true, onDirtyChange }: DemandPointWorkbenchProps) {
-  const { message: messageApi } = AntApp.useApp()
+export function DemandPointWorkbench({
+  showCard = true,
+  onDirtyChange,
+  initialDemandId,
+  sourceThemeId,
+}: DemandPointWorkbenchProps) {
+  const { message: messageApi, modal } = AntApp.useApp()
   const queryClient = useQueryClient()
   const refCodesQuery = useRefCodeMaps()
   const [selectedDemandId, setSelectedDemandId] = useState<string | null>(null)
@@ -306,7 +315,7 @@ export function DemandPointWorkbench({ showCard = true, onDirtyChange }: DemandP
   const [creating, setCreating] = useState(false)
   const [draft, setDraft] = useState<DemandDraft>(emptyDraft)
   const [dirty, setDirty] = useState(false)
-  const [busy, setBusy] = useState<'save' | 'confirm' | null>(null)
+  const [busy, setBusy] = useState<'save' | 'confirm' | 'delete' | null>(null)
   const [validationIssues, setValidationIssues] = useState<string[]>([])
   const [serverError, setServerError] = useState<string | null>(null)
   const [assistantSignalIds, setAssistantSignalIds] = useState<string[]>([])
@@ -326,6 +335,11 @@ export function DemandPointWorkbench({ showCard = true, onDirtyChange }: DemandP
   })
 
   const demands = demandsQuery.data ?? []
+  const visibleDemands = sourceThemeId
+    ? demands.filter((demand) => demand.source_tech_theme_id === sourceThemeId)
+    : demands
+  const listedDemands = sourceThemeId && visibleDemands.length === 0 ? demands : visibleDemands
+  const openedDemandId = useRef<string | null>(null)
   const themes = themesQuery.data ?? []
   const selectedDemand = demands.find((demand) => demand.id === selectedDemandId)
   const stageOptions = Object.entries(refCodesQuery.maps.byDomain.value_chain_stage ?? {})
@@ -414,6 +428,17 @@ export function DemandPointWorkbench({ showCard = true, onDirtyChange }: DemandP
     clearFeedback()
   }
 
+  useEffect(() => {
+    const targetId =
+      initialDemandId ||
+      (sourceThemeId ? listedDemands.find((demand) => demand.source_tech_theme_id === sourceThemeId)?.id : undefined)
+    if (!targetId || openedDemandId.current === targetId) return
+    const match = listedDemands.find((demand) => demand.id === targetId)
+    if (!match) return
+    openedDemandId.current = targetId
+    editDemand(match)
+  }, [initialDemandId, listedDemands, sourceThemeId])
+
   const discardChanges = () => {
     setEditing(false)
     setCreating(false)
@@ -421,6 +446,44 @@ export function DemandPointWorkbench({ showCard = true, onDirtyChange }: DemandP
     setDraft(emptyDraft())
     setDirty(false)
     clearFeedback()
+  }
+
+  const removeDemand = async () => {
+    if (!selectedDemandId || creating) return
+    const demandId = selectedDemandId
+    setBusy('delete')
+    try {
+      await deleteDemand(demandId)
+      queryClient.setQueryData<DemandOut[]>(eeaQueryKeys.demands, (current) =>
+        (current ?? []).filter((demand) => demand.id !== demandId),
+      )
+      await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.demands })
+      await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.overview })
+      await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.vehicleFunctionsRoot })
+      await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.landingPoints })
+      discardChanges()
+      messageApi.success('需求点已删除')
+    } catch (error) {
+      setServerError(errorMessage(error))
+    } finally {
+      setBusy(null)
+    }
+  }
+
+  const confirmRemoveDemand = () => {
+    if (!selectedDemand || creating) return
+    const functionCount = selectedDemand.function_count ?? 0
+    modal.confirm({
+      title: '删除需求点',
+      content:
+        functionCount > 0
+          ? `删除「${selectedDemand.name}」会同时去掉已映射的 ${functionCount} 个车辆功能。来源主题本身会保留。`
+          : `删除「${selectedDemand.name}」后，来源主题不再被这个需求点引用。`,
+      okText: '删除',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: () => removeDemand(),
+    })
   }
 
   const rememberSavedDemand = async (saved: DemandOut, submitted: DemandCreatePayload | DemandUpdatePayload) => {
@@ -603,7 +666,7 @@ export function DemandPointWorkbench({ showCard = true, onDirtyChange }: DemandP
               size="small"
               rowKey="id"
               loading={demandsQuery.isLoading}
-              dataSource={demands}
+              dataSource={listedDemands}
               pagination={{ pageSize: 10, size: 'small', hideOnSinglePage: true }}
               locale={{
                 emptyText: <PlatformEmptyState title="暂无需求点" description="新建后保存在此列表。" />,
@@ -983,6 +1046,11 @@ export function DemandPointWorkbench({ showCard = true, onDirtyChange }: DemandP
                 <Button disabled={Boolean(busy)} onClick={discardChanges}>
                   {dirty ? '放弃未保存修改' : '关闭'}
                 </Button>
+                {!creating && selectedDemand ? (
+                  <Button danger loading={busy === 'delete'} disabled={Boolean(busy)} onClick={confirmRemoveDemand}>
+                    删除需求点
+                  </Button>
+                ) : null}
               </Space>
                     </Space>
                   ),

@@ -16,6 +16,7 @@ import {
   Typography,
 } from 'antd'
 import { defaultSettings, loadPlatformSettings, savePlatformSettings, type PlatformSettingsPrefs } from '@/lib/platform-prefs'
+import { CaptureTokensPanel } from '@/components/settings/capture-tokens-panel'
 import { PageHeader } from '@/components/shared/page-header'
 import { flattenMainMenuLeafKeys, mainMenuTree } from '@/config/menu'
 import type { UtilityPageConfig } from '@/config/utility-pages'
@@ -133,8 +134,8 @@ export function PlatformSettingsPage({ config }: PlatformSettingsPageProps) {
             </Form.Item>
           </Card>
 
-          <Card className="panel-card" title="角色与权限（第一期）" style={{ marginTop: 18 }}>
-            <Text type="secondary">当前没有可用的服务端角色与权限查询接口。</Text>
+          <Card className="panel-card" title="采集凭据（CC-03）" style={{ marginTop: 18 }}>
+            <CaptureTokensPanel />
           </Card>
 
           <Card className="panel-card" title="数据与合规" style={{ marginTop: 18 }}>

@@ -25,7 +25,20 @@ export type UtilityPageConfig = {
 
 export const utilityPages: Record<string, UtilityPageConfig> = {
   newSignal: { eyebrow: '06 · 原始信息采集', title: '新建信号', description: '粘贴链接或录入研究线索，系统将生成可追溯的信号记录。', action: '保存信号', icon: <PlusOutlined /> },
-  createTopic: { eyebrow: '02 · 需求点提取', title: '新建主题', description: '创建一个研究主题，聚合相关证据并持续沉淀洞察。', action: '创建主题', icon: <PlusOutlined /> },
+  createTopic: {
+    eyebrow: '02 · 需求点提取',
+    title: '新建主题',
+    description: '自动整理会把当前标签聚成候选主题；手动整理先点一条，再纳入相近信号，一起收成主题。',
+    action: '创建主题',
+    icon: <PlusOutlined />,
+  },
+  demands: {
+    eyebrow: '02 · 需求点提取',
+    title: '需求点',
+    description: '主题仍被需求点引用时，先改来源或删除需求点，再回到主题删除。',
+    action: '保存需求点',
+    icon: <BulbOutlined />,
+  },
   report: { eyebrow: '07 · 研究交付', title: '链路报告', description: '按技术落脚点生成持久化 Markdown 链路报告，并预览最近导出。', action: '生成 Markdown', icon: <FilePdfOutlined /> },
   notifications: { eyebrow: '08 · 工作提醒', title: '通知中心', description: '查看复核、抓取与协作任务的最新状态。', action: '全部标记已读', icon: <BellOutlined /> },
   search: { eyebrow: '09 · 全局检索', title: '搜索结果', description: '跨信号、主题、需求点和技术落脚点检索研究资产。', action: '保存检索', icon: <SearchOutlined /> },

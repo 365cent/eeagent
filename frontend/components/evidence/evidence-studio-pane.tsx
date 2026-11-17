@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { Alert, Button, Spin, Typography } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { fetchSignalStudio } from '@/lib/api/eea-api'
-import { EeaApiError } from '@/lib/api/client'
+import { eeaErrorMessage } from '@/lib/api/client'
 import type {
   StudioInfographicPayload,
   StudioMindmapNode,
@@ -25,10 +25,6 @@ type EvidenceStudioPaneProps = {
   cached: string | StudioMindmapPayload | StudioInfographicPayload | undefined
   onLoaded: (payload: string | StudioMindmapPayload | StudioInfographicPayload) => void
   onInvalidate?: () => void
-}
-
-function isNotFound(status: number) {
-  return status === 404 || status === 501 || status === 405
 }
 
 function MindmapTree({ node, depth = 0 }: { node: StudioMindmapNode; depth?: number }) {
@@ -108,11 +104,7 @@ export function EvidenceStudioPane({
       const payload = await fetchSignalStudio(signalId, kind)
       onLoadedRef.current(payload as string | StudioMindmapPayload | StudioInfographicPayload)
     } catch (err) {
-      if (err instanceof EeaApiError && isNotFound(err.status)) {
-        setError('not_wired')
-        return
-      }
-      setError(err instanceof EeaApiError ? err.message : String(err))
+      setError(eeaErrorMessage(err, '生成失败'))
     } finally {
       setLoading(false)
     }
@@ -152,15 +144,6 @@ export function EvidenceStudioPane({
     )
   }
 
-  if (error === 'not_wired') {
-    return (
-      <PlatformEmptyState
-        title="工作室生成尚未接入"
-        description="后端需实现 POST /signals/{id}/studio，契约见 backend/TODO.md §八。"
-      />
-    )
-  }
-
   const renderCached = () => {
     if (cached === undefined) return null
     if (kind === 'report' && typeof cached === 'string') {
@@ -175,7 +158,7 @@ export function EvidenceStudioPane({
     return null
   }
 
-  if (error && error !== 'not_wired') {
+  if (error) {
     if (cached !== undefined) {
       const body = renderCached()
       if (body) {
@@ -226,7 +209,7 @@ export function EvidenceStudioPane({
   return (
     <PlatformEmptyState
       title="无法解析生成结果"
-      description="请在后端接入 studio 接口后重试。"
+      description="响应结构与当前客户端不一致，请重试或检查模型配置。"
       action={
         <Button type="primary" icon={<ReloadOutlined />} loading={loading} onClick={handleRegenerate}>
           重新生成

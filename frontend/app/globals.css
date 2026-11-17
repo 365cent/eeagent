@@ -1034,6 +1034,14 @@
     @apply relative;
   }
 
+  .query-surface-initial {
+    @apply flex min-h-[200px] w-full items-center justify-center;
+  }
+
+  .main-grid.overview-workflow-grid .query-surface-initial {
+    min-height: 220px;
+  }
+
   .query-surface-refresh {
     @apply pointer-events-none absolute inset-0 z-[2] flex items-center justify-center rounded-[inherit];
     background: color-mix(in srgb, var(--eea-surface-elevated) 72%, transparent);

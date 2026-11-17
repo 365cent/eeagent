@@ -53,7 +53,7 @@ open "dist/EEA Capture.app"
 ## 目录结构
 
 ```text
-cmd/capture/         入口：无参数 = GUI；upload / doctor / version
+cmd/capture/         入口：无参数 = GUI；upload / auth / doctor / version
 internal/cdp/        DevTools WebSocket（stdlib，无第三方依赖）
 internal/capture/    启动 Edge/Chrome、注入 SingleFile、取回归档
 internal/singlefile/ 内嵌的 SingleFile core（AGPL，见 scripts/vendor-singlefile.sh）
@@ -92,14 +92,23 @@ dist/                发布产物（gitignored）
 | `headless` | `true` 则无窗口；`capture_archive=extension` 时会强制可见窗口以加载 SingleFile |
 | `capture_archive` | `extension`（默认）/ `auto` / `embedded` — 见下方「工作原理」 |
 | `singlefile_extension_path` | 留空则自动从本机 Edge/Chrome 复制到 `data/extensions/singlefile` |
+| `ca_cert_path` | 企业 CA 的 PEM 文件；不得用关闭证书校验代替 |
+| `auth_token_env` | 读取 capture token 的环境变量名，默认 `EEA_CAPTURE_TOKEN` |
+| `auth_token_credential` | Windows Credential Manager target；推荐用 `capture auth set` 写入，config 只保存引用 |
+| `auth_token_file` | 兼容用的 token 文件路径；凭据管理器缺失时回退 |
 
 环境变量覆盖：`EEA_API_BASE`、`EEA_CLIENT_CONFIG`（指定别的配置文件）。
+Token 优先级：`EEA_CAPTURE_TOKEN` 环境变量 > `auth_token_credential`（Windows Credential Manager）> `auth_token_file`。
+管理员通过 `POST /api/v1/capture/tokens` 为研究者签发用户级 token（原始 token 只返回一次），再在客户端用 `capture auth set` 存入 Credential Manager；撤销后客户端请求返回 401。
 
 `doctor` 会打印解析后的地址与网卡 IP：
 
 ```text
 api_base      http://10.215.8.74:8000
 auto_api      true (lan 10.215.8.74)
+ca_cert       (none)
+auth_token    credential
+auth          ok (alice, researcher)
 ```
 
 上传出站连接会绑定该网卡（VMnet8 等虚拟网卡被跳过）；文档上传超时独立为 `upload_timeout_sec`（默认 900 秒），上限 `max_upload_mb=120`。
@@ -111,6 +120,9 @@ auto_api      true (lan 10.215.8.74)
 ```bash
 capture.exe                       # 图形界面（默认）
 capture.exe doctor                # 检查浏览器 / profile / 后端连通性
+capture.exe auth set              # 从 stdin 读取 token 并存入 Windows Credential Manager
+capture.exe auth status           # 显示 token 来源（env / credential / file）
+capture.exe auth clear            # 删除凭据并清除 config 中的引用
 capture.exe upload --url https://… --headless
 capture.exe upload --resume                 # 恢复本地队列中未完成的任务
 capture.exe upload --html saved.html                 # 已保存的 SingleFile HTML

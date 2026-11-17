@@ -323,7 +323,7 @@ async def caption_figure(figure: Figure, *, model: str, retries: int = 0) -> str
     gateway (transient upstream error); one retry recovers most of those.
     """
     settings = get_settings()
-    base = settings.llm_base_url_normalized
+    base = settings.chat_base_url_normalized
     if not base or not model:
         return ""
     for attempt in range(retries + 1):
@@ -360,8 +360,8 @@ async def _caption_once(
         ],
     }
     headers = {"Content-Type": "application/json"}
-    if settings.llm_api_key:
-        headers["Authorization"] = f"Bearer {settings.llm_api_key}"
+    if settings.chat_api_key_value:
+        headers["Authorization"] = f"Bearer {settings.chat_api_key_value}"
     started = time.perf_counter()
     try:
         async with open_async_http_client(timeout=VISION_TIMEOUT) as client:

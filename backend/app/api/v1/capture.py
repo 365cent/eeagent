@@ -39,9 +39,8 @@ from app.services.doc_ingest import normalize_document_mime
 from app.services.objectstore import save_bytes
 from app.services.refcodes import codes, normalize as normalize_ref_code
 from app.services.url_fetch import FetchError, fetch_url
-from app.domains.capture.document_path import _document_path
+from app.domains.capture.ingest import ingest_capture_payload
 from app.domains.capture.submission import _is_html, _submission_fingerprint
-from app.domains.evidence.html_capture import _signal_from_html
 from app.domains.evidence.signal_queries import get_signal_detail
 
 from app.domains.evidence.document_pipeline import document_raw_out as _raw_out
@@ -109,6 +108,12 @@ async def _capture_job_out(db: AsyncSession, job: CaptureJob) -> CaptureJobOut:
         channel_code=job.channel_code,
         import_batch_id=job.import_batch_id,
     )
+
+
+@router.get("/whoami")
+async def capture_whoami(actor: OperatorIdentity = Depends(get_capture_identity)):
+    """Return the verified capture identity for client diagnostics."""
+    return {"subject": actor.subject, "role": actor.role}
 
 
 @router.post("", response_model=CaptureResult, status_code=201)
@@ -208,31 +213,26 @@ async def capture(
         raise HTTPException(413, f"capture file exceeds {get_settings().doc_raw_upload_max_bytes} bytes")
 
     if _is_html(mime=mime, filename=filename):
-        # html evidence needs a source url; uploaded html without one is its own origin
-        source_url = url or f"eea://capture/html/{uuid.uuid4()}"
-        sig = await _signal_from_html(
-            db,
-            url=source_url,
-            data=data,
-            channel_code=channel_code,
-            html_label="file",
-            capture_submission_id=submission_id,
-            capture_submission_sha256=fingerprint if submission_id is not None else None,
+        source_url = url or (
+            f"eea://capture/html/{submission_id}"
+            if submission_id is not None
+            else f"eea://capture/html/{uuid.uuid4()}"
         )
-        return await _capture_result(db, sig, via=via)
-
-    sig, _ = await _document_path(
+    else:
+        source_url = url
+    sig, _ = await ingest_capture_payload(
         db,
         data=data,
+        source_url=source_url,
         filename=filename,
         mime=mime,
-        source_url=url,
+        channel_code=channel_code,
         publisher=publisher,
         source_label=source_label,
-        channel_code=channel_code,
         capture_submission_id=submission_id,
         capture_submission_sha256=fingerprint if submission_id is not None else None,
-        vision_captions=True,
+        figure_vision_captions=True,
+        document_vision_captions=True,
     )
     return await _capture_result(db, sig, via=via)
 

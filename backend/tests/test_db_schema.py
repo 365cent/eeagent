@@ -38,6 +38,7 @@ EXPECTED_TABLES = {
     "eea_document_figure",
     "eea_access_log",
     "eea_capture_job",
+    "eea_capture_token",
     "eea_vehicle_function",
     "eea_tech_landing_point",
     "eea_deployment_standard",

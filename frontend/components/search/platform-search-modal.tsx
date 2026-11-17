@@ -17,13 +17,8 @@ import {
   Tag,
   Typography,
 } from 'antd'
-import {
-  buildPlatformSearchIndex,
-  platformSearchKindLabel,
-  searchPlatform,
-  type PlatformSearchHit,
-} from '@/lib/platform-search-index'
-import { useDemandRows, useLandingRows, useSignalsList, useThemeRows } from '@/hooks/use-eea-queries'
+import { platformSearchKindLabel, searchPlatform, type PlatformSearchHit } from '@/lib/platform-search-index'
+import { usePlatformSearchIndex } from '@/hooks/use-platform-search-index'
 import type { NavigateFn } from '@/types/platform'
 
 const { Text } = Typography
@@ -42,14 +37,7 @@ export function PlatformSearchModal({ open, onClose, onNavigate }: PlatformSearc
   const inputRef = useRef<InputRef>(null)
   const listyRef = useRef<ListyRef>(null)
 
-  const { rows: signals } = useSignalsList({ limit: 200 }, open)
-  const { rows: themes } = useThemeRows(open)
-  const { rows: demands } = useDemandRows(open)
-  const { rows: landings } = useLandingRows(open)
-  const searchIndex = useMemo(
-    () => buildPlatformSearchIndex({ signals, themes, demands, landings }),
-    [signals, themes, demands, landings],
-  )
+  const searchIndex = usePlatformSearchIndex(open)
   const results = useMemo(() => searchPlatform(query, searchIndex), [query, searchIndex])
 
   const selectHit = useCallback(

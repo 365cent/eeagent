@@ -1,6 +1,6 @@
 'use client'
 
-import DashboardClient from '@/components/dashboard-client'
+import DashboardClientLoader from '@/components/dashboard-client-loader'
 
 type ViewRouteClientProps = {
   initialView: string
@@ -9,5 +9,5 @@ type ViewRouteClientProps = {
 
 /** Client dashboard shell for App Router view pages. */
 export function ViewRouteClient({ initialView, signalId }: ViewRouteClientProps) {
-  return <DashboardClient initialView={initialView} signalId={signalId} />
+  return <DashboardClientLoader initialView={initialView} signalId={signalId} />
 }

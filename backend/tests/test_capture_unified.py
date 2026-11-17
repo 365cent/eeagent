@@ -10,6 +10,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from app.core.config import get_settings
 from app.services.url_fetch import FetchedPage, FetchError
 
 pytestmark = pytest.mark.anyio
@@ -28,6 +29,33 @@ def _html_file(name="page.html"):
 
 async def _count_signals(client) -> int:
     return len((await client.get("/api/v1/signals")).json())
+
+
+@pytest.mark.no_db
+async def test_capture_whoami_reports_test_identity(client):
+    response = await client.get("/api/v1/capture/whoami")
+    assert response.status_code == 200, response.text
+    assert response.json() == {"subject": "eea-test-actor", "role": "platform_admin"}
+
+
+@pytest.mark.no_db
+async def test_capture_whoami_accepts_configured_bearer(client, monkeypatch):
+    monkeypatch.setattr(get_settings(), "capture_bearer_tokens", "alice:capture-token")
+    response = await client.get(
+        "/api/v1/capture/whoami",
+        headers={"Authorization": "Bearer capture-token"},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json() == {"subject": "alice", "role": "researcher"}
+
+
+@pytest.mark.no_db
+async def test_capture_whoami_rejects_revoked_bearer(client):
+    response = await client.get(
+        "/api/v1/capture/whoami",
+        headers={"Authorization": "Bearer revoked-token"},
+    )
+    assert response.status_code == 401
 
 
 async def test_html_file_upload_creates_snapshot_signal(client):
@@ -102,6 +130,10 @@ async def test_document_file_upload_creates_derived_signal(client, monkeypatch):
     assert sig["document_id"] == body["document"]["id"]
     assert sig["title"] == "deck"  # filename stem (S1-3 document defaults)
     assert sig["url"].startswith("eea://document/")
+    assert sig["published_at"]
+    assert sig["event_date_text"]
+    assert sig["event_date_precision"] in {"year", "month", "day"}
+    assert sig["excerpt"]
     assert await _count_signals(client) == before + 1
 
 

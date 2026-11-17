@@ -341,7 +341,7 @@ def test_max_figures_cap_comes_from_settings(monkeypatch):
 async def test_caption_figure_retries_empty_response(monkeypatch):
     """First call empty (transient gateway fault) → one retry recovers."""
     calls = {"n": 0}
-    settings = doc_ingest.get_settings().model_copy(update={"llm_base_url": "https://example.test"})
+    settings = doc_ingest.get_settings().model_copy(update={"chat_base_url": "https://example.test"})
     monkeypatch.setattr(doc_ingest, "get_settings", lambda: settings)
 
     async def fake_caption_once(figure, *, model, settings, base, attempt=1):
@@ -356,7 +356,7 @@ async def test_caption_figure_retries_empty_response(monkeypatch):
 
 
 async def test_caption_figure_gives_up_after_retries(monkeypatch):
-    settings = doc_ingest.get_settings().model_copy(update={"llm_base_url": "https://example.test"})
+    settings = doc_ingest.get_settings().model_copy(update={"chat_base_url": "https://example.test"})
     monkeypatch.setattr(doc_ingest, "get_settings", lambda: settings)
     async def always_empty(figure, *, model, settings, base, attempt=1):
         return ""

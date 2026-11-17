@@ -118,6 +118,28 @@ export type CaptureJobOut = {
   result?: CaptureResult | null
 }
 
+export type CaptureTokenOut = {
+  id: string
+  subject: string
+  role: string
+  label: string | null
+  created_at: string
+  created_by: string
+  expires_at: string | null
+  revoked_at: string | null
+  revoked_by: string | null
+}
+
+export type CaptureTokenCreated = CaptureTokenOut & {
+  token: string
+}
+
+export type CaptureTokenCreatePayload = {
+  subject: string
+  label?: string | null
+  expires_at?: string | null
+}
+
 export type SignalCreatePayload = {
   title?: string | null
   url?: string | null
@@ -211,6 +233,72 @@ export type VocabOut = {
 export type ThemeCreatePayload = {
   working_name: string
   value_chain_stage_code?: string | null
+}
+
+export type ThemeUpdatePayload = {
+  working_name?: string
+  value_chain_stage_code?: string | null
+}
+
+export type ThemeNameSuggestion = {
+  working_name: string
+  value_chain_stage_code: string | null
+  source: 'llm' | 'fallback'
+}
+
+export type TagDistributionItem = {
+  tag: string
+  support: number
+  cluster_share: number
+  corpus_share: number
+  lift: number
+}
+
+export type ClusterMemberOut = {
+  signal_id: string
+  title: string
+  tags: string[]
+  value_chain_stage_code: string | null
+  updated_at: string
+  source_host: string
+  assigned?: boolean
+}
+
+export type ThemeClusterProposal = {
+  key: string
+  members: ClusterMemberOut[]
+  shared_tags: string[]
+  tag_distribution: TagDistributionItem[]
+  cohesion: number
+  signal_count: number
+  source_count: number
+  value_chain_stage_code: string | null
+}
+
+export type SignalNeighborOut = {
+  signal_id: string
+  title: string
+  tags: string[]
+  similarity: number
+  shared_tags: string[]
+  value_chain_stage_code: string | null
+  updated_at: string
+  source_host: string
+  assigned: boolean
+}
+
+export type ThemeClusterReport = {
+  method: string
+  metric: string
+  linkage: string
+  distance_threshold: number
+  sample_size: number
+  unassigned_count: number
+  truncated: boolean
+  silhouette: number | null
+  tag_distribution: TagDistributionItem[]
+  clusters: ThemeClusterProposal[]
+  neighbors: Record<string, SignalNeighborOut[]>
 }
 
 export type AssistantChatTurn = {

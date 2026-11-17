@@ -136,7 +136,7 @@ def test_local_model_does_not_record_synthetic_tokens():
 
 
 async def test_chat_completion_logs_each_attempt_without_prompt_or_cache_fields(monkeypatch):
-    monkeypatch.setattr(gw, "get_settings", lambda: _settings(llm_model="configured"))
+    monkeypatch.setattr(gw, "get_settings", lambda: _settings(chat_model_value="configured"))
 
     async def chain(max_models=1):
         return ["configured", "fallback-model"][:max_models]

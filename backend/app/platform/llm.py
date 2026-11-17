@@ -27,6 +27,6 @@ def build_chat_model(
 def gateway_openai_provider(settings: Settings | None = None) -> OpenAIProvider:
     settings = settings or get_settings()
     return build_openai_provider(
-        base_url=settings.llm_base_url_normalized,
-        api_key=settings.llm_api_key,
+        base_url=settings.chat_base_url_normalized,
+        api_key=settings.chat_api_key_value,
     )

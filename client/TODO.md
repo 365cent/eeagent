@@ -1,6 +1,6 @@
 # Capture Client 实施清单
 
-更新：2026-11-11。生产服务端已选 Linux 内网；本目录仍是研究者 Windows 电脑上的 Go 采集程序。公网与登录浏览器留在用户终端。总顺序见 [项目清单](../TODO.md)，原文映射见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。
+更新：2026-11-17。生产服务端已选 Linux 内网；本目录仍是研究者 Windows 电脑上的 Go 采集程序。公网与登录浏览器留在用户终端。总顺序见 [项目清单](../TODO.md)，原文映射见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。
 
 ## 现状和边界
 
@@ -34,9 +34,13 @@
 
 ## CC-03 Linux 服务连接与凭据
 
-- [ ] P0 · 未开始（现有仅基础地址配置）· 依赖 OPS-03。
+- [ ] P0 · 部分实现 · 依赖 OPS-03。
+- 已交付凭据诊断与存储切片：后端 `GET /api/v1/capture/whoami` 用现有 Bearer/受信代理身份校验调用者；`capture doctor` 显示 `auth ok (subject, role)`，无效或撤销 token 返回 401 并给出明确提示。企业 CA 与 token env/file 配置已接入；`capture auth set` 将 token 存入 Windows Credential Manager，`config.json` 只保存 target 引用。
+- 服务端已新增 `/api/v1/capture/tokens` 签发/列表/撤销，数据库只保存 SHA-256 摘要；capture 身份解析同时支持环境静态令牌和数据库签发令牌。
+- 剩余：Linux TLS/反向代理路径实测，以及错误 CA/错误地址/代理路径的操作说明验收。
+- 已验证：`tests/test_capture_tokens.py` 3 passed；Windows Credential Manager 写入/读取/删除通过；release 二进制 `auth status` 显示 `credential`；`go test -short ./...` 与 `go vet ./internal/...` 通过。
 - 来源：实施计划 §10.1 #4、REQ-RULE-02；WBS 1.6/1.7。
-- 入口：[config.go](internal/config/config.go)、[netinfo.go](internal/netinfo/netinfo.go)、doctor 命令。
+- 入口：[config.go](internal/config/config.go)、[netinfo.go](internal/netinfo/netinfo.go)、[credential](internal/credential/credential_windows.go)、doctor/auth 命令。
 - 生产明确配置 HTTPS API 根地址；现有“本机 LAN IP 推断服务器”只保留开发用途，不能误连用户电脑。
 - 支持企业 CA 信任和反向代理路径；禁止用关闭证书校验作为部署办法。
 - 使用服务器签发的用户级 capture 上传凭据，只允许相应上传/自身任务查询；Windows 凭据存储保存秘密，配置文件只保存引用。

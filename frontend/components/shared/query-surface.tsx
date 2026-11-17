@@ -22,7 +22,11 @@ export function QuerySurface({
   className,
 }: QuerySurfaceProps) {
   if (showInitial) {
-    return <>{initial ?? <Spin />}</>
+    return (
+      <div className={`query-surface query-surface-initial${className ? ` ${className}` : ''}`} aria-busy="true">
+        {initial ?? <Spin />}
+      </div>
+    )
   }
 
   return (

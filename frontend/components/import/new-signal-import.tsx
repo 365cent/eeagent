@@ -24,7 +24,7 @@ import {
   pollCaptureJob,
   retryCaptureJob,
 } from '@/lib/api/eea-api'
-import { EeaApiError } from '@/lib/api/client'
+import { EeaApiError, eeaErrorMessage } from '@/lib/api/client'
 import { sourceUrlFromSavedHtml } from '@/lib/ingest-source-url'
 import { duplicateUrlCaptureMessage } from '@/lib/signal-duplicate-notice'
 import { documentSummaryLine } from '@/lib/document-ingest'
@@ -152,7 +152,7 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
       }
     } catch (err) {
       if (!(err instanceof EeaApiError && err.message === '轮询已中止')) {
-        const detail = err instanceof EeaApiError ? err.message : String(err)
+        const detail = eeaErrorMessage(err)
         setJobError(detail)
       }
     } finally {
@@ -269,7 +269,7 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
       refreshSignals()
       onNavigate(`singal/${sig.id}`)
     } catch (err) {
-      const detail = err instanceof EeaApiError ? err.message : String(err)
+      const detail = eeaErrorMessage(err)
       messageApi.error(detail || '创建失败')
     } finally {
       setBusy(false)
@@ -296,7 +296,7 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
       )
       refreshSignals()
     } catch (err) {
-      const detail = err instanceof EeaApiError ? err.message : String(err)
+      const detail = eeaErrorMessage(err)
       messageApi.error(detail || '批量排队失败')
     } finally {
       setBusy(false)
@@ -370,7 +370,7 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
         messageApi.info('采集任务已取消')
       }
     } catch (err) {
-      const detail = err instanceof EeaApiError ? err.message : String(err)
+      const detail = eeaErrorMessage(err)
       setJobError(detail)
       messageApi.error(`${file.name}: ${detail}`)
     } finally {
@@ -400,7 +400,7 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
         setJobError(terminal.error?.trim() || '采集任务失败')
       }
     } catch (err) {
-      const detail = err instanceof EeaApiError ? err.message : String(err)
+      const detail = eeaErrorMessage(err)
       setJobError(detail)
       messageApi.error(detail)
     } finally {

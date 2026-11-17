@@ -14,6 +14,7 @@ export const PRIMARY_VIEW_KEYS = [
 export const UTILITY_VIEW_KEYS = [
   'newSignal',
   'createTopic',
+  'demands',
   'report',
   'notifications',
   'search',

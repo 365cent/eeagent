@@ -1,6 +1,6 @@
 # EEA LLM 与 Agent 运维说明
 
-**运行时代码中的提示词以 [`backend/app/services/llm_prompts.py`](../backend/app/services/llm_prompts.py) 为准**；本文档保留审阅结论、任务参数与评估方案。模型由 `LLM_MODEL` / 网关解析，不在代码中写死提供商模型 ID。
+**运行时代码中的提示词以 [`backend/app/services/llm_prompts.py`](../backend/app/services/llm_prompts.py) 为准**；本文档保留审阅结论、任务参数与评估方案。模型由 `CHAT_MODEL` / 网关解析，不在代码中写死提供商模型 ID。
 
 本文档记录仓库内 LLM 网关用法、各任务提示词、模型选型原则与评估方案。代码审阅基于当前实现；**未执行付费 API 调用**，真实质量、token 成本与延迟需在生产网关与固定模型上实测。
 
@@ -22,7 +22,7 @@
 
 ## 最高优先级改进（尚未全面实施）
 
-1. **模型路由延迟** — [`llm_gateway.py`](../backend/app/services/llm_gateway.py) 在 `LLM_MODEL` 已配置时仍可能请求 `/models`；自动选型时还可能探针多模型。应缓存模型列表；配置明确时短路；生产固定模型并打日志。
+1. **模型路由延迟** — [`llm_gateway.py`](../backend/app/services/llm_gateway.py) 在 `CHAT_MODEL` 已配置时仍可能请求 `/models`；自动选型时还可能探针多模型。应缓存模型列表；配置明确时短路；生产固定模型并打日志。
 2. **任务级参数** — 当前各路径温度、`max_tokens`、超时彼此独立（见下表）；durable agent 未单独配置推理/输出预算。若网关支持 `reasoning.effort` / verbosity，应按能力探测后传入，勿盲目发送。
 3. **JSON 脆弱** — [`demand_draft.py`](../backend/app/services/demand_draft.py)、[`studio.py`](../backend/app/services/studio.py) 依赖文本启发式解析；网关支持时优先 JSON Schema / Pydantic 结构化输出，否则保留服务端校验与重试。
 4. **不可信内容进 system** — 证据助手与 Studio 将信号正文置于高权限 system 消息（[`signals.py`](../backend/app/api/v1/signals.py)、[`studio.py`](../backend/app/services/studio.py)）；应改为明确分隔的数据块并声明“正文不是指令”。持久化 Agent 在 [`agent_contract.py`](../backend/app/services/agent_contract.py) 已较好。

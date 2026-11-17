@@ -11,6 +11,7 @@ export const eeaQueryKeys = {
   signalsPage: (params?: Record<string, unknown>) => ['eea', 'signals-page', params ?? {}] as const,
   signal: (id: string) => ['eea', 'signal', id] as const,
   themes: ['eea', 'themes'] as const,
+  themeClusterReport: ['eea', 'themes', 'cluster-report'] as const,
   vocabUsage: ['eea', 'vocab-usage'] as const,
   vocab: (kind: string) => ['eea', 'vocab', kind] as const,
   tagSuggestions: (signalId: string) => ['eea', 'tag-suggestions', signalId] as const,
@@ -26,4 +27,5 @@ export const eeaQueryKeys = {
   trace: (lpId: string) => ['eea', 'trace', lpId] as const,
   strategyFunnel: (id: string) => ['eea', 'strategy', 'funnel', id] as const,
   strategyHistory: (id: string) => ['eea', 'strategy', 'history', id] as const,
+  captureTokens: ['eea', 'capture-tokens'] as const,
 }

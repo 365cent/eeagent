@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"eea/capture/internal/credential"
 	"eea/capture/internal/netinfo"
 )
 
@@ -31,11 +32,12 @@ type Config struct {
 	MinTextChars       int    `json:"min_text_chars"`
 	Headless           bool   `json:"headless"`
 	// capture_archive: auto | extension | embedded (auto prefers the store extension).
-	CaptureArchive            string `json:"capture_archive"`
-	SingleFileExtensionPath   string `json:"singlefile_extension_path"`
-	CACertPath                string `json:"ca_cert_path"`
-	AuthTokenEnv              string `json:"auth_token_env"`
-	AuthTokenFile             string `json:"auth_token_file"`
+	CaptureArchive          string `json:"capture_archive"`
+	SingleFileExtensionPath string `json:"singlefile_extension_path"`
+	CACertPath              string `json:"ca_cert_path"`
+	AuthTokenEnv            string `json:"auth_token_env"`
+	AuthTokenFile           string `json:"auth_token_file"`
+	AuthTokenCredential     string `json:"auth_token_credential"`
 }
 
 // Default returns the settings used when config.json is absent.
@@ -156,6 +158,11 @@ func (c Config) BearerToken() string {
 	if value := strings.TrimSpace(os.Getenv(envName)); value != "" {
 		return value
 	}
+	if target := strings.TrimSpace(c.AuthTokenCredential); target != "" {
+		if value, err := credential.Read(target); err == nil && value != "" {
+			return value
+		}
+	}
 	path := strings.TrimSpace(c.AuthTokenFile)
 	if path == "" {
 		return ""
@@ -178,6 +185,11 @@ func (c Config) AuthTokenSource() string {
 	}
 	if strings.TrimSpace(os.Getenv(envName)) != "" {
 		return "env:" + envName
+	}
+	if target := strings.TrimSpace(c.AuthTokenCredential); target != "" {
+		if value, err := credential.Read(target); err == nil && value != "" {
+			return "credential"
+		}
 	}
 	if strings.TrimSpace(c.AuthTokenFile) != "" {
 		return "file"

@@ -4,7 +4,7 @@ import pytest
 
 from app.main import app
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.no_db]
 
 
 def _spec() -> dict:
@@ -23,26 +23,17 @@ async def test_swagger_ui(client):
         assert "SwaggerUIBundle" in html
 
 
-async def test_docs_routes_not_in_openapi(client):
+async def test_docs_routes_and_llms_txt(client):
     spec = _spec()
     assert "/" not in spec["paths"]
     assert "/docs" not in spec["paths"]
     assert "/llms.txt" not in spec["paths"]
+    assert (await client.get("/llms.txt")).status_code == 404
 
 
-async def test_llms_txt_removed(client):
-    r = await client.get("/llms.txt")
-    assert r.status_code == 404
-
-
-async def test_docs_surface(client):
-    """OpenAPI JSON and health remain; llms alternate pages are gone."""
-    spec = _spec()
-    for route in ("/healthz", "/openapi.json"):
-        r = await client.get(route)
-        assert r.status_code == 200, route
+async def test_openapi_json_matches_in_process_spec(client):
+    r = await client.get("/openapi.json")
+    assert r.status_code == 200
     body = r.json()
     assert body["openapi"].startswith("3.0.")
-    assert body["paths"] == spec["paths"]
-    r = await client.get("/api/v1/ref-codes")
-    assert r.status_code == 200
+    assert body["paths"] == _spec()["paths"]

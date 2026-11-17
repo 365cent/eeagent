@@ -33,16 +33,16 @@ async def build_agent(
 ) -> Agent[None, str]:
     """Agent over the gateway; the model is explicit or auto-resolved.
 
-    Raises `LLMNotConfiguredError` when `LLM_BASE_URL` is unset and
+    Raises `LLMNotConfiguredError` when `CHAT_BASE_URL` is unset and
     `LLMNoModelError` when the gateway offers no working chat model.
     """
     settings = get_settings()
-    base = settings.llm_base_url_normalized
+    base = settings.chat_base_url_normalized
     if not base:
-        raise LLMNotConfiguredError("LLM_BASE_URL must be set in backend/.env")
+        raise LLMNotConfiguredError("CHAT_BASE_URL must be set in backend/.env")
     chosen = model_name or await resolve_chat_model()
     return Agent(
-        build_model(chosen, base_url=base, api_key=settings.llm_api_key),
+        build_model(chosen, base_url=base, api_key=settings.chat_api_key_value),
         system_prompt=system_prompt or DEFAULT_SYSTEM_PROMPT,
         output_type=str,
     )

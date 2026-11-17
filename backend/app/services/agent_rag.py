@@ -1,19 +1,27 @@
-"""Deterministic document chunks and keyword RAG search."""
+"""Deterministic document chunks and keyword + semantic RAG search."""
 
 from __future__ import annotations
 
 import hashlib
+import logging
 import uuid
 
+import numpy as np
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.models.agent_models import DocumentChunk, DocumentFigure
 from app.models.models import Document
+from app.services import semantic_api
 from app.services.agent_citations import make_chunk_citation, make_figure_citation
 from app.services.agent_contract import AgentCitation
 from app.services.objectstore import load_body
+
+logger = logging.getLogger(__name__)
+
+SEMANTIC_CANDIDATE_LIMIT = 120
+SEMANTIC_RERANK_POOL = 32
 
 
 def _sha256_text(text: str) -> str:
@@ -24,6 +32,72 @@ def _chunk_text(text: str, *, size: int) -> list[str]:
     if not text.strip():
         return []
     return [text[i : i + size] for i in range(0, len(text), size)]
+
+
+def _cosine_scores(query: list[float], vectors: list[list[float]]) -> list[float]:
+    q = np.asarray(query, dtype=np.float32)
+    matrix = np.asarray(vectors, dtype=np.float32)
+    norms = np.linalg.norm(matrix, axis=1) * np.linalg.norm(q)
+    numerator = matrix @ q
+    return np.divide(numerator, norms, out=np.zeros_like(numerator), where=norms > 0).tolist()
+
+
+def _chunk_citation(chunk: DocumentChunk, doc: Document) -> AgentCitation:
+    return make_chunk_citation(
+        document_id=doc.id,
+        chunk_id=chunk.chunk_id,
+        title=doc.filename or str(doc.id),
+        summary=chunk.text[:400],
+    )
+
+
+async def _semantic_search_document_chunks(
+    db: AsyncSession, *, keyword: str, limit: int
+) -> tuple[list[AgentCitation], bool, str | None]:
+    rows = (
+        await db.execute(
+            select(DocumentChunk, Document)
+            .join(Document, Document.id == DocumentChunk.document_id)
+            .order_by(Document.created_at.desc())
+            .limit(SEMANTIC_CANDIDATE_LIMIT)
+        )
+    ).all()
+    if not rows:
+        return [], False, None
+
+    texts = [chunk.text for chunk, _ in rows]
+    try:
+        vectors: list[list[float]] = []
+        for offset in range(0, len(texts), semantic_api.MAX_BATCH):
+            vectors.extend(
+                await semantic_api.create_embeddings(
+                    texts[offset : offset + semantic_api.MAX_BATCH], db=db
+                )
+            )
+        query_vector = (await semantic_api.create_embeddings([keyword], db=db))[0]
+    except Exception as exc:
+        logger.warning("semantic document search unavailable: %s", exc)
+        return [], True, f"语义检索不可用：{exc.__class__.__name__}"
+
+    scores = _cosine_scores(query_vector, vectors)
+    embedding_order = sorted(range(len(rows)), key=lambda i: scores[i], reverse=True)
+    order = embedding_order
+    degraded = False
+    reason = None
+    if semantic_api.rerank_configured():
+        pool = embedding_order[:SEMANTIC_RERANK_POOL]
+        try:
+            ranked = await semantic_api.rerank(keyword, [texts[i] for i in pool])
+            reranked = [pool[i] for i, _ in ranked if 0 <= i < len(pool)]
+            seen = set(reranked)
+            order = reranked + [i for i in embedding_order if i not in seen]
+        except Exception as exc:
+            logger.warning("semantic rerank unavailable: %s", exc)
+            degraded = True
+            reason = f"rerank 不可用，使用 embedding 排序：{exc.__class__.__name__}"
+
+    citations = [_chunk_citation(rows[i][0], rows[i][1]) for i in order[:limit]]
+    return citations, degraded, reason
 
 
 async def ensure_document_index(db: AsyncSession, document: Document) -> None:
@@ -63,7 +137,8 @@ async def ensure_document_index(db: AsyncSession, document: Document) -> None:
 async def search_document_chunks(
     db: AsyncSession, *, keyword: str, limit: int
 ) -> tuple[list[AgentCitation], bool, str | None]:
-    like = f"%{keyword.strip()}%"
+    keyword = keyword.strip()
+    like = f"%{keyword}%"
     q = (
         select(DocumentChunk, Document)
         .join(Document, Document.id == DocumentChunk.document_id)
@@ -72,27 +147,14 @@ async def search_document_chunks(
         .limit(limit)
     )
     rows = (await db.execute(q)).all()
-    citations: list[AgentCitation] = []
-    for chunk, doc in rows:
-        await ensure_document_index(db, doc)
-        title = doc.filename or str(doc.id)
-        summary = chunk.text[:400]
-        citations.append(
-            make_chunk_citation(
-                document_id=doc.id,
-                chunk_id=chunk.chunk_id,
-                title=title,
-                summary=summary,
-            )
-        )
-    degraded = False
-    reason = None
-    from app.services import semantic_api
 
-    if not rows and semantic_api.semantic_configured():
-        degraded = True
-        reason = "关键词未命中文档片段；语义重排未在本切片接入。"
-    return citations, degraded, reason
+    if rows:
+        return [_chunk_citation(chunk, doc) for chunk, doc in rows], False, None
+
+    if semantic_api.embedding_configured():
+        return await _semantic_search_document_chunks(db, keyword=keyword, limit=limit)
+
+    return [], False, None
 
 
 async def load_figure_citation(

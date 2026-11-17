@@ -10,7 +10,7 @@ Production on Linux uses **Docker Compose** under this directory: PostgreSQL, Al
    ```bash
    cd deploy
    cp .env.compose.example .env
-   # Edit DB_PASSWORD, optional LLM/MaaS keys, EEA_HTTP_PORT
+   # Edit DB_PASSWORD, optional CHAT_*/EMBEDDING_*/RERANK_* gateways, EEA_HTTP_PORT
    ```
 
 3. Build and start:
@@ -54,7 +54,7 @@ Minimum production:
 - Strong `DB_PASSWORD`
 - `TRUSTED_PROXY_IPS` narrowed to your authenticating reverse proxy when TLS terminates upstream
 
-Optional model gateways: `LLM_*`, `MAAS_*` — when unset, `/readyz` reports `semantic_gateway: degraded` but storage/DB remain `ready`.
+Optional model gateways: `CHAT_*`, `EMBEDDING_*`, `RERANK_*` — when unset, `/readyz` reports `semantic_gateway: degraded` but storage/DB remain `ready`.
 
 ## TLS and identity (OPS-03)
 

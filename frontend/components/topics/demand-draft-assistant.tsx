@@ -4,7 +4,7 @@ import { useCallback, useState } from 'react'
 import { App as AntApp, Button, Input, Space, Spin, Tag, Typography } from 'antd'
 import { RobotOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { postDemandAssistantMessage, proposeDemandDraft, type AssistantChatTurn } from '@/lib/api/eea-api'
-import { EeaApiError } from '@/lib/api/client'
+import { eeaErrorMessage } from '@/lib/api/client'
 import type { DemandDraftProposal } from '@/lib/api/types'
 import { ChatMarkdown } from '@/components/shared/chat-markdown'
 
@@ -66,7 +66,7 @@ export function DemandDraftAssistant({
       ])
       messageApi.success('需求草稿已生成')
     } catch (err) {
-      messageApi.error(err instanceof EeaApiError ? err.message : '生成草稿失败')
+      messageApi.error(eeaErrorMessage(err, '生成草稿失败'))
     } finally {
       setBusy(null)
     }
@@ -97,7 +97,7 @@ export function DemandDraftAssistant({
           messageApi.info('助手附带了一份可应用的草稿')
         }
       } catch (err) {
-        messageApi.error(err instanceof EeaApiError ? err.message : '助手请求失败')
+        messageApi.error(eeaErrorMessage(err, '助手请求失败'))
         setTurns((prev) => prev.slice(0, -1))
         if (!textOverride) setDraft(text)
       } finally {

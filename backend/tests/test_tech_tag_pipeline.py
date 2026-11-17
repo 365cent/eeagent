@@ -58,7 +58,7 @@ async def test_llm_picks_from_candidates(monkeypatch):
         )
 
     monkeypatch.setattr(llm, "get_settings", lambda: types.SimpleNamespace(
-        llm_base_url_normalized="http://gw/v1", llm_api_key="k", llm_model="m"
+        chat_base_url_normalized="http://gw/v1", chat_api_key_value="k", chat_model_value="m"
     ))
     async def build_pick_agent():
         return Agent(FunctionModel(fake), output_type=LLMCandidateTagPick)

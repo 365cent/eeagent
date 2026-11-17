@@ -33,15 +33,18 @@ class Settings(BaseSettings):
     )
     object_dir: str = str(BACKEND_ROOT / ".pg" / "objects")
 
-    llm_base_url: str = ""
-    llm_api_key: str = ""
-    llm_model: str = ""
-    # iFlytek MaaS embedding/rerank (independent of llm_base_url chat proxy).
-    maas_api_base_url: str = ""
-    maas_api_key: str = ""
+    # Primary gateway settings: one URL/key/model per capability.
+    chat_base_url: str = ""
+    chat_api_key: str = ""
+    chat_model: str = ""
+    embedding_base_url: str = ""
+    embedding_api_key: str = ""
+    rerank_base_url: str = ""
+    rerank_api_key: str = ""
     embedding_model: str = "Qwen3-Embedding-8B"
     rerank_model: str = "Qwen3-Reranker-8B"
     vision_model: str = ""
+
 
     # Document upload (POST /documents/raw) and MarkItDown ingest caps (MiB-based).
     doc_raw_upload_max_bytes: int = 120 * 1024 * 1024
@@ -83,25 +86,33 @@ class Settings(BaseSettings):
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]
 
     @property
-    def llm_base_url_normalized(self) -> str:
-        return self.llm_base_url.rstrip("/")
+    def chat_base_url_normalized(self) -> str:
+        return self.chat_base_url.strip().rstrip("/")
 
     @property
-    def maas_api_base_normalized(self) -> str:
-        return self.maas_api_base_url.strip().rstrip("/")
+    def chat_api_key_value(self) -> str:
+        return self.chat_api_key.strip()
 
     @property
-    def semantic_api_key(self) -> str:
-        return self.maas_api_key.strip()
+    def chat_model_value(self) -> str:
+        return self.chat_model.strip()
+
+    @property
+    def embedding_api_key_value(self) -> str:
+        return self.embedding_api_key.strip()
+
+    @property
+    def rerank_api_key_value(self) -> str:
+        return self.rerank_api_key.strip()
 
     @property
     def embedding_url(self) -> str:
-        base = self.maas_api_base_normalized
+        base = self.embedding_base_url.strip().rstrip("/")
         return f"{base}/embeddings" if base else ""
 
     @property
     def rerank_url(self) -> str:
-        base = self.maas_api_base_normalized
+        base = self.rerank_base_url.strip().rstrip("/")
         return f"{base}/rerank" if base else ""
 
 
