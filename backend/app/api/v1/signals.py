@@ -99,6 +99,21 @@ async def _load_signal(db: AsyncSession, sid: uuid.UUID) -> Signal:
     return obj
 
 
+async def _has_readable_evidence(db: AsyncSession, signal: Signal) -> bool:
+    if signal.body_object_key and load_body(signal.body_object_key):
+        return True
+    if (
+        signal.snapshot_html_object_key
+        and load_bytes(signal.snapshot_html_object_key) is not None
+    ):
+        return True
+    if signal.document_id is not None:
+        document = await db.get(Document, signal.document_id)
+        if document is not None and document.canonical_md_object_key:
+            return load_bytes(document.canonical_md_object_key) is not None
+    return False
+
+
 def _apply_signal_list_filters(
     q,
     *,
@@ -608,6 +623,12 @@ async def update_signal(
         old = getattr(s, field)
         if value == old:
             continue
+
+        if field == "evidence_status_code":
+            if value is None:
+                raise HTTPException(422, "evidence_status_code cannot be null")
+            if value == "retained" and not body_text and not await _has_readable_evidence(db, s):
+                raise HTTPException(422, "readable evidence is required before marking a signal retained")
         # REQ-RULE-02: audit human corrections of machine-classified fields
         if field in (
             "value_chain_stage_code",
