@@ -53,6 +53,7 @@ async def list_landing_points(
 async def create_landing_point(
     payload: LandingPointCreate,
     db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_operator_identity),
 ):
     vehicle_function = await db.get(VehicleFunction, payload.vehicle_function_id)
     if vehicle_function is None:
@@ -73,6 +74,21 @@ async def create_landing_point(
         role_description=payload.role_description,
     )
     db.add(lp)
+    await db.flush()
+    await record_correction(
+        db,
+        "tech_landing_point",
+        lp.id,
+        "created",
+        None,
+        {
+            "vehicle_function_id": str(lp.vehicle_function_id),
+            "name": lp.name,
+            "domain": domain.name,
+            "role_description": lp.role_description,
+        },
+        actor,
+    )
     await db.commit()
     # re-select with eager loads: the fresh instance has unloaded relationships,
     # and touching them after commit would raise MissingGreenlet in the async session

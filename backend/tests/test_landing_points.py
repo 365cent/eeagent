@@ -149,6 +149,26 @@ async def test_landing_point_patch_updates_domain_and_records_audit(client):
     assert changes["role_description"]["new_value"] == "提供状态回传与保护执行。"
 
 
+async def test_landing_point_create_records_audit(client):
+    func = await _function(client)
+    lp = await create_landing_point(
+        client,
+        func["id"],
+        name="Audited landing point",
+        domain="hardware",
+        role="execution layer",
+    )
+    audit = (await client.get("/api/v1/audit", params={"entity_id": lp["id"]})).json()
+    created = next(row for row in audit if row["field_name"] == "created")
+    assert created["new_value"] == {
+        "vehicle_function_id": func["id"],
+        "name": "Audited landing point",
+        "domain": "hardware",
+        "role_description": "execution layer",
+    }
+    assert created["operator_subject"] == "eea-test-actor"
+
+
 async def test_landing_point_patch_rejects_blank_name(client):
     lp = await create_landing_point(client, (await _function(client))["id"])
     response = await client.patch(f"/api/v1/landing-points/{lp['id']}", json={"name": "  "})
