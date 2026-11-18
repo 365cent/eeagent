@@ -2,7 +2,16 @@
 
 import pytest
 
+from app.core.config import get_settings
+
+
 pytestmark = pytest.mark.anyio
+
+
+@pytest.fixture(autouse=True)
+def _trust_test_client(monkeypatch):
+    monkeypatch.setattr(get_settings(), "trusted_proxy_ips", "127.0.0.1/32")
+
 
 UA_CHROME = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "

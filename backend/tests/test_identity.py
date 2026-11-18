@@ -77,3 +77,23 @@ def test_production_rejects_unmapped_role(monkeypatch):
             _request("10.0.0.8", {"x-eea-authenticated-user": "alice", "x-eea-authenticated-role": "root"})
         )
     assert exc.value.status_code == 401
+
+
+def test_client_ip_ignores_forwarded_header_from_untrusted_peer(monkeypatch):
+    monkeypatch.setattr(
+        identity,
+        "get_settings",
+        lambda: SimpleNamespace(trusted_proxy_ips="10.0.0.8/32"),
+    )
+    request = _request("10.0.0.9", {"x-forwarded-for": "203.0.113.5"})
+    assert identity.client_ip(request) == "10.0.0.9"
+
+
+def test_client_ip_uses_last_untrusted_hop_from_trusted_proxy(monkeypatch):
+    monkeypatch.setattr(
+        identity,
+        "get_settings",
+        lambda: SimpleNamespace(trusted_proxy_ips="10.0.0.8/32"),
+    )
+    request = _request("10.0.0.8", {"x-forwarded-for": "198.51.100.7, 10.0.0.8"})
+    assert identity.client_ip(request) == "198.51.100.7"

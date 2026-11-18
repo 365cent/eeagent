@@ -36,6 +36,23 @@ def _trusted_peer(peer: str, configured: str) -> bool:
     return False
 
 
+def client_ip(request: Request) -> str:
+    """Caller address for access history, trusting forwarded headers only from a proxy."""
+    peer = request.client.host if request.client else "unknown"
+    settings = get_settings()
+    if not _trusted_peer(peer, settings.trusted_proxy_ips):
+        return peer
+    forwarded = request.headers.get("x-forwarded-for", "")
+    for hop in reversed([part.strip() for part in forwarded.split(",") if part.strip()]):
+        try:
+            ipaddress.ip_address(hop)
+        except ValueError:
+            continue
+        if not _trusted_peer(hop, settings.trusted_proxy_ips):
+            return hop
+    return peer
+
+
 def get_operator_identity(request: Request) -> OperatorIdentity:
     settings = get_settings()
     if settings.app_env == "test":

@@ -9,18 +9,12 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.identity import client_ip
 from app.db.base import get_db
 from app.domains.session.service import list_access_history, record_visit, session_summary
 from app.schemas.schemas import AccessLogOut, AccessVisitIn, SessionOut
 
 router = APIRouter(prefix="/session", tags=["session"])
-
-
-def _client_ip(request: Request) -> str:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
 
 
 def _user_agent(request: Request) -> str:
@@ -34,7 +28,7 @@ async def record_visit_endpoint(
     """Record one page visit; identical visits within 10 minutes collapse."""
     return await record_visit(
         db,
-        ip=_client_ip(request),
+        ip=client_ip(request),
         raw_ua=_user_agent(request),
         page=payload.page,
     )
@@ -47,11 +41,11 @@ async def access_history(
     db: AsyncSession = Depends(get_db),
 ):
     """Recent visits for the caller's IP (auto identity)."""
-    return await list_access_history(db, ip=_client_ip(request), limit=limit)
+    return await list_access_history(db, ip=client_ip(request), limit=limit)
 
 
 @router.get("/me", response_model=SessionOut)
 async def session_me(request: Request, db: AsyncSession = Depends(get_db)):
     return await session_summary(
-        db, ip=_client_ip(request), raw_ua=_user_agent(request)
+        db, ip=client_ip(request), raw_ua=_user_agent(request)
     )
