@@ -35,6 +35,10 @@ os.environ["DB_NAME"] = TEST_DB_NAME
 # keep test bodies out of backend/.pg/objects (the dev object store)
 _OBJECT_DIR = tempfile.mkdtemp(prefix="eea-test-objects-")
 os.environ["OBJECT_DIR"] = _OBJECT_DIR
+for _gateway in ("CHAT", "EMBEDDING", "RERANK"):
+    os.environ[f"{_gateway}_BASE_URL"] = ""
+    os.environ[f"{_gateway}_API_KEY"] = ""
+    os.environ[f"{_gateway}_MODEL"] = ""
 
 import psycopg  # noqa: E402
 import pytest  # noqa: E402
