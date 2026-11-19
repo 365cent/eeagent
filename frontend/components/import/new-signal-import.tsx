@@ -1,21 +1,14 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
-import {
-  BulbOutlined,
-  CheckCircleFilled,
-  ClockCircleOutlined,
-  FileAddOutlined,
-  LinkOutlined,
-  UploadOutlined,
-} from '@ant-design/icons'
-import { App as AntApp, Alert, Button, Card, Col, Input, Progress, Row, Space, Typography, Upload } from 'antd'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { App as AntApp, Card, Col, Row } from 'antd'
 import { useQueryClient } from '@tanstack/react-query'
 import {
   cancelCaptureJob,
   captureJobStageLabel,
   createCaptureJob,
   createSignal,
+  fetchLatestPanoramaImport,
   fetchSignal,
   fetchPanoramaImportBatch,
   getCaptureJob,
@@ -30,38 +23,25 @@ import { duplicateUrlCaptureMessage } from '@/lib/signal-duplicate-notice'
 import { documentSummaryLine } from '@/lib/document-ingest'
 import { DocumentIngestResult } from '@/components/import/document-ingest-result'
 import type { CaptureJobOut, DocumentRawOut, PanoramaImportBatchOut } from '@/lib/api/types'
-import { PanoramaImportBanner } from '@/components/import/panorama-import-banner'
 import { eeaQueryKeys } from '@/hooks/use-eea-queries'
 import {
   clearPendingCaptureJob,
   loadPendingCaptureJob,
   savePendingCaptureJob,
 } from '@/lib/capture-job-session'
-
-const { Text } = Typography
+import { analyzeImportPaste, type PasteAnalysis } from '@/lib/import-paste-analysis'
+import { ImportUnifiedSurface } from '@/components/import/import-unified-surface'
+import { ImportProgressSide } from '@/components/import/import-progress-side'
 
 type NewSignalImportProps = {
   onNavigate: (key: string) => void
 }
 
-export function SignalImportCaptureNotice() {
-  return (
-    <Alert
-      type="info"
-      showIcon
-      title="网站抓取请使用 EEA Capture"
-      description="浏览器内无法直接打开外网页面。需要抓取在线网页时，请使用 EEA Capture 客户端。也可在上方粘贴链接与正文，或拖入文件完成入库。"
-      style={{ marginTop: 0 }}
-    />
-  )
-}
-
-export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
+function useNewSignalImport(onNavigate: (key: string) => void) {
   const { message: messageApi } = AntApp.useApp()
   const queryClient = useQueryClient()
   const resumeAbort = useRef<AbortController | null>(null)
-  const [url, setUrl] = useState('')
-  const [notes, setNotes] = useState('')
+  const [pasteText, setPasteText] = useState('')
   const [busy, setBusy] = useState(false)
   const [uploadProgress, setUploadProgress] = useState<number | null>(null)
   const [uploadProcessing, setUploadProcessing] = useState(false)
@@ -71,8 +51,11 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
   const [lastDocument, setLastDocument] = useState<DocumentRawOut | null>(null)
   const [lastDocumentName, setLastDocumentName] = useState<string | null>(null)
   const [jobError, setJobError] = useState<string | null>(null)
-  const [bulkUrlText, setBulkUrlText] = useState('')
   const [panoramaBatch, setPanoramaBatch] = useState<PanoramaImportBatchOut | null>(null)
+
+  const analysis = useMemo(() => analyzeImportPaste(pasteText), [pasteText])
+  const pasteHintId = 'eea-import-paste-hint'
+  const uploadInFlight = uploadProgress !== null
 
   const refreshSignals = () => {
     void queryClient.invalidateQueries({ queryKey: ['eea', 'signals'] })
@@ -97,13 +80,10 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
   const finishJobSuccess = async (job: CaptureJobOut) => {
     const signal =
       job.result?.signal ??
-      (job.signal_id
-        ? await fetchSignal(job.signal_id).catch(() => null)
-        : null)
+      (job.signal_id ? await fetchSignal(job.signal_id).catch(() => null) : null)
     if (!signal?.id) {
       throw new Error(
-        job.error?.trim() ||
-          '任务已完成但未返回信号详情；可在信号列表中查找或重试采集。',
+        job.error?.trim() || '任务已完成但未返回信号详情；可在信号列表中查找或重试采集。',
       )
     }
     clearPendingCaptureJob()
@@ -152,8 +132,7 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
       }
     } catch (err) {
       if (!(err instanceof EeaApiError && err.message === '轮询已中止')) {
-        const detail = eeaErrorMessage(err)
-        setJobError(detail)
+        setJobError(eeaErrorMessage(err))
       }
     } finally {
       setBusy(false)
@@ -165,6 +144,17 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
     if (!pending || busy) return
     void resumePendingJob(pending.jobId, pending.filename)
     // eslint-disable-next-line react-hooks/exhaustive-deps -- resume once on mount
+  }, [])
+
+  useEffect(() => {
+    void fetchLatestPanoramaImport()
+      .then((batch) => {
+        if (!batch) return
+        if (batch.status === 'capturing' || batch.status === 'structuring') {
+          setPanoramaBatch(batch)
+        }
+      })
+      .catch(() => undefined)
   }, [])
 
   useEffect(() => {
@@ -203,26 +193,13 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
     }
   }, [panoramaBatch?.id, panoramaBatch?.status, messageApi])
 
-  const primaryActionLabel = (idle: string, busyIdle: string) => {
-    if (!busy) return idle
-    if (uploadProgress !== null) {
-      if (uploadProcessing) return jobStageLabel ?? '服务端处理…'
-      return `上传 ${uploadProgress}%`
-    }
-    return busyIdle
-  }
-
-  const submitSignal = async (options: { requireUrl: boolean }) => {
-    const trimmedUrl = url.trim()
-    const trimmedNotes = notes.trim()
+  const savePasteSignal = async (parsed: PasteAnalysis) => {
+    const trimmedUrl = parsed.urls[0]?.trim() ?? ''
+    const trimmedNotes = parsed.body.trim()
     const doc = lastDocument
 
-    if (options.requireUrl && !trimmedUrl) {
-      messageApi.warning('请先粘贴来源 URL')
-      return
-    }
-    if (!options.requireUrl && !trimmedUrl && !trimmedNotes && !doc) {
-      messageApi.warning('请粘贴 URL、填写正文，或先上传文档')
+    if (!trimmedUrl && !trimmedNotes && !doc) {
+      messageApi.warning('请粘贴内容或先上传文档')
       return
     }
 
@@ -266,41 +243,44 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
         document_id: doc?.id,
       })
       messageApi.success(`已创建信号 ${sig.title}`)
+      setPasteText('')
       refreshSignals()
       onNavigate(`singal/${sig.id}`)
     } catch (err) {
-      const detail = eeaErrorMessage(err)
-      messageApi.error(detail || '创建失败')
+      messageApi.error(eeaErrorMessage(err) || '创建失败')
     } finally {
       setBusy(false)
     }
   }
 
-  const pasteFallback = () => submitSignal({ requireUrl: true })
-  const saveSignal = () => submitSignal({ requireUrl: false })
-
-  const submitBulkUrls = async () => {
-    const text = bulkUrlText.trim()
-    if (!text) {
-      messageApi.warning('请粘贴链接列表（每行一条 http(s) 链接）')
-      return
-    }
+  const submitBatchCapture = async (text: string) => {
     setBusy(true)
     try {
       const batch = await importCaptureUrlList(text)
       setPanoramaBatch(batch)
-      setBulkUrlText('')
+      setPasteText('')
       messageApi.success(
         `已排队 ${batch.capture_jobs_total || '若干'} 条采集任务；请保持 EEA Capture 客户端运行。与既有证据同源的链接仍会采集，标题将自动加后缀区分。`,
         8,
       )
       refreshSignals()
     } catch (err) {
-      const detail = eeaErrorMessage(err)
-      messageApi.error(detail || '批量排队失败')
+      messageApi.error(eeaErrorMessage(err) || '批量排队失败')
     } finally {
       setBusy(false)
     }
+  }
+
+  const submitPastebin = async () => {
+    if (analysis.mode === 'empty' && !lastDocument) {
+      messageApi.warning('请粘贴链接、正文，或拖入文件')
+      return
+    }
+    if (analysis.mode === 'batch-capture') {
+      await submitBatchCapture(pasteText.trim())
+      return
+    }
+    await savePasteSignal(analysis)
   }
 
   const handleBeforeUpload = async (file: File) => {
@@ -319,20 +299,20 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
       const name = file.name.toLowerCase()
       if (name.endsWith('.xlsx') || name.endsWith('.xlsm')) {
         messageApi.info(
-          '请在工作簿「数据来源」中复制链接列，粘贴到下方「批量链接采集」文本框（每行一条），由 EEA Capture 自动采集。',
+          '请在工作簿「数据来源」中复制链接列，粘贴到文本框（每行一条），系统将自动识别并批量采集。',
           10,
         )
         setBusy(false)
         clearUploadProgress()
-        return false
+        return
       }
-      let sourceUrl = url.trim()
+      let sourceUrl = analysis.urls[0]?.trim() ?? ''
       let fileBlob: Blob = file
       if (name.endsWith('.html') || name.endsWith('.htm')) {
         const html = await file.text()
         sourceUrl = sourceUrlFromSavedHtml(html) ?? sourceUrl
         if (!sourceUrl) {
-          throw new Error('HTML 中找不到 http(s) 来源链接，请先粘贴 URL 或确保文件内含来源')
+          throw new Error('HTML 中找不到 http(s) 来源链接，请先在文本框粘贴 URL 或确保文件内含来源')
         }
         fileBlob = new Blob([html], { type: 'text/html; charset=utf-8' })
       }
@@ -379,7 +359,16 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
         clearUploadProgress()
       }
     }
-    return false
+  }
+
+  const onFiles = (list: FileList | File[]) => {
+    const files = Array.from(list)
+    if (!files.length || busy) return
+    void (async () => {
+      for (const file of files) {
+        await handleBeforeUpload(file)
+      }
+    })()
   }
 
   const onRetryJob = async () => {
@@ -425,180 +414,77 @@ export function NewSignalImport({ onNavigate }: NewSignalImportProps) {
     setBusy(false)
   }
 
-  return (
-    <div className="new-signal-import-form">
-      {panoramaBatch &&
-      (panoramaBatch.status === 'capturing' || panoramaBatch.status === 'structuring') ? (
-        <PanoramaImportBanner batch={panoramaBatch} />
-      ) : null}
-      <Input.TextArea
-        rows={5}
-        placeholder="批量链接采集：每行一条 http(s) 链接（可从 Excel「数据来源」整列复制粘贴）"
-        value={bulkUrlText}
-        onChange={(e) => setBulkUrlText(e.target.value)}
-        style={{ marginBottom: 12 }}
-      />
-      <Button
-        type="default"
-        size="large"
-        block
-        loading={busy}
-        icon={<LinkOutlined />}
-        onClick={() => void submitBulkUrls()}
-        style={{ marginBottom: 16 }}
-      >
-        批量排队采集（需 EEA Capture）
-      </Button>
-      <Space.Compact block>
-        <Input
-          prefix={<LinkOutlined />}
-          placeholder="粘贴文章或网页 URL（配合下方正文为粘贴入库）"
-          size="large"
-          value={url}
-          onChange={(e) => setUrl(e.target.value)}
-        />
-        <Button type="primary" size="large" loading={busy} onClick={() => void pasteFallback()}>
-          {primaryActionLabel('粘贴入库', '入库中…')}
-        </Button>
-      </Space.Compact>
-      <div className="import-dragger-wrap">
-        <Upload.Dragger
-          multiple
-          accept=".html,.htm,.pdf,.doc,.docx,.ppt,.pptx,.md,.txt,.png,.jpg,.jpeg,.xlsx,.xlsm"
-          showUploadList={false}
-          beforeUpload={(file) => {
-            void handleBeforeUpload(file)
-            return false
-          }}
-          disabled={busy}
-          className="import-dragger-fill"
-        >
-          <p>
-            <UploadOutlined />
-          </p>
-          <p className="import-dragger-title">
-            {uploadProgress !== null && uploadFileName
-              ? uploadProcessing
-                ? `${jobStageLabel ?? '服务端处理'} ${uploadFileName}…`
-                : `正在上传 ${uploadFileName}（${uploadProgress}%）`
-              : '拖入 PDF / Word / PPT / Markdown / 图片 / HTML'}
-          </p>
-          <Text type="secondary" className="import-dragger-hint">
-            文件走可恢复采集任务；刷新页面可继续查看进度。网页在线抓取请用 EEA Capture。
-          </Text>
-        </Upload.Dragger>
-      </div>
-      {jobError ? (
-        <Alert
-          type="error"
-          showIcon
-          title="采集任务失败"
-          description={jobError}
-          action={
-            <Space>
-              {activeJobId ? (
-                <Button size="small" onClick={() => void onRetryJob()}>
-                  重试
-                </Button>
-              ) : null}
-              <Button size="small" onClick={() => void onCancelJob()}>
-                清除
-              </Button>
-            </Space>
-          }
-          style={{ marginBottom: 12 }}
-        />
-      ) : null}
-      <Input.TextArea
-        rows={4}
-        placeholder="粘贴正文（可选，与上方链接一起保存为信号）"
-        value={notes}
-        onChange={(e) => setNotes(e.target.value)}
-      />
-      {lastDocument ? (
-        <DocumentIngestResult
-          doc={lastDocument}
-          filename={lastDocumentName ?? undefined}
-          onUpdated={(detail) => setLastDocument(detail)}
-          onNavigate={onNavigate}
-        />
-      ) : null}
-      <div className="import-form-actions">
-        {uploadProgress !== null ? (
-          <Progress
-            className="import-upload-progress"
-            percent={uploadProcessing ? 100 : uploadProgress}
-            status={uploadProcessing ? 'active' : 'normal'}
-            format={() =>
-              uploadProcessing
-                ? jobStageLabel ?? '处理中…'
-                : `${uploadProgress ?? 0}%`
-            }
-          />
-        ) : null}
-        <Space wrap>
-          <Button
-            type="primary"
-            icon={<FileAddOutlined />}
-            loading={busy}
-            onClick={() => void saveSignal()}
-          >
-            {primaryActionLabel('保存信号', '保存中…')}
-          </Button>
-          <Button onClick={() => onNavigate('signals')}>查看证据库</Button>
-        </Space>
-      </div>
-    </div>
-  )
-}
-
-function SignalImportFlowPanel() {
-  return (
-    <div className="signal-import-flow">
-      <div className="timeline-item">
-        <CheckCircleFilled />
-        <div>
-          <Text strong>原始文档</Text>
-          <Text type="secondary">
-            PDF、Word、PPT、Markdown 或图片 → 可恢复采集任务 → MarkItDown 与图块描述
-          </Text>
-        </div>
-      </div>
-      <div className="timeline-item">
-        <ClockCircleOutlined />
-        <div>
-          <Text strong>网页 / HTML</Text>
-          <Text type="secondary">拖入 html 或通过采集任务入库；粘贴链接与正文可手动保存</Text>
-        </div>
-      </div>
-      <div className="timeline-item">
-        <BulbOutlined />
-        <div>
-          <Text strong>公网在线页面</Text>
-          <Text type="secondary">在平台批量粘贴链接排队，EEA Capture 客户端自动抓取并上传</Text>
-        </div>
-      </div>
-      <div className="signal-import-notice">
-        <SignalImportCaptureNotice />
-      </div>
-    </div>
-  )
+  return {
+    pasteText,
+    setPasteText,
+    analysis,
+    pasteHintId,
+    busy,
+    uploadInFlight,
+    lastDocument,
+    lastDocumentName,
+    setLastDocument,
+    panoramaBatch,
+    fileJob: {
+      uploadProgress,
+      uploadProcessing,
+      uploadFileName,
+      jobStageLabel,
+      jobError,
+      activeJobId,
+    },
+    submitPastebin,
+    onFiles,
+    onRetryJob,
+    onCancelJob,
+  }
 }
 
 export function NewSignalImportPage({ onNavigate }: NewSignalImportProps) {
+  const vm = useNewSignalImport(onNavigate)
+
   return (
-    <Row gutter={[18, 18]} className="new-signal-import-row">
-      <Col xs={24} lg={16} className="new-signal-import-col new-signal-import-stack">
-        <Card className="panel-card new-signal-import-card" title="导入证据">
-          <NewSignalImport onNavigate={onNavigate} />
-        </Card>
-        <Card
-          className="panel-card new-signal-import-card new-signal-import-side new-signal-import-flow-card"
-          title="解析流程"
-        >
-          <SignalImportFlowPanel />
-        </Card>
-      </Col>
-    </Row>
+    <div className="new-signal-import-page">
+      <Row gutter={[18, 18]} className="new-signal-import-row">
+        <Col xs={24} lg={16} className="new-signal-import-col new-signal-import-stack">
+          <Card className="panel-card new-signal-import-card" title="导入证据">
+            <div className="new-signal-import-form">
+              <ImportUnifiedSurface
+                pasteText={vm.pasteText}
+                onPasteTextChange={vm.setPasteText}
+                analysis={vm.analysis}
+                pasteHintId={vm.pasteHintId}
+                busy={vm.busy}
+                uploadInFlight={vm.uploadInFlight}
+                disabled={vm.busy}
+                onSubmit={() => void vm.submitPastebin()}
+                onNavigateSignals={() => onNavigate('signals')}
+                onFiles={vm.onFiles}
+              />
+              {vm.lastDocument ? (
+                <DocumentIngestResult
+                  doc={vm.lastDocument}
+                  filename={vm.lastDocumentName ?? undefined}
+                  onUpdated={(detail) => vm.setLastDocument(detail)}
+                  onNavigate={onNavigate}
+                />
+              ) : null}
+            </div>
+          </Card>
+        </Col>
+        <Col xs={24} lg={8} className="new-signal-import-col new-signal-import-side-col">
+          <div className="new-signal-import-side-stack">
+            <Card className="panel-card new-signal-import-card new-signal-import-side" title="任务进度">
+              <ImportProgressSide
+                panoramaBatch={vm.panoramaBatch}
+                fileJob={vm.fileJob}
+                onRetryJob={() => void vm.onRetryJob()}
+                onCancelJob={() => void vm.onCancelJob()}
+              />
+            </Card>
+          </div>
+        </Col>
+      </Row>
+    </div>
   )
 }

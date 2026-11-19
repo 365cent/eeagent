@@ -110,6 +110,7 @@ class Signal(Base):
     signal_type_code: Mapped[str | None] = mapped_column(Text)
     evolution_node_code: Mapped[str | None] = mapped_column(Text)
     evidence_status_code: Mapped[str] = mapped_column(Text, nullable=False)
+    classification_basis: Mapped[dict | None] = mapped_column(JSONB)
     tech_theme_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("eea_tech_theme.id")
     )

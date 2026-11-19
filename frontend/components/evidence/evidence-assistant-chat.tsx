@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { App as AntApp, Button, Card, Collapse, Descriptions, Input, Space, Spin, Tag, Typography } from 'antd'
+import { App as AntApp, Button, Card, Collapse, Descriptions, Input, Select, Space, Spin, Tag, Typography } from 'antd'
 import { isUuid } from '@/lib/api/api-errors'
 import { EeaApiError } from '@/lib/api/client'
 import {
@@ -12,6 +12,7 @@ import {
   deleteAgentMemory,
   fetchAgentSkillsStatus,
   listAgentMemories,
+  listAgentSessions,
   listAgentSessionMessages,
   listAgentSessionPatches,
   postAgentSessionMessage,
@@ -26,14 +27,17 @@ import {
 } from '@/lib/api/agent-events'
 import type { AgentMessageRecord, AgentPatchOut } from '@/lib/api/types'
 import { ChatMarkdown } from '@/components/shared/chat-markdown'
+import { citationLabel } from '@/lib/document-research'
+import { streamAgentSessionMessage } from '@/lib/api/agent-stream'
 
 const { Text } = Typography
 
 type EvidenceAssistantChatProps = {
   signalId?: string | null
+  onCitation?: (refId: string, kind: string) => void
 }
 
-export function EvidenceAssistantChat({ signalId }: EvidenceAssistantChatProps) {
+export function EvidenceAssistantChat({ signalId, onCitation }: EvidenceAssistantChatProps) {
   const { message: messageApi } = AntApp.useApp()
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -43,11 +47,20 @@ export function EvidenceAssistantChat({ signalId }: EvidenceAssistantChatProps) 
   const [legacyTurns, setLegacyTurns] = useState<AssistantChatTurn[]>([])
   const [activeRunId, setActiveRunId] = useState<string | null>(null)
   const [streamNote, setStreamNote] = useState<string | null>(null)
+  const [citations, setCitations] = useState<{ refId: string; kind: string }[]>([])
+  const [liveAnswer, setLiveAnswer] = useState('' )
+  const streamAbortRef = useRef<AbortController | null>(null)
   const lastEventSeqRef = useRef(0)
   const eventSourceRef = useRef<EventSource | null>(null)
 
   const apiSignalId = signalId && isUuid(signalId) ? signalId : null
   const sessionStorageKey = apiSignalId ? `eea-agent-session:${apiSignalId}` : null
+
+  const sessionsQuery = useQuery({
+    queryKey: ['eea', 'agent', 'sessions', apiSignalId],
+    queryFn: () => listAgentSessions(apiSignalId ?? undefined),
+    enabled: Boolean(apiSignalId),
+  })
 
   const skillsQuery = useQuery({
     queryKey: ['eea', 'agent', 'skills-status'],
@@ -73,25 +86,83 @@ export function EvidenceAssistantChat({ signalId }: EvidenceAssistantChatProps) 
     return null
   }, [])
 
+  const recordCitation = useCallback((payload: AgentSsePayload) => {
+    if (payload.type !== 'citation') return
+    const refId = typeof payload.ref_id === 'string' ? payload.ref_id : null
+    if (!refId) return
+    const kind = typeof payload.kind === 'string' ? payload.kind : 'unknown'
+    setCitations((prev) =>
+      prev.some((item) => item.refId === refId) ? prev : [...prev, { refId, kind }],
+    )
+  }, [])
+
+  const rememberSession = useCallback(
+    (sid: string) => {
+      setSessionId(sid)
+      if (sessionStorageKey && typeof window !== 'undefined') {
+        window.sessionStorage.setItem(sessionStorageKey, sid)
+      }
+    },
+    [sessionStorageKey],
+  )
+
   const ensureSession = useCallback(async () => {
     if (sessionId) return sessionId
     if (sessionStorageKey && typeof window !== 'undefined') {
       const stored = window.sessionStorage.getItem(sessionStorageKey)
-      if (stored) {
-        setSessionId(stored)
-        return stored
+      const known = stored && sessionsQuery.data?.some((row) => row.id === stored) ? stored : null
+      if (known) {
+        setSessionId(known)
+        return known
       }
+    }
+    const listed = sessionsQuery.data?.[0]?.id
+    if (listed) {
+      rememberSession(listed)
+      return listed
     }
     const created = await createAgentSession({
       title: apiSignalId ? `信号助手 ${apiSignalId.slice(0, 8)}` : '证据助手',
       page_context: apiSignalId ? { signal_id: apiSignalId } : undefined,
     })
-    setSessionId(created.id)
-    if (sessionStorageKey && typeof window !== 'undefined') {
-      window.sessionStorage.setItem(sessionStorageKey, created.id)
-    }
+    rememberSession(created.id)
+    void sessionsQuery.refetch()
     return created.id
-  }, [apiSignalId, sessionId, sessionStorageKey])
+  }, [apiSignalId, rememberSession, sessionId, sessionStorageKey, sessionsQuery])
+
+  const switchSession = useCallback(
+    (sid: string) => {
+      if (sid === sessionId) return
+      closeEventSource()
+      streamAbortRef.current?.abort()
+      lastEventSeqRef.current = 0
+      setMessages([])
+      setPatches([])
+      setCitations([])
+      setLiveAnswer('')
+      setStreamNote(null)
+      rememberSession(sid)
+    },
+    [closeEventSource, rememberSession, sessionId],
+  )
+
+  const startNewSession = useCallback(async () => {
+    try {
+      const created = await createAgentSession({
+        title: apiSignalId ? `信号助手 ${apiSignalId.slice(0, 8)}` : '证据助手',
+        page_context: apiSignalId ? { signal_id: apiSignalId } : undefined,
+      })
+      setMessages([])
+      setPatches([])
+      setCitations([])
+      setLiveAnswer('')
+      rememberSession(created.id)
+      void sessionsQuery.refetch()
+    } catch (err) {
+      const detail = err instanceof EeaApiError ? err.message : String(err)
+      messageApi.error(detail || '新建会话失败')
+    }
+  }, [apiSignalId, messageApi, rememberSession, sessionsQuery])
 
   const refreshConversation = useCallback(async (sid: string) => {
     const [msgs, pcs] = await Promise.all([listAgentSessionMessages(sid), listAgentSessionPatches(sid)])
@@ -104,7 +175,20 @@ export function EvidenceAssistantChat({ signalId }: EvidenceAssistantChatProps) 
     void refreshConversation(sessionId)
   }, [refreshConversation, sessionId])
 
-  useEffect(() => () => closeEventSource(), [closeEventSource])
+  useEffect(() => () => {
+    closeEventSource()
+    streamAbortRef.current?.abort()
+  }, [closeEventSource])
+
+  useEffect(() => {
+    setCitations([])
+  }, [apiSignalId])
+
+  useEffect(() => {
+    if (!sessionStorageKey || typeof window === 'undefined') return
+    const stored = window.sessionStorage.getItem(sessionStorageKey)
+    if (stored) setSessionId(stored)
+  }, [sessionStorageKey])
 
   const send = useCallback(async () => {
     const text = draft.trim()
@@ -117,14 +201,57 @@ export function EvidenceAssistantChat({ signalId }: EvidenceAssistantChatProps) 
     setBusy(true)
     setStreamNote(null)
     setActiveRunId(null)
+    setCitations([])
+    setLiveAnswer('')
+    let streamedText = false
     try {
       const sid = await ensureSession()
+      closeEventSource()
+      try {
+        const controller = new AbortController()
+        streamAbortRef.current = controller
+        try {
+          const streamed = await streamAgentSessionMessage(sid, text, {
+            signal: controller.signal,
+            onEvent: (event) => {
+              if (event.type === 'text.delta' && typeof event.delta === 'string') {
+                streamedText = true
+                setLiveAnswer((prev) => prev + event.delta)
+              }
+              if (event.type === 'tool.call' && typeof event.tool === 'string') {
+                setStreamNote('正在调用工具：' + event.tool)
+              }
+              if (event.type === 'citation') {
+                recordCitation(event as never)
+              }
+              if (event.type === 'turn.started' && typeof event.run_id === 'string') {
+                setActiveRunId(event.run_id)
+              }
+            },
+          })
+          setActiveRunId(streamed.run_id)
+          await refreshConversation(sid)
+          if (streamed.status === 'failed' && streamed.error) {
+            messageApi.warning(streamed.error)
+          }
+          return
+        } finally {
+          streamAbortRef.current = null
+          setLiveAnswer('')
+        }
+      } catch (streamErr) {
+        if (streamedText) {
+          messageApi.error(streamErr instanceof Error ? streamErr.message : '流式响应中断')
+          return
+        }
+      }
       closeEventSource()
       const es = openAgentSessionEventSource(sid, {
         lastEventId: String(lastEventSeqRef.current),
         onEvent: (payload, eventId) => {
           const parsed = Number.parseInt(eventId, 10)
           if (!Number.isNaN(parsed)) lastEventSeqRef.current = Math.max(lastEventSeqRef.current, parsed)
+          recordCitation(payload)
           const note = noteFromEvent(payload)
           if (note) setStreamNote(note)
           if (payload.run_id && typeof payload.run_id === 'string') setActiveRunId(payload.run_id)
@@ -136,6 +263,7 @@ export function EvidenceAssistantChat({ signalId }: EvidenceAssistantChatProps) 
       closeEventSource()
       const replay = await fetchAgentSessionEvents(sid, String(lastEventSeqRef.current))
       lastEventSeqRef.current = replay.lastSeq
+      replay.payloads.forEach(recordCitation)
       const terminal = replay.payloads.find((p) =>
         ['turn.completed', 'turn.failed', 'turn.cancelled', 'approval.required'].includes(p.type),
       )
@@ -169,6 +297,7 @@ export function EvidenceAssistantChat({ signalId }: EvidenceAssistantChatProps) 
     legacyTurns,
     messageApi,
     noteFromEvent,
+    recordCitation,
     refreshConversation,
   ])
 
@@ -200,6 +329,7 @@ export function EvidenceAssistantChat({ signalId }: EvidenceAssistantChatProps) 
   }
 
   const skills = skillsQuery.data
+  const sessions = sessionsQuery.data ?? []
   const displayMessages =
     messages.length > 0
       ? messages
@@ -222,7 +352,25 @@ export function EvidenceAssistantChat({ signalId }: EvidenceAssistantChatProps) 
               : `Skill 包：${skills.packs.map((p) => p.name).join(', ')}`}
           </Tag>
         ) : null}
-        {sessionId ? <Tag>会话 {sessionId.slice(0, 8)}</Tag> : null}
+        {sessions.length > 1 ? (
+          <Select
+            size="small"
+            style={{ minWidth: 180 }}
+            value={sessionId ?? undefined}
+            placeholder="选择会话"
+            options={sessions.map((row) => ({
+              value: row.id,
+              label: `${row.title || '会话'} · ${row.id.slice(0, 6)}`,
+            }))}
+            onChange={(value) => switchSession(value)}
+            disabled={busy}
+          />
+        ) : sessionId ? (
+          <Tag>会话 {sessionId.slice(0, 8)}</Tag>
+        ) : null}
+        <Button size="small" disabled={!apiSignalId || busy} onClick={() => void startNewSession()}>
+          新建会话
+        </Button>
       </Space>
       <div className="chat-messages">
         {displayMessages.length === 0 && !busy ? (
@@ -241,12 +389,18 @@ export function EvidenceAssistantChat({ signalId }: EvidenceAssistantChatProps) 
             {turn.role === 'assistant' ? <ChatMarkdown content={turn.content} /> : turn.content}
           </div>
         ))}
-        {busy ? (
+        {liveAnswer ? (
+          <div className="chat-message assistant">
+            <ChatMarkdown content={liveAnswer} />
+          </div>
+        ) : null}
+        {busy && !liveAnswer ? (
           <div className="chat-message assistant">
             <Spin size="small" />{' '}
             <Text type="secondary"> {streamNote ?? '思考中…'}</Text>
           </div>
-        ) : streamNote ? (
+        ) : null}
+        {streamNote && liveAnswer ? (
           <div className="chat-message assistant">
             <Text type="secondary">{streamNote}</Text>
           </div>
@@ -304,6 +458,22 @@ export function EvidenceAssistantChat({ signalId }: EvidenceAssistantChatProps) 
             ))}
           </Space>
         </Card>
+      ) : null}
+
+      {citations.length > 0 && onCitation ? (
+        <Space wrap size={[6, 6]} className="agent-citations" style={{ marginTop: 8 }}>
+          <Text type="secondary">引用</Text>
+          {citations.map((citation) => (
+            <Button
+              key={citation.refId}
+              size="small"
+              type="link"
+              onClick={() => onCitation(citation.refId, citation.kind)}
+            >
+              {citationLabel(citation.refId)}
+            </Button>
+          ))}
+        </Space>
       ) : null}
 
       <Space orientation="vertical" size={8} style={{ width: '100%', marginTop: 8 }} className="chat-composer">

@@ -21,6 +21,7 @@ export type SignalOut = {
   signal_type_code: string | null
   evolution_node_code: string | null
   evidence_status_code: string
+  classification_basis?: Record<string, unknown> | null
   tech_theme_id: string | null
   document_id?: string | null
   source_label: string | null
@@ -756,19 +757,41 @@ export type DocumentFigureOut = {
   figure_index: number
   caption: string | null
   review_status: string
+  review_reason?: string | null
+  source?: string | null
+  page?: number | null
+  position?: number | null
+  section_path?: string[] | null
+  occurrence_count?: number
+  confidence?: number | null
+  image_url?: string | null
 }
 
 export type DocumentKeywordOut = {
   term: string
   score: number | null
   chunk_id: number | null
+  section_path?: string[] | null
+  heading_level?: number | null
   source: string
+}
+
+export type DocumentChunkOut = {
+  chunk_id: number
+  section_path: string[] | null
+  heading_level: number | null
+  text: string
+  char_start: number | null
+  char_end: number | null
+  figure_indices: number[] | null
+  content_sha256: string
 }
 
 export type AgentSessionOut = {
   id: string
   title: string | null
   project_key: string | null
+  page_context: Record<string, unknown> | null
   status: string
   created_at: string
   updated_at: string
@@ -807,6 +830,8 @@ export type AgentMessageResponse = {
 export type AgentSkillsStatusOut = {
   baseline_mode: boolean
   packs: { name: string; version: string; checksum: string }[]
+  errors?: { file: string; error: string }[]
+  rule_count?: number
 }
 
 export type AgentMemoryOut = {

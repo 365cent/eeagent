@@ -2,6 +2,83 @@
 
 This record keeps evidence for implementation slices removed from the remaining-work TODOs. A slice does not close its parent task; acceptance stays open until the subsystem TODO criteria and required platform evidence pass.
 
+## 2026-11-19
+
+### Figure retry authorization (OPS-03 slice) and trace smoke test
+
+- POST /documents/{id}/figures/{n}/recaption now depends on get_operator_identity and rejects roles outside researcher/taxonomy_admin/platform_admin with 403. The role is read from the server identity (trusted proxy headers in production, configured operator in development), never from the request body.
+- A successful retry writes a CorrectionAudit row (entity_type document_figure, field caption:{index}, old/new caption, operator subject/role, reason 单图重新识别) in the same transaction as the caption update.
+- Added @playwright/test with playwright.config.ts reusing the host Edge/Chrome channel (EEA_PW_CHANNEL overrides it) because the intranet image ships no browser download. pnpm pw:smoke runs only tests/e2e/trace-smoke.spec.ts.
+- Trace smoke coverage: /trace renders the server relation rows when the panorama API returns landing points, otherwise the real empty state with no demo rows; no /api/v1 request may fail during load. /traceDetail/{unknown-uuid} asserts the API returns 404 and the page shows 无法打开这条追溯链 plus 该技术落脚点已不存在.
+- Checks: backend full suite 452 passed, 2 skipped; test_figure_recaption.py 8 passed (added role-denied 403 and audit-row assertions). Frontend pnpm typecheck and pnpm build passed; pnpm pw:smoke 2 passed against the local API (8000) and Next dev server (3000) using the Edge channel.
+- Still open: the smoke test runs against a dev-host Edge, not the Linux intranet; it does not yet seed a landing point, so the relation-row branch is only covered when data exists. Playwright browser download is not bundled.
+
+### Document research: multi-session switching and per-figure retry
+
+- GET /agent/sessions now accepts `signal_id` and filters on `page_context.signal_id`; AgentSessionOut returns page_context so a client can confirm scoping. Filtering stays inside the operator-subject predicate.
+- The evidence assistant lists sessions for the current signal, shows a selector once more than one exists, and has a 新建会话 button. The last session id is remembered per signal and restored after reload; switching resets events, citations and the live answer before loading the other conversation.
+- POST /documents/{id}/figures/{n}/recaption retries vision recognition for one stored figure only: the image object is reused, the caption marker is rewritten in canonical Markdown, chunks are rebuilt, and a failed model call leaves the text intact with review_status=needs_review plus an explicit reason.
+- The document research panel adds 重试识别 per figure and refreshes figures, chunks and document detail after the retry.
+- The trace view replaces the generic evidence link with 查看首张图块, which navigates to singal/{id}?doc_figure=1 so the research tab opens focused on figure 1.
+- Checks: backend full suite 450 passed, 2 skipped; test_figure_recaption.py 6 passed; test_agent_workflow.py 15 passed; OpenAPI path snapshot refreshed. Frontend typecheck, pnpm build and scoped antd lint (components/evidence, views/trace) passed; tests/document-research.test.cjs 4 passed.
+- Browser (dev host, local PostgreSQL, real gateway vision model): opening singal/{id}?doc_figure=4 opened the research tab with figure 4 active; retrying figure 8 in the panel changed it from 待复核 to 已就绪 with a caption; the session selector listed two signal-scoped sessions and switching to the older one loaded its two stored messages; after reload the remembered session was restored.
+- Still open: real Word seven-figure/eight-insertion acceptance, PDF OCR and Linux browser evidence. Retry authorization and audit were added in the 2026-11-19 OPS-03 slice above.
+
+
+
+### Chat streaming with non-stream fallback
+
+- Added POST /agent/sessions/{id}/messages/stream: SSE that forwards turn.started, tool.call, citation, text.delta and a final message.completed (or message.failed) payload while the existing POST /messages stays the non-stream endpoint.
+- run_agent_turn now uses agent.run_stream + stream_output when an event sink exists, emits answer deltas, and keeps agent.run for callers without a sink.
+- The frontend streams the answer into the chat bubble; if streaming is unavailable or fails before any text arrives, it falls back to the existing synchronous POST + SSE replay path.
+- Checks: backend full suite passed (443 passed, 2 skipped); agent workflow tests passed (14); OpenAPI path snapshot updated; frontend typecheck, build and scoped antd lint passed. Browser smoke showed live incremental text in the assistant bubble; a 22-delta stream completed with status completed.
+
+### Chat model auto-discovery and runtime fallback
+
+- When CHAT_MODEL is empty, resolve_chat_model reads the gateway model list, probes candidates with a content-returning completion, and caches the first model that returns non-empty assistant content. Reasoning-only replies are rejected.
+- chat_completion now defaults to multiple model attempts. Empty content, 404 model errors and retryable upstream failures fall through to the next candidate; the successful model replaces the runtime cache when CHAT_MODEL is unset.
+- Force resolution clears the cached chat model before probing. Explicit CHAT_MODEL remains the first attempt but fallback candidates are still available.
+- Checks: full backend suite passed (443 passed, 2 skipped); test_llm_gateway_models.py passed 14 tests. Live probe with CHAT_MODEL empty resolved glm-5.3-o-anthropic and returned content. Live fallback from a cached empty-content Qwen3.6-35B switched to glm-5.3-o-anthropic and updated the cache.
+
+## 2026-11-18
+
+### Model gateway availability probe
+
+- backend/.env has chat, embedding and rerank credentials; vision uses Qwen3.8-27B, embedding uses Qwen3-Embedding-8B, rerank uses Qwen3-Reranker-8B. CHAT_MODEL stays empty and resolves a content-returning model at runtime.
+- Live gateway checks: 17 model ids; Qwen3.8-27B and glm-5.3-o-anthropic return content; Qwen3.6-35B returns reasoning_content with empty content; several other candidates return 503 or timeout.
+- Live feature checks passed: structured tag suggestions (llm-rerank-refine), theme naming, excerpt generation, evidence studio report/mindmap/infographic/audio, agent session with document citation, demand assistant with two non-document retained signals, document vision captions, 4096-dimensional embeddings, rerank and semantic RAG citations.
+- CHAT_MODEL remains empty. Auto-probe now validates non-empty content and resolves glm-5.3-o-anthropic; the reasoning-only Qwen3.6-35B is skipped. No secret values were printed or recorded.
+- Agent skills remain in baseline mode because no approved business skill packs are present. OCR and image-generation models are listed by the gateway, but the application has no OCR or image-generation feature path in this slice.
+
+### FE-11 — document research view
+
+- Added a shared document research panel that groups document chunks by section path, renders canonical section text, lists section keywords, and shows figure thumbnails with ready/needs-review status and review reasons.
+- Document sources now expose a research tab in evidence detail. Selection is persisted through doc_chunk and doc_figure query parameters, so refresh restores the active section or figure.
+- The assistant now collects citation SSE events and renders citation buttons when an onCitation handler is available; document chunk and figure refs open the research tab and focus the target.
+- The document import result now opens the same research panel in a modal; temporary figure/keyword tag lists and duplicate loading buttons were removed.
+- Evidence: [research panel](../frontend/components/evidence/document-research-panel.tsx), [helpers](../frontend/lib/document-research.ts), [evidence detail](../frontend/views/dashboard/workspace.tsx), [assistant citations](../frontend/components/evidence/evidence-assistant-chat.tsx), and [tests](../frontend/tests/document-research.test.cjs).
+- Checks: node document research tests passed (3); pnpm typecheck passed; pnpm build passed; scoped antd lint zero issues for changed components. Browser smoke with a synthetic PPTX showed 3 section chunks, 2 needs-review figures with reasons, figure image loading, doc_figure=1 URL persistence after reload, and a working document signal research tab.
+- Remaining: the import-result modal was not separately browser-tested because the upload flow auto-created a signal and navigated to evidence detail; live Agent citation E2E still needs a working gateway or a controlled event fixture; Playwright and 320 px responsive acceptance remain open. FE-11 parent stays open.
+
+### BE-13 — declarative skill rules and reproducible evaluation
+
+- Skill packs are validated YAML/JSON objects with schema version, pack version, checksum, field rules, match terms, priority and reason. Invalid packs and duplicate name/version are rejected and exposed through the skills status endpoint.
+- Approved business rules now run before model/frequency fallbacks for value-chain stage, signal type and technical tags. Conflicts and the winning source are persisted in signal.classification_basis; explicit operator values win.
+- The evaluator reads a JSON/YAML gold set, reports overall/stage/type/tag accuracy, failure samples, thresholds and latency, and exits nonzero when non-baseline thresholds fail. Its default 20-item fixture is explicitly synthetic and does not count as business accuracy.
+- Evidence: [skills loader](../backend/app/services/skills.py), [evaluator](../backend/app/services/skill_eval.py), [signal integration](../backend/app/domains/evidence/signal_record.py), [migration](../backend/migrations/versions/0020_signal_classification_basis.py), and [tests](../backend/tests/test_skills_eval.py).
+- Checks: full backend suite passed (441 passed, 2 skipped); BE-13 unit tests passed (7); signals/agent regression slice passed (36); lint-imports passed; migration upgrade/downgrade/upgrade passed on eea_test; frontend typecheck/build passed.
+- Remaining: DOC-02 approved business packs and a real 20-item human-labelled gold set, real model/gateway quality and latency measurements, and business sign-off. BE-13 parent remains open.
+
+### BE-12 — document figure assets and heading-aware chunks
+
+- Added additive migration 0019_document_structure for figure asset metadata and chunk section fields.
+- Successful ingest now stores figure bytes in object storage and persists source, page, position, section path, occurrence count, confidence, review status and review reason. Failed reingest rolls back and keeps the previous canonical text and index.
+- OOXML reference counting distinguishes seven distinct images from eight insertions; identical bytes share one asset and sum their occurrence count.
+- Added document chunks API and figure image endpoint; figure and keyword responses carry section paths and chunk references.
+- Evidence: [doc ingest](../backend/app/services/doc_ingest.py), [section parser](../backend/app/services/doc_structure.py), [document API](../backend/app/api/v1/documents.py), and [migration](../backend/migrations/versions/0019_document_structure.py).
+- Checks: full backend suite passed (430 passed, 2 skipped); lint-imports passed; frontend pnpm typecheck and build passed. Migration upgrade/downgrade/upgrade passed on eea_test.
+- Remaining: real Word seven-image/eight-insertion visual acceptance, PDF missing-text/OCR review case, Linux service and Windows client evidence. The BE-12 parent task remains open.
+
 ## 2026-11-17
 
 ### BE-14/BE-04 — semantic RAG retrieval

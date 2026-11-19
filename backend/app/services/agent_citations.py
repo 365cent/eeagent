@@ -30,7 +30,12 @@ def make_signal_citation(*, signal_id: uuid.UUID, title: str, summary: str) -> A
 
 
 def make_chunk_citation(
-    *, document_id: uuid.UUID, chunk_id: int, title: str, summary: str
+    *,
+    document_id: uuid.UUID,
+    chunk_id: int,
+    title: str,
+    summary: str,
+    section_path: list[str] | None = None,
 ) -> AgentCitation:
     return AgentCitation(
         ref_id=chunk_ref_id(document_id, chunk_id),
@@ -39,8 +44,8 @@ def make_chunk_citation(
         summary=summary,
         document_id=document_id,
         chunk_id=chunk_id,
+        section_path=section_path,
     )
-
 
 def make_figure_citation(
     *,

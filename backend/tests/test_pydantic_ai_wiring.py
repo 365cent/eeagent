@@ -109,7 +109,8 @@ async def test_dynamic_instructions_include_project_and_memory():
 
 @pytest.mark.no_db
 async def test_run_agent_turn_wires_event_stream_handler():
-    """event_stream_handler must be passed when event_sink is set (not gated on stream_function)."""
+    """When event_sink is set, run_agent_turn must stream through run_stream."""
+    from contextlib import asynccontextmanager
     from types import SimpleNamespace
     from unittest.mock import MagicMock
 
@@ -119,15 +120,25 @@ async def test_run_agent_turn_wires_event_stream_handler():
     agent = await build_eea_agent(model=TestModel())
     captured: dict = {}
 
-    async def recording_run(*_args, **kwargs):
-        captured["handler"] = kwargs.get("event_stream_handler")
-        return SimpleNamespace(
-            output=AgentTurn(answer="ok", citation_refs=[], patch_ids=[]),
-            all_messages=lambda: [],
-            usage=lambda: None,
-        )
+    class FakeStreamed:
+        async def stream_output(self, debounce_by=0.05):
+            del debounce_by
+            yield SimpleNamespace(answer="ok")
 
-    agent.run = recording_run  # type: ignore[method-assign]
+        async def get_output(self):
+            return AgentTurn(answer="ok", citation_refs=[], patch_ids=[])
+
+        def all_messages(self):
+            return []
+
+        usage = None
+
+    @asynccontextmanager
+    async def recording_run_stream(*_args, **kwargs):
+        captured["handler"] = kwargs.get("event_stream_handler")
+        yield FakeStreamed()
+
+    agent.run_stream = recording_run_stream  # type: ignore[method-assign]
 
     deps = AgentDeps(
         db=MagicMock(),
@@ -142,6 +153,44 @@ async def test_run_agent_turn_wires_event_stream_handler():
 
     await run_agent_turn(agent, user_message="hi", deps=deps, event_sink=sink)
     assert captured.get("handler") is not None
+
+
+@pytest.mark.no_db
+async def test_run_agent_turn_without_sink_uses_non_stream_run():
+    """The fallback path must call agent.run, not run_stream."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from app.core.identity import OperatorIdentity
+    from app.services.agent_workflow import build_eea_agent, run_agent_turn
+
+    agent = await build_eea_agent(model=TestModel())
+    captured: dict = {}
+
+    async def recording_run(*_args, **kwargs):
+        captured["called"] = "run"
+        return SimpleNamespace(
+            output=AgentTurn(answer="ok", citation_refs=[], patch_ids=[]),
+            all_messages=lambda: [],
+            usage=lambda: None,
+        )
+
+    async def forbidden_stream(*_args, **_kwargs):
+        raise AssertionError("run_stream must not be used without an event sink")
+
+    agent.run = recording_run  # type: ignore[method-assign]
+    agent.run_stream = forbidden_stream  # type: ignore[method-assign]
+
+    deps = AgentDeps(
+        db=MagicMock(),
+        actor=OperatorIdentity("dev-user", "researcher"),
+        session_id=uuid.uuid4(),
+        project_key=None,
+        page_context=None,
+    )
+
+    await run_agent_turn(agent, user_message="hi", deps=deps)
+    assert captured.get("called") == "run"
 
 
 @pytest.mark.no_db

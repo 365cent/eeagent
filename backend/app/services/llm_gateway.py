@@ -91,8 +91,23 @@ def _remember(kind: str, model: str) -> str:
     return model
 
 
+_PLACEHOLDER_GATEWAY_MARKERS = ("example.com", "your-gateway")
+
+
+def is_placeholder_gateway_url(url: str) -> bool:
+    low = url.strip().lower()
+    return not low or any(marker in low for marker in _PLACEHOLDER_GATEWAY_MARKERS)
+
+
 def llm_configured() -> bool:
-    return bool(get_settings().chat_base_url_normalized)
+    base = get_settings().chat_base_url_normalized
+    return bool(base) and not is_placeholder_gateway_url(base)
+
+
+def chat_gateway_credentials_ready() -> bool:
+    """URL is usable and an API key is present (OpenAI-compatible gateways)."""
+    settings = get_settings()
+    return llm_configured() and bool(settings.chat_api_key_value)
 
 
 def _headers() -> dict[str, str]:
@@ -127,7 +142,7 @@ def chat_candidates(models: list[str]) -> list[str]:
 
 
 def upstream_retryable(exc: LLMUpstreamError) -> bool:
-    if exc.status in (408, 429, 500, 502, 503, 504, 554):
+    if exc.status in (404, 408, 429, 500, 502, 503, 504, 554):
         return True
     detail = exc.detail.lower()
     return "timeout" in detail or "edgeone" in detail
@@ -174,13 +189,17 @@ async def studio_generation_slot():
 
 
 async def _probe_chat(model: str, *, timeout: float = 20.0) -> bool:
-    """One-turn probe: a single user message, one token of output."""
+    """Probe for usable content, not just HTTP 200.
+
+    Reasoning-only models can return 200 with empty assistant content and
+    finish_reason=length. They are not safe defaults for business calls.
+    """
     settings = get_settings()
     payload = {
         "model": model,
-        "messages": [{"role": "user", "content": "ping"}],
+        "messages": [{"role": "user", "content": "Reply with the single word OK."}],
         "temperature": 0,
-        "max_tokens": 1,
+        "max_tokens": 64,
     }
     try:
         async with open_async_http_client(timeout=timeout) as client:
@@ -191,7 +210,14 @@ async def _probe_chat(model: str, *, timeout: float = 20.0) -> bool:
             )
     except httpx.HTTPError:
         return False
-    return resp.status_code < 400
+    if resp.status_code >= 400:
+        return False
+    try:
+        data = resp.json()
+        content = data["choices"][0]["message"]["content"]
+    except (KeyError, IndexError, TypeError, ValueError):
+        return False
+    return isinstance(content, str) and bool(content.strip())
 
 
 async def resolve_chat_model(*, force: bool = False) -> str:
@@ -209,6 +235,8 @@ async def resolve_chat_model(*, force: bool = False) -> str:
             hit = _cached("chat")
             if hit:
                 return hit
+        else:
+            _cache.pop("chat", None)
         models = await list_models()
         candidates = chat_candidates(models)
         for candidate in candidates:
@@ -321,7 +349,7 @@ async def chat_completion(
     *,
     temperature: float = 0.3,
     max_tokens: int = 1200,
-    max_model_attempts: int = 1,
+    max_model_attempts: int = DEFAULT_CHAT_MODEL_ATTEMPTS,
     task: str = "chat",
     caller_attempt: int = 1,
 ) -> tuple[str, str]:
@@ -390,7 +418,11 @@ async def chat_completion(
                 latency_ms=latency_ms,
             )
         )
+        if idx > 0 and not configured_chat_model(settings):
+            _remember("chat", model)
         return text, served
     if last is not None:
+        if not configured_chat_model(settings) and upstream_retryable(last):
+            _cache.pop("chat", None)
         raise last
     raise LLMNoModelError("no chat model attempts remain")

@@ -250,6 +250,7 @@ class SignalBase(BaseModel):
     signal_type_code: str | None
     evolution_node_code: str | None
     evidence_status_code: str
+    classification_basis: dict | None = None
     tech_theme_id: uuid.UUID | None
     document_id: uuid.UUID | None
     source_label: str | None
@@ -359,12 +360,35 @@ class DocumentFigureOut(BaseModel):
     figure_index: int
     caption: str | None = None
     review_status: str
+    review_reason: str | None = None
+    source: str | None = None
+    page: int | None = None
+    position: int | None = None
+    section_path: list[str] | None = None
+    occurrence_count: int = 1
+    confidence: float | None = None
+    image_url: str | None = None
+
+
+class DocumentChunkOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    chunk_id: int
+    section_path: list[str] | None = None
+    heading_level: int | None = None
+    text: str
+    char_start: int | None = None
+    char_end: int | None = None
+    figure_indices: list[int] | None = None
+    content_sha256: str
 
 
 class DocumentKeywordOut(BaseModel):
     term: str
     score: float | None = None
     chunk_id: int | None = None
+    section_path: list[str] | None = None
+    heading_level: int | None = None
     source: str = "heuristic"
 
 

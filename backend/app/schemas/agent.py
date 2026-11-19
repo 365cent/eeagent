@@ -19,6 +19,7 @@ class AgentSessionOut(BaseModel):
     id: uuid.UUID
     title: str | None
     project_key: str | None
+    page_context: dict[str, Any] | None = None
     status: str
     created_at: datetime
     updated_at: datetime
@@ -87,3 +88,5 @@ class AgentPatchOut(BaseModel):
 class AgentSkillsStatusOut(BaseModel):
     baseline_mode: bool
     packs: list[dict[str, str]]
+    errors: list[dict[str, str]] = []
+    rule_count: int = 0

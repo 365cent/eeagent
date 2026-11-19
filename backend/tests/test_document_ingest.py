@@ -364,3 +364,187 @@ async def test_caption_figure_gives_up_after_retries(monkeypatch):
     monkeypatch.setattr(doc_ingest, "_caption_once", always_empty)
     figure = doc_ingest.Figure(index=1, source="x.png", mime="image/png", data=b"x")
     assert await doc_ingest.caption_figure(figure, model="qwen", retries=1) == ""
+
+
+def _docx_with_seven_images_eight_references() -> bytes:
+    buffer = io.BytesIO()
+    rels = [
+        '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+    ]
+    for index in range(1, 8):
+        rels.append(
+            f'<Relationship Id="rId{index}" '
+            'Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" '
+            f'Target="media/image{index}.png"/>'
+        )
+    rels.append("</Relationships>")
+    refs = [f"rId{index}" for index in range(1, 8)] + ["rId1"]
+    drawing = "".join(f'<a:blip r:embed="{rid}"/>' for rid in refs)
+    document = (
+        '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" '
+        'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" '
+        'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
+        f"<w:body>{drawing}</w:body></w:document>"
+    )
+    with zipfile.ZipFile(buffer, "w") as zf:
+        zf.writestr("word/_rels/document.xml.rels", "".join(rels))
+        zf.writestr("word/document.xml", document)
+        for index in range(1, 8):
+            zf.writestr(f"word/media/image{index}.png", _png((index * 20, 80, 160)))
+    return buffer.getvalue()
+
+
+@pytest.mark.no_db
+def test_docx_distinguishes_seven_images_from_eight_insertions():
+    figures = doc_ingest.extract_figures(_docx_with_seven_images_eight_references(), ".docx")
+    assert len(figures) == 7
+    assert sum(figure.occurrence_count for figure in figures) == 8
+    assert figures[0].occurrence_count == 2
+    assert [figure.source for figure in figures] == [f"image{index}.png" for index in range(1, 8)]
+
+
+@pytest.mark.no_db
+def test_captions_then_figure_locations_track_heading_paths():
+    from app.services.doc_structure import assign_figure_locations
+
+    figures = [
+        doc_ingest.Figure(index=1, source="a.png", mime="image/png", data=b"", caption="第一张"),
+        doc_ingest.Figure(index=2, source="b.png", mime="image/png", data=b"", caption="第二张"),
+    ]
+    markdown = "# 总览\n\n## 方案\n\n![a](data:image/png;base64,AAA)\n\n## 结论\n\n![b](Picture2.png)\n"
+    out = doc_ingest.apply_captions(markdown, figures)
+    assign_figure_locations(out, figures)
+    assert figures[0].section_path == ["总览", "方案"]
+    assert figures[1].section_path == ["总览", "结论"]
+    assert figures[0].position == out.index("> 图 1")
+    assert figures[1].position == out.index("> 图 2")
+
+
+
+async def test_document_figures_chunks_and_keywords_api(client, monkeypatch):
+    canonical = "# 总览\n\n概述\n\n## 结构\n\neFuse 智能配电\n\n> 图 1：架构图\n"
+    image_bytes = _png((20, 100, 180))
+
+    async def fake_ingest(data, filename, mime, **kwargs):
+        return doc_ingest.IngestResult(
+            canonical_md=canonical,
+            markitdown_version="test",
+            figures=[
+                doc_ingest.Figure(
+                    index=1,
+                    source="architecture.png",
+                    mime="image/png",
+                    data=image_bytes,
+                    caption="架构图",
+                    page=2,
+                    occurrence_count=2,
+                    section_path=["总览", "结构"],
+                    position=canonical.index("> 图 1"),
+                )
+            ],
+            vision_model="fake-vision",
+        )
+
+    async def fake_tags(filename, text):
+        assert "eFuse" in text
+        return ["eFuse"], "heuristic", 0.91
+
+    monkeypatch.setattr(
+        "app.domains.evidence.document_pipeline.ingest_document", fake_ingest
+    )
+    monkeypatch.setattr("app.api.v1.documents.suggest_tech_tags", fake_tags)
+
+    response = await client.post(
+        "/api/v1/documents/raw",
+        files={
+            "file": (
+                "structure.docx",
+                b"docx-bytes",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+    assert response.status_code == 201, response.text
+    document_id = response.json()["id"]
+
+    figures = (await client.get(f"/api/v1/documents/{document_id}/figures")).json()
+    assert len(figures) == 1
+    figure = figures[0]
+    assert figure["source"] == "architecture.png"
+    assert figure["page"] == 2
+    assert figure["position"] == canonical.index("> 图 1")
+    assert figure["section_path"] == ["总览", "结构"]
+    assert figure["occurrence_count"] == 2
+    assert figure["review_status"] == "ready"
+    assert figure["image_url"] == (
+        f"/api/v1/documents/{document_id}/figures/1/image"
+    )
+
+    image = await client.get(figure["image_url"])
+    assert image.status_code == 200
+    assert image.headers["content-type"].startswith("image/png")
+    assert image.content == image_bytes
+
+    chunks = (await client.get(f"/api/v1/documents/{document_id}/chunks")).json()
+    assert [chunk["section_path"] for chunk in chunks] == [["总览"], ["总览", "结构"]]
+    assert chunks[1]["figure_indices"] == [1]
+    assert chunks[1]["text"].startswith("## 结构")
+
+    keywords = (await client.get(f"/api/v1/documents/{document_id}/keywords")).json()
+    assert keywords[0]["term"] == "eFuse"
+    assert keywords[0]["chunk_id"] == 2
+    assert keywords[0]["section_path"] == ["总览", "结构"]
+    assert (await client.get(f"/api/v1/documents/{document_id}/figures/99/image")).status_code == 404
+
+
+async def test_failed_reingest_keeps_previous_figure_and_chunk_index(client, monkeypatch):
+    canonical = "# 总览\n\n保留旧索引\n\n> 图 1：旧图\n"
+
+    async def good_ingest(data, filename, mime, **kwargs):
+        return doc_ingest.IngestResult(
+            canonical_md=canonical,
+            markitdown_version="test",
+            figures=[
+                doc_ingest.Figure(
+                    index=1,
+                    source="old.png",
+                    mime="image/png",
+                    data=_png((80, 30, 30)),
+                    caption="旧图",
+                    section_path=["总览"],
+                    position=canonical.index("> 图 1"),
+                )
+            ],
+        )
+
+    monkeypatch.setattr(
+        "app.domains.evidence.document_pipeline.ingest_document", good_ingest
+    )
+    response = await client.post(
+        "/api/v1/documents/raw",
+        files={
+            "file": (
+                "retry.docx",
+                b"retry-bytes",
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            )
+        },
+    )
+    assert response.status_code == 201, response.text
+    document_id = response.json()["id"]
+
+    async def failing_ingest(data, filename, mime, **kwargs):
+        raise RuntimeError("synthetic parse failure")
+
+    monkeypatch.setattr(
+        "app.domains.evidence.document_pipeline.ingest_document", failing_ingest
+    )
+    retry = await client.post(f"/api/v1/documents/{document_id}/ingest")
+    assert retry.status_code == 200
+    assert retry.json()["ingest_status"] == "failed"
+
+    figures = (await client.get(f"/api/v1/documents/{document_id}/figures")).json()
+    assert len(figures) == 1
+    assert figures[0]["caption"] == "旧图"
+    chunks = (await client.get(f"/api/v1/documents/{document_id}/chunks")).json()
+    assert chunks[0]["section_path"] == ["总览"]

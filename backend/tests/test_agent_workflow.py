@@ -81,6 +81,35 @@ async def test_session_create_list_and_isolation(client, monkeypatch):
     assert any(row["id"] == session_id for row in listed.json())
 
 
+async def test_list_sessions_filters_by_signal_page_context(client):
+    sig = await create_signal(client, title="session filter target")
+    other = await create_signal(client, title="other signal")
+    scoped = (
+        await client.post(
+            "/api/v1/agent/sessions",
+            json={"title": "scoped", "page_context": {"signal_id": sig["id"]}},
+        )
+    ).json()
+    unrelated = (
+        await client.post(
+            "/api/v1/agent/sessions",
+            json={"title": "unrelated", "page_context": {"signal_id": other["id"]}},
+        )
+    ).json()
+    open_session = (await client.post("/api/v1/agent/sessions", json={"title": "open"})).json()
+
+    filtered = await client.get("/api/v1/agent/sessions", params={"signal_id": sig["id"]})
+    assert filtered.status_code == 200, filtered.text
+    ids = {row["id"] for row in filtered.json()}
+    assert scoped["id"] in ids
+    assert unrelated["id"] not in ids
+    assert open_session["id"] not in ids
+    assert filtered.json()[0]["page_context"] == {"signal_id": sig["id"]}
+
+    all_sessions = await client.get("/api/v1/agent/sessions")
+    assert {row["id"] for row in all_sessions.json()} >= {scoped["id"], unrelated["id"], open_session["id"]}
+
+
 async def test_patch_propose_confirm_and_duplicate(client, monkeypatch):
     sig = await create_signal(client, title="patch target")
     session = (await client.post("/api/v1/agent/sessions", json={})).json()
@@ -402,3 +431,22 @@ async def test_workflow_smoke_sequence(client, monkeypatch):
         assert denied.status_code == 403
     finally:
         app.dependency_overrides.pop(get_operator_identity, None)
+
+
+async def test_message_stream_returns_completed_sse(client, monkeypatch):
+    monkeypatch.setattr("app.services.agent_runtime.build_eea_agent", _agent_with_test_model)
+    session = (await client.post("/api/v1/agent/sessions", json={"title": "stream"})).json()
+
+    response = await client.post(
+        f"/api/v1/agent/sessions/{session['id']}/messages/stream",
+        json={"message": "hello"},
+    )
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/event-stream")
+    assert "event: message.completed" in response.text
+    assert '"status": "completed"' in response.text
+
+    messages = (
+        await client.get(f"/api/v1/agent/sessions/{session['id']}/messages")
+    ).json()
+    assert [row["role"] for row in messages] == ["user", "assistant"]

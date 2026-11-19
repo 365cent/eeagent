@@ -212,3 +212,93 @@ async def test_embedding_vectors_follow_response_index(monkeypatch):
         assert await semantic_api.create_embeddings(["a", "b"]) == [[1.0], [2.0]]
     finally:
         get_settings.cache_clear()
+
+
+async def test_probe_chat_requires_non_empty_content(monkeypatch):
+    from contextlib import asynccontextmanager
+
+    monkeypatch.setattr(gw, "get_settings", lambda: _settings())
+
+    class FakeClient:
+        def __init__(self, content):
+            self.content = content
+
+        async def post(self, url, headers=None, json=None):
+            return httpx.Response(
+                200,
+                json={"choices": [{"message": {"content": self.content}}]},
+            )
+
+    async def run(content):
+        @asynccontextmanager
+        async def fake_open(**_kwargs):
+            yield FakeClient(content)
+
+        monkeypatch.setattr(gw, "open_async_http_client", fake_open)
+        return await gw._probe_chat("probe-model")
+
+    assert await run("OK") is True
+    assert await run("") is False
+    assert await run("   ") is False
+
+
+async def test_chat_completion_falls_back_on_empty_content_and_caches(monkeypatch):
+    monkeypatch.setattr(gw, "get_settings", lambda: _settings())
+    monkeypatch.setattr(gw, "log_llm_call", lambda *args, **kwargs: None)
+    gw._cache.clear()
+
+    async def fake_chain(max_models=4):
+        return ["empty-model", "good-model"]
+
+    async def fake_post(**kwargs):
+        if kwargs["model"] == "empty-model":
+            raise gw.LLMUpstreamError(502, "empty assistant content from LLM")
+        return "OK", "good-model", None
+
+    monkeypatch.setattr(gw, "build_chat_model_chain", fake_chain)
+    monkeypatch.setattr(gw, "_post_chat_completion", fake_post)
+
+    text, served = await gw.chat_completion(
+        [{"role": "user", "content": "ping"}], max_model_attempts=2
+    )
+    assert text == "OK"
+    assert served == "good-model"
+    assert gw._cached("chat") == "good-model"
+    gw._cache.clear()
+
+
+async def test_chat_completion_does_not_cache_fallback_for_explicit_model(monkeypatch):
+    monkeypatch.setattr(
+        gw, "get_settings", lambda: _settings(chat_model_value="fixed-model")
+    )
+    monkeypatch.setattr(gw, "log_llm_call", lambda *args, **kwargs: None)
+    gw._cache.clear()
+
+    async def fake_chain(max_models=4):
+        return ["fixed-model", "good-model"]
+
+    async def fake_post(**kwargs):
+        if kwargs["model"] == "fixed-model":
+            raise gw.LLMUpstreamError(404, "model_not_found")
+        return "OK", "good-model", None
+
+    monkeypatch.setattr(gw, "build_chat_model_chain", fake_chain)
+    monkeypatch.setattr(gw, "_post_chat_completion", fake_post)
+
+    text, served = await gw.chat_completion(
+        [{"role": "user", "content": "ping"}], max_model_attempts=2
+    )
+    assert text == "OK"
+    assert served == "good-model"
+    assert gw._cached("chat") is None
+    gw._cache.clear()
+
+
+async def test_resolve_chat_model_returns_cached_model_without_probing(monkeypatch):
+    monkeypatch.setattr(gw, "_cached", lambda _kind: "cached-model")
+
+    async def explode():
+        raise AssertionError("model list must not be read when cache is warm")
+
+    monkeypatch.setattr(gw, "list_models", explode)
+    assert await gw.resolve_chat_model() == "cached-model"

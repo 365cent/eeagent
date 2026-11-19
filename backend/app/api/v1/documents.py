@@ -17,12 +17,21 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.identity import OperatorIdentity, get_operator_identity
 from app.platform.launchdarkly import EVIDENCE_CAPTURE, require_feature, track_workflow_success
 from app.db.base import get_db
 from app.models.models import Document
-from app.models.agent_models import DocumentFigure
-from app.schemas.schemas import DocumentDetail, DocumentFigureOut, DocumentKeywordOut, DocumentRawOut
+from app.models.agent_models import DocumentChunk, DocumentFigure
+from app.schemas.schemas import (
+    DocumentChunkOut,
+    DocumentDetail,
+    DocumentFigureOut,
+    DocumentKeywordOut,
+    DocumentRawOut,
+)
 from app.services.agent_rag import ensure_document_index
+from app.services.audit import record_correction
+from app.services.figure_recaption import recaption_figure
 from app.services.objectstore import load_body
 from app.services.tagging import suggest_tech_tags, text_for_tagging
 from app.domains.evidence.document_pipeline import (
@@ -70,6 +79,27 @@ def _detail(doc: Document) -> DocumentDetail:
         ingested_at=doc.ingested_at,
         has_canonical=bool(doc.canonical_md_object_key),
         ingest_error=doc.ingest_error,
+    )
+
+
+
+def _figure_out(row: DocumentFigure, document_id: uuid.UUID) -> DocumentFigureOut:
+    return DocumentFigureOut(
+        figure_index=row.figure_index,
+        caption=row.caption,
+        review_status=row.review_status,
+        review_reason=row.review_reason,
+        source=row.source,
+        page=row.page,
+        position=row.position,
+        section_path=row.section_path,
+        occurrence_count=row.occurrence_count or 1,
+        confidence=row.confidence,
+        image_url=(
+            f"/api/v1/documents/{document_id}/figures/{row.figure_index}/image"
+            if row.object_key
+            else None
+        ),
     )
 
 
@@ -265,39 +295,139 @@ async def list_document_figures(document_id: uuid.UUID, db: AsyncSession = Depen
                 document_id=document_id,
                 figure_index=index,
                 caption=None,
-                review_status="ready",
+                review_status="needs_review",
+                review_reason="旧文档未保存图块位置，请重新解析",
+                occurrence_count=1,
             )
             for index in range(1, doc.figure_count + 1)
         ]
-    return [
-        DocumentFigureOut(
-            figure_index=row.figure_index,
-            caption=row.caption,
-            review_status=row.review_status,
+    return [_figure_out(row, document_id) for row in rows]
+
+
+@router.get("/{document_id}/figures/{figure_index}/image")
+async def get_document_figure_image(
+    document_id: uuid.UUID,
+    figure_index: int,
+    db: AsyncSession = Depends(get_db),
+):
+    doc = await _load(db, document_id)
+    if figure_index < 1:
+        raise HTTPException(404, "figure not found")
+    row = (
+        await db.execute(
+            select(DocumentFigure).where(
+                DocumentFigure.document_id == document_id,
+                DocumentFigure.figure_index == figure_index,
+            )
         )
-        for row in rows
-    ]
+    ).scalar_one_or_none()
+    if row is None or not row.object_key:
+        raise HTTPException(404, "figure image not stored; reingest the document")
+    payload = load_bytes(row.object_key)
+    if payload is None:
+        raise HTTPException(404, f"figure object {row.object_key!r} missing from the object store")
+    return Response(
+        content=payload,
+        media_type=row.mime or "application/octet-stream",
+        headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@router.post("/{document_id}/figures/{figure_index}/recaption", response_model=DocumentFigureOut)
+async def recaption_document_figure(
+    document_id: uuid.UUID,
+    figure_index: int,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_operator_identity),
+):
+    """Retry vision recognition for one figure; the stored image and text stay intact.
+
+    OPS-03: role comes from the server identity, never from the caller payload.
+    """
+    if actor.role not in {"researcher", "taxonomy_admin", "platform_admin"}:
+        raise HTTPException(403, "当前角色不能重试图块识别")
+    if figure_index < 1:
+        raise HTTPException(404, "figure not found")
+    previous = (
+        await db.execute(
+            select(DocumentFigure.caption).where(
+                DocumentFigure.document_id == document_id,
+                DocumentFigure.figure_index == figure_index,
+            )
+        )
+    ).scalar_one_or_none()
+    row = await recaption_figure(db, document_id, figure_index)
+    if row is None:
+        raise HTTPException(404, "figure not found")
+    await record_correction(
+        db,
+        entity_type="document_figure",
+        entity_id=str(document_id),
+        field_name=f"caption:{figure_index}",
+        old_value=previous,
+        new_value=row.caption,
+        actor=actor,
+        reason="单图重新识别",
+    )
+    await db.commit()
+    return _figure_out(row, document_id)
+
+
+@router.get("/{document_id}/chunks", response_model=list[DocumentChunkOut])
+async def list_document_chunks(document_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    doc = await _load(db, document_id)
+    await ensure_document_index(db, doc)
+    await db.commit()
+    rows = (
+        await db.execute(
+            select(DocumentChunk)
+            .where(DocumentChunk.document_id == document_id)
+            .order_by(DocumentChunk.chunk_id)
+        )
+    ).scalars().all()
+    return rows
 
 
 @router.get("/{document_id}/keywords", response_model=list[DocumentKeywordOut])
 async def list_document_keywords(document_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     doc = await _load(db, document_id)
     await ensure_document_index(db, doc)
+    await db.commit()
     text = ""
     if doc.canonical_md_object_key:
         text = load_body(doc.canonical_md_object_key) or ""
     if not text:
         raise HTTPException(409, "document has no canonical text; ingest or retry first")
-    tags, source, top_score = await suggest_tech_tags(doc.filename or "", text)
-    return [
-        DocumentKeywordOut(
-            term=name,
-            score=top_score if index == 0 else None,
-            chunk_id=None,
-            source=source,
+    chunks = (
+        await db.execute(
+            select(DocumentChunk)
+            .where(DocumentChunk.document_id == document_id)
+            .order_by(DocumentChunk.chunk_id)
         )
-        for index, name in enumerate(tags)
-    ]
+    ).scalars().all()
+    tags, source, top_score = await suggest_tech_tags(doc.filename or "", text)
+
+    def locate(term: str) -> DocumentChunk | None:
+        needle = term.lower()
+        for chunk in chunks:
+            if needle in chunk.text.lower():
+                return chunk
+        return None
+
+    out: list[DocumentKeywordOut] = []
+    for index, name in enumerate(tags):
+        chunk = locate(name)
+        out.append(
+            DocumentKeywordOut(
+                term=name,
+                score=top_score if index == 0 else None,
+                chunk_id=chunk.chunk_id if chunk else None,
+                section_path=chunk.section_path if chunk else None,
+                heading_level=chunk.heading_level if chunk else None,
+                source=source,
+            )
+        )
+    return out
 
 
 @router.post("/{document_id}/extract-keywords", response_model=list[DocumentKeywordOut])

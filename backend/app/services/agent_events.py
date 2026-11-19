@@ -38,6 +38,14 @@ def format_sse(event: AgentEvent) -> str:
     return f"id: {event.seq}\nevent: {event.event_type}\ndata: {data}\n\n"
 
 
+def format_sse_payload(event_type: str, payload: dict[str, Any], event_id: int | None = None) -> str:
+    lines: list[str] = []
+    if event_id is not None:
+        lines.append(f"id: {event_id}")
+    lines.append(f"event: {event_type}")
+    lines.append("data: " + json.dumps({"type": event_type, **payload}, ensure_ascii=False))
+    return "\n".join(lines) + "\n\n"
+
 async def list_events_after(
     db: AsyncSession, session_id: uuid.UUID, *, after_seq: int = 0, limit: int = 200
 ) -> list[AgentEvent]:

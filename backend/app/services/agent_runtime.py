@@ -20,6 +20,7 @@ from app.services.agent_workflow import (
     dumps_message_history,
     loads_message_history,
     run_agent_turn,
+    EventSink,
 )
 from app.services.llm_gateway import LLMNotConfiguredError, LLMNoModelError, LLMUpstreamError
 
@@ -41,6 +42,7 @@ async def execute_user_message(
     session: AgentSession,
     actor: OperatorIdentity,
     message: str,
+    event_sink: EventSink | None = None,
 ) -> tuple[AgentRun, dict | None, str | None]:
     run = AgentRun(session_id=session.id, status="running")
     db.add(run)
@@ -55,6 +57,8 @@ async def execute_user_message(
         payload={"run_id": str(run.id)},
         run_id=run.id,
     )
+    if event_sink is not None:
+        await event_sink("turn.started", {"run_id": str(run.id)})
     history = loads_message_history(session.model_messages_json)
     deps = deps_for_session(
         db,
@@ -71,6 +75,8 @@ async def execute_user_message(
 
     async def sink(event_type: str, payload: dict) -> None:
         stream_buffer.append((event_type, payload))
+        if event_sink is not None:
+            await event_sink(event_type, payload)
 
     async def persist_buffered_stream_events() -> None:
         nonlocal stream_events_persisted

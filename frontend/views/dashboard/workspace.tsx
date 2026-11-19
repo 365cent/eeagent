@@ -84,11 +84,17 @@ import {
   DocumentPdfViewerLazy,
 } from '@/components/evidence/document-stage-preview'
 import { documentStagePreviewMode } from '@/lib/document-preview'
+import {
+  buildDocumentResearchSearch,
+  parseDocumentCitationRef,
+  parseDocumentResearchFocus,
+  type DocumentResearchFocus,
+} from '@/lib/document-research'
 import { fetchDocument, patchSignal } from '@/lib/api/eea-api'
 import { buildAppPath } from '@/lib/navigation'
 import { excerptLooksLikeChrome, sourceExcerptSnippet } from '@/lib/evidence/audio-overview-segments'
 import type { AppRouteOptions, NavigateFn, Signal } from '@/types/platform'
-import type { StudioInfographicPayload, StudioMindmapPayload } from '@/lib/api/types'
+import type { DocumentDetail, StudioInfographicPayload, StudioMindmapPayload } from '@/lib/api/types'
 import {
   clearStudioKind,
   loadStudioCache,
@@ -96,6 +102,7 @@ import {
   type StudioCacheEntry,
 } from '@/lib/studio-cache'
 import { EvidenceAssistantChat } from '@/components/evidence/evidence-assistant-chat'
+import { DocumentResearchPanel } from '@/components/evidence/document-research-panel'
 import { EvidenceAudioTransport } from '@/components/evidence/evidence-audio-transport'
 import { EvidenceStudioPane } from '@/components/evidence/evidence-studio-pane'
 import { SignalBodyMarkdown } from '@/components/evidence/signal-body-markdown'
@@ -175,6 +182,7 @@ type EvidenceStageView =
   | 'archive'
   | 'preview'
   | 'markdown'
+  | 'research'
   | 'assistant'
   | 'mindmap'
   | 'report'
@@ -188,10 +196,13 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
   const [canonicalMd, setCanonicalMd] = useState<string | null>(null)
   const [archiveFrameLoaded, setArchiveFrameLoaded] = useState(false)
   const [figureByIndex, setFigureByIndex] = useState<Record<number, string>>({})
+  const [researchFocus, setResearchFocus] = useState<DocumentResearchFocus>({})
+  const [documentRefreshKey, setDocumentRefreshKey] = useState(0)
   const [studioCacheBySignal, setStudioCacheBySignal] = useState<Record<string, StudioCacheEntry>>({})
   const markdownArticleRef = useRef<HTMLElement>(null)
   const { signal: liveSignal, detail, isLoading, isError } = useSignalDetail(signalId)
   const { maps } = useRefCodeMaps()
+  const queryClient = useQueryClient()
   const apiId = detail?.id ?? (isUuid(signalId) ? signalId : null)
   const documentId = detail?.document_id ?? null
   const documentQuery = useQuery({
@@ -201,6 +212,7 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
     staleTime: 60_000,
   })
   const documentMeta = documentQuery.data
+  const canResearch = Boolean(documentId && documentMeta?.has_canonical)
   const documentPreviewMode = documentMeta
     ? documentStagePreviewMode(documentMeta.filename, documentMeta.mime)
     : null
@@ -211,10 +223,10 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
   const hasArchive = Boolean(detail?.snapshot_html_object_key)
   const isDocumentSource = Boolean(documentId)
   const coreStageViews = useMemo((): EvidenceStageView[] => {
-    if (showPreviewTab) return ['preview', 'markdown', 'assistant']
-    if (hasArchive) return ['archive', 'markdown', 'assistant']
-    return ['markdown', 'assistant']
-  }, [showPreviewTab, hasArchive])
+    if (showPreviewTab) return canResearch ? ['preview', 'research', 'markdown', 'assistant'] : ['preview', 'markdown', 'assistant']
+    if (hasArchive) return canResearch ? ['archive', 'research', 'markdown', 'assistant'] : ['archive', 'markdown', 'assistant']
+    return canResearch ? ['research', 'markdown', 'assistant'] : ['markdown', 'assistant']
+  }, [showPreviewTab, hasArchive, canResearch])
   const linkedDemands = detail?.linked_demand_points ?? []
   const hasBody = Boolean(
     detail?.body_object_key || bodyText || detail?.excerpt || (isDocumentSource && canonicalMd),
@@ -338,7 +350,7 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
     return () => {
       cancelled = true
     }
-  }, [detail?.document_id])
+  }, [detail?.document_id, documentRefreshKey])
 
   useEffect(() => {
     if (!detail?.body_object_key || !apiId) {
@@ -388,11 +400,44 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
     () => [
       ...(showPreviewTab ? [{ label: '预览', value: 'preview' as const }] : []),
       ...(!showPreviewTab ? [{ label: '来源留存', value: 'archive' as const, disabled: !hasArchive }] : []),
+      ...(isDocumentSource ? [{ label: '文档研究', value: 'research' as const, disabled: !canResearch }] : []),
       { label: '解析快照', value: 'markdown', disabled: !hasBody },
       { label: '研究助手', value: 'assistant' },
     ],
-    [showPreviewTab, hasArchive, hasBody],
+    [showPreviewTab, hasArchive, hasBody, isDocumentSource, canResearch],
   )
+
+  useEffect(() => {
+    if (!canResearch) return
+    const focus = parseDocumentResearchFocus(window.location.search)
+    if (!focus.chunkId && !focus.figureIndex) return
+    setResearchFocus(focus)
+    setStageView('research')
+  }, [canResearch, signalId])
+
+  const updateResearchFocus = useCallback((focus: DocumentResearchFocus) => {
+    setResearchFocus(focus)
+    const search = buildDocumentResearchSearch(window.location.search, focus)
+    const next = window.location.pathname + (search ? '?' + search : '') + window.location.hash
+    window.history.replaceState(null, '', next)
+  }, [])
+
+  const handleCitation = useCallback((refId: string) => {
+    const parsed = parseDocumentCitationRef(refId)
+    if (!parsed || parsed.documentId !== documentId) return
+    setStageView('research')
+    setPreviewOpen(false)
+    updateResearchFocus(
+      parsed.kind === 'chunk' ? { chunkId: parsed.chunkId } : { figureIndex: parsed.figureIndex },
+    )
+  }, [documentId, updateResearchFocus])
+
+  const handleDocumentReingested = useCallback((detail: DocumentDetail) => {
+    if (!documentId) return
+    queryClient.setQueryData(eeaQueryKeys.documentDetail(documentId), detail)
+    setDocumentRefreshKey((value) => value + 1)
+    void queryClient.invalidateQueries({ queryKey: eeaQueryKeys.documentDetail(documentId) })
+  }, [documentId, queryClient])
 
   if (isLoading && !signal) {
     return (
@@ -427,6 +472,9 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
   const onStageTabChange = (value: EvidenceStageView) => {
     if (value === 'assistant') {
       setPreviewOpen(true)
+    }
+    if (value === 'research') {
+      setPreviewOpen(false)
     }
     setStageView(value)
   }
@@ -623,6 +671,18 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
               <PlatformEmptyState title="暂无 HTML 归档" description="该信号未留存 SingleFile 快照，可查看解析快照或继续用研究助手提问。" />
             )}
           </div>
+          <div className={['evidence-stage-tab-pane', stageView === 'research' ? 'is-active' : ''].filter(Boolean).join(' ')}>
+            {documentId ? (
+              <DocumentResearchPanel
+                documentId={documentId}
+                focus={researchFocus}
+                onFocusChange={updateResearchFocus}
+                onReingested={handleDocumentReingested}
+              />
+            ) : (
+              <PlatformEmptyState title="无法打开文档研究" description="该证据未关联可解析文档。" />
+            )}
+          </div>
           <div className={`evidence-stage-tab-pane${stageView === 'markdown' ? ' is-active' : ''}`}>
             <SignalBodyMarkdown
               ref={markdownArticleRef}
@@ -664,7 +724,7 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
             className={`evidence-stage-tab-pane evidence-stage-tab-pane-assistant${stageView === 'assistant' ? ' is-active' : ''}`}
           >
             <div className="evidence-assistant-shell chat-card evidence-stage-chat">
-              <EvidenceAssistantChat signalId={apiId} />
+              <EvidenceAssistantChat signalId={apiId} onCitation={handleCitation} />
             </div>
           </div>
         </div>

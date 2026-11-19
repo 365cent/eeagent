@@ -27,5 +27,9 @@ export const eeaQueryKeys = {
   trace: (lpId: string) => ['eea', 'trace', lpId] as const,
   strategyFunnel: (id: string) => ['eea', 'strategy', 'funnel', id] as const,
   strategyHistory: (id: string) => ['eea', 'strategy', 'history', id] as const,
+  documentDetail: (id: string) => ['eea', 'document', id] as const,
+  documentFigures: (id: string) => ['eea', 'document', id, 'figures'] as const,
+  documentChunks: (id: string) => ['eea', 'document', id, 'chunks'] as const,
+  documentKeywords: (id: string) => ['eea', 'document', id, 'keywords'] as const,
   captureTokens: ['eea', 'capture-tokens'] as const,
 }

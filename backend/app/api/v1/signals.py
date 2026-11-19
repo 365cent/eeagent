@@ -99,21 +99,6 @@ async def _load_signal(db: AsyncSession, sid: uuid.UUID) -> Signal:
     return obj
 
 
-async def _has_readable_evidence(db: AsyncSession, signal: Signal) -> bool:
-    if signal.body_object_key and load_body(signal.body_object_key):
-        return True
-    if (
-        signal.snapshot_html_object_key
-        and load_bytes(signal.snapshot_html_object_key) is not None
-    ):
-        return True
-    if signal.document_id is not None:
-        document = await db.get(Document, signal.document_id)
-        if document is not None and document.canonical_md_object_key:
-            return load_bytes(document.canonical_md_object_key) is not None
-    return False
-
-
 def _apply_signal_list_filters(
     q,
     *,
@@ -627,8 +612,10 @@ async def update_signal(
         if field == "evidence_status_code":
             if value is None:
                 raise HTTPException(422, "evidence_status_code cannot be null")
-            if value == "retained" and not body_text and not await _has_readable_evidence(db, s):
-                raise HTTPException(422, "readable evidence is required before marking a signal retained")
+            if value == "retained" and not body_text and not (
+                s.body_object_key and load_body(s.body_object_key)
+            ):
+                raise HTTPException(422, "retained signals require stored body text")
         # REQ-RULE-02: audit human corrections of machine-classified fields
         if field in (
             "value_chain_stage_code",
@@ -762,9 +749,7 @@ async def tag_suggestions(
         suggest_tech_tags(s.title, tag_body),
         suggest_tags_with_llm(s.title, llm_body[:6000]),
     )
-    settings = get_settings()
-    llm_configured = bool(settings.chat_base_url_normalized)
-    from app.services import semantic_api
+    from app.services import llm_gateway, semantic_api
 
     stage = (
         llm.value_chain_stage_code
@@ -776,16 +761,28 @@ async def tag_suggestions(
         if llm and llm.signal_type_code
         else judge_signal_type(s.title, tagging_text or fallback_text)
     )
+    chat_ready = llm_gateway.llm_configured()
+    chat_cred = llm_gateway.chat_gateway_credentials_ready()
+    rerank_ready = semantic_api.rerank_configured()
     degraded_reason: str | None = None
-    if tag_source == "jieba-frequency" and llm_configured:
-        degraded_reason = "对话模型或语义精排暂不可用，已使用词频建议。"
-    elif tag_source == "embedding-rerank" and llm_configured:
+    if tag_source == "jieba-frequency":
+        if not chat_ready and not rerank_ready:
+            degraded_reason = "模型网关未配置（backend/.env 中 CHAT/RERANK），已使用词频建议。"
+        elif not chat_cred and not rerank_ready:
+            degraded_reason = "CHAT_API_KEY 与 RERANK_API_KEY 未设置，已使用词频建议。"
+        elif not chat_cred:
+            degraded_reason = "CHAT_API_KEY 未设置，对话模型不可用；精排失败或未配置，已使用词频建议。"
+        elif not rerank_ready:
+            degraded_reason = "RERANK 未配置，语义精排不可用；对话模型暂不可用，已使用词频建议。"
+        elif chat_ready:
+            degraded_reason = "对话模型或语义精排暂不可用，已使用词频建议。可运行 scripts/probe_model_gateways.py 排查。"
+    elif tag_source == "embedding-rerank" and chat_cred:
         degraded_reason = "对话模型暂不可用；标签已语义精排，环节与类型见规则或单独 LLM。"
     elif tag_source == "embedding-rerank":
         degraded_reason = "对话模型未配置；标签已语义精排。"
-    elif llm_configured and tag_source != "llm-rerank-refine":
+    elif chat_cred and tag_source != "llm-rerank-refine":
         degraded_reason = "标签精选模型暂不可用，已使用精排/词频结果。"
-    elif not llm_configured and not semantic_api.semantic_configured():
+    elif not chat_ready and not semantic_api.semantic_configured():
         degraded_reason = "对话模型与语义服务未配置，已使用词频建议。"
     if tag_source == "llm-rerank-refine":
         degraded_reason = None

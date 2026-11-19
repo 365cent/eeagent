@@ -124,19 +124,24 @@
 - 验收：全链点击回源、刷新保持选择、失效 ID/缺链合理提示、导出引用与页面一致。
 - 已实现切片：追溯总览可打开指定落脚点深链接；详情展示需求五步/交叉验证、功能正向/反向数据、部署标准九宫格的未填/留空/正文、直接证据与主题成员、文档图块数量、归档引用、缺失链路及战略版本时间线。
 - 检查：macOS `next build` 与 `tsc --noEmit` 通过；workspace scoped antd lint 零问题。Mac 浏览器已验证空库追溯总览与失效落脚点深链接提示。有效 ID 刷新、重新选择和回源仍待走查。
-- 仍需：API basis freshness 为 `unknown_untracked`，页面明确提示无法确认；图块可从信号详情继续查看，尚未实现页面内图块定位；报告仍依赖 BE-15；真实业务链和 Linux 验收未做。
+- 已实现切片（2026-11-19）：研究助手按当前信号列出会话、可新建/切换，刷新后恢复上次会话；文档研究面板每张图可单独重试识别；追溯页可直接跳到 `singal/{id}?doc_figure=1`。
+- 仍需：API basis freshness 为 `unknown_untracked`，页面明确提示无法确认；图块可定位但追溯页只跳首图；报告仍依赖 BE-15；真实业务链和 Linux 验收未做。
+- 2026-11-19 追加：图块重试按服务端操作者角色授权并写审计；新增 Playwright 追溯页冒烟（空态与失效深链接）；含 Playwright 主流程仍需补七环节与角色限制用例。
+- 仍需：API basis freshness 为 `unknown_untracked`，页面明确提示无法确认；图块可定位但追溯页只跳首图；报告仍依赖 BE-15；真实业务链和 Linux 验收未做。
 
 ## FE-11 Agent 与文档研究
 
-- [ ] P1 · 部分实现 · 依赖 BE-12/13/14/15、OPS-03。
+- [ ] P1 · 部分实现（文档研究面板/证据详情研究标签已交付；引用真实网关、导入结果弹窗浏览器路径和 Playwright 仍待）
 - 来源：实施计划 §7.1/7.2 REQ-DOC/AGT；WBS 1.3.10/1.3.11/1.3.12。
 - 基于现有助手增加多会话、持久消息、SSE/取消/重连、引用跳转和图块定位。
-- 已实现切片（v0.1.0 复检）：`evidence-assistant-chat` 持久会话（`sessionStorage`）、补丁确认、记忆列表、SSE 事件重放与 `runs/{id}/cancel`；仍以同步 POST 完成为主，无 Playwright。
+- 已实现切片（v0.1.0 复检）：`evidence-assistant-chat` 持久会话（`sessionStorage`）、补丁确认、记忆列表、SSE 事件重放与 `runs/{id}/cancel`；流式增量输出已接通。Playwright 于 2026-11-19 引入，当前仅覆盖追溯页。
 - 待确认变更显示字段前后值/理由；确认/拒绝/过期/已应用分别展示，重复确认不重复写。
 - 记忆按用户/项目分别查看删除；真实技能版本与基线模式可识别。
 - 文档显示 canonical、图块识别状态、章节关键词树、局部失败重试；无图注不能显示成功。
 - PPTX 幻灯片预览 UI 对齐 [`deckpeek`](../../reference-will-deleted/deckpeek-src/src/deckpeek.py) 胶片条/结构模式（见 [`docs/research/2026-11-10-deckpeek-pptx-preview-reference.md`](../../docs/research/2026-11-10-deckpeek-pptx-preview-reference.md)）；底图模式依赖可选 Windows 导出，非 macOS 开发机验收项。
 - 验收：会话刷新、用户隔离、伪造引用缺失提示、确认写入审计、失败图待复核和重跑。
+
+- 已实现切片：文档研究面板（章节树、正文、关键词跳转、图块图片/状态、重新解析）、证据详情“文档研究”标签、doc_chunk/doc_figure 刷新恢复、助手引用按钮；浏览器已验证文档信号研究视图与图块定位。
 
 ## FE-12 前端验收与 Linux 接入
 

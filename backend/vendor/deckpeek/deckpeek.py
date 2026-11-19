@@ -1893,8 +1893,8 @@ HTML_TEMPLATE = """<!DOCTYPE html>
       <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/>
       <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
   </button>
-  <button id="btn-focus" class="ghost sq" title="专注模式 (F)" aria-label="专注模式"
-    aria-pressed="false">
+  <button id="btn-focus" class="ghost sq" title="全屏预览 (F)" aria-label="全屏预览"
+    aria-pressed="false" aria-haspopup="dialog">
     <svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
       stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <polyline points="15 3 21 3 21 9"/><polyline points="9 21 3 21 3 15"/>
@@ -1941,13 +1941,28 @@ HTML_TEMPLATE = """<!DOCTYPE html>
     <div class="kv"><span>翻页</span><em><kbd>&#8592;</kbd><kbd>&#8594;</kbd></em></div>
     <div class="kv"><span>刷新本页</span><em><kbd>R</kbd></em></div>
     <div class="kv"><span>底图 / 结构</span><em><kbd>1</kbd><kbd>2</kbd></em></div>
-    <div class="kv"><span>专注模式</span><em><kbd>F</kbd></em></div>
+    <div class="kv"><span>全屏预览</span><em><kbd>F</kbd></em></div>
     <div class="kv"><span>取消选中</span><em><kbd>Esc</kbd></em></div>
   </section>
 </aside>
 <div id="strip" role="tablist" aria-label="幻灯片"><div class="inner">@@STRIP@@</div></div>
 <div id="tip" role="tooltip"></div>
 <div id="toast" role="status" aria-live="polite"></div>
+<dialog id="focus-dialog" aria-labelledby="focus-dialog-title" class="focus-dialog">
+  <form method="dialog" class="focus-dialog-form">
+    <header class="focus-dialog-bar">
+      <h2 id="focus-dialog-title" class="focus-dialog-title">幻灯片全屏</h2>
+      <span id="focus-dialog-pos" class="focus-dialog-pos" aria-live="polite"></span>
+      <button type="submit" class="ghost focus-dialog-close" value="close"
+        aria-label="关闭全屏">关闭</button>
+    </header>
+    <div id="focus-dialog-stage" class="focus-dialog-stage"></div>
+    <footer class="focus-dialog-foot">
+      <button type="button" id="focus-prev" class="ghost">上一页</button>
+      <button type="button" id="focus-next" class="ghost">下一页</button>
+    </footer>
+  </form>
+</dialog>
 <textarea id="copybuf" readonly spellcheck="false" aria-hidden="true"
   style="position:fixed;left:-9999px;top:0;width:1px;height:1px;opacity:0"></textarea>
 <script id="shapedata" type="application/json">@@DATA@@</script>
@@ -2214,11 +2229,38 @@ html.snap .nbadge{animation:none}
 /* a slide whose PNG is missing should read as "no preview", not as a broken glyph */
 .st img.miss{visibility:hidden}
 
-/* ---------- focus mode ---------- */
-body.focus{--panel:0px;--strip:0px}
-body.focus #panel,body.focus #strip{display:none}
-body.focus #main{bottom:0}
-body.focus #toast{bottom:20px}
+/* ---------- fullscreen preview dialog ---------- */
+#focus-dialog{
+  margin:0;padding:0;border:0;
+  width:100vw;max-width:100vw;height:100vh;max-height:100vh;
+  background:var(--bg);color:var(--fg);
+}
+#focus-dialog:modal{overscroll-behavior:contain}
+#focus-dialog::backdrop{
+  background:rgba(0,0,0,.55);
+  overflow:hidden;overscroll-behavior:contain;
+}
+.focus-dialog-form{display:flex;flex-direction:column;height:100%;min-height:0}
+.focus-dialog-bar{
+  display:flex;align-items:center;gap:10px;flex-shrink:0;
+  padding:10px 14px;border-bottom:1px solid var(--line);
+  background:var(--panel-bg);
+}
+.focus-dialog-title{margin:0;font-size:15px;font-weight:600;flex:1;min-width:0}
+.focus-dialog-pos{font-size:13px;color:var(--fg-dim);font-variant-numeric:tabular-nums}
+.focus-dialog-close{margin-left:auto}
+.focus-dialog-stage{
+  flex:1;min-height:0;display:flex;align-items:center;justify-content:center;
+  padding:12px 16px;box-sizing:border-box;
+}
+.focus-dialog-stage #stagewrap{
+  position:relative;flex:1;width:100%;height:100%;
+  top:auto;left:auto;right:auto;bottom:auto;
+}
+.focus-dialog-foot{
+  display:flex;justify-content:center;gap:10px;flex-shrink:0;
+  padding:10px 14px;border-top:1px solid var(--line);
+}
 """
 
 JS_TEMPLATE = """
@@ -2251,6 +2293,13 @@ var btnBg = document.getElementById('m-bg');
 var btnStruct = document.getElementById('m-struct');
 var btnFocus = document.getElementById('btn-focus');
 var btnRefresh = document.getElementById('btn-refresh');
+var focusDialog = document.getElementById('focus-dialog');
+var focusStageHost = document.getElementById('focus-dialog-stage');
+var focusPosEl = document.getElementById('focus-dialog-pos');
+var focusPrev = document.getElementById('focus-prev');
+var focusNext = document.getElementById('focus-next');
+var stageWrap = document.getElementById('stagewrap');
+var mainEl = document.getElementById('main');
 /* order  = selected elements, in selection order (badge number = index + 1)
    primary = the element whose properties the panel shows (last one clicked)
    anchor  = origin of a shift-click range */
@@ -2300,6 +2349,9 @@ function show(n, updateHash){
   jump.value = String(n);
   btnPrev.disabled = n <= 1;
   btnNext.disabled = n >= COUNT;
+  if (focusPosEl) focusPosEl.textContent = n + ' / ' + COUNT;
+  if (focusPrev) focusPrev.disabled = n <= 1;
+  if (focusNext) focusNext.disabled = n >= COUNT;
   var btns = document.querySelectorAll('#strip .st');
   for (var i = 0; i < btns.length; i++){
     var on = Number(btns[i].dataset.n) === n;
@@ -2617,14 +2669,58 @@ function setMode(struct){
 btnBg.addEventListener('click', function(){ setMode(false); });
 btnStruct.addEventListener('click', function(){ setMode(true); });
 
-/* ---- focus mode ---- */
-function toggleFocus(force){
-  var on = typeof force === 'boolean' ? force : !document.body.classList.contains('focus');
-  document.body.classList.toggle('focus', on);
-  btnFocus.setAttribute('aria-pressed', on ? 'true' : 'false');
+/* ---- fullscreen preview (native dialog) ---- */
+function restoreStageFromDialog(){
+  if (!stageWrap || !mainEl) return;
+  if (stageWrap.parentElement === focusStageHost){
+    mainEl.insertBefore(stageWrap, mainEl.firstChild);
+  }
+}
+function openFocusDialog(){
+  if (!focusDialog || !stageWrap || !focusStageHost) return;
+  if (focusDialog.open) return;
+  focusStageHost.appendChild(stageWrap);
+  if (focusPosEl) focusPosEl.textContent = posEl ? posEl.textContent : '';
+  if (typeof focusDialog.showModal === 'function') focusDialog.showModal();
+  else toggleFocusLegacy(true);
+  btnFocus.setAttribute('aria-pressed', 'true');
   setTimeout(fit, 0);
 }
+function closeFocusDialog(){
+  if (!focusDialog) return;
+  restoreStageFromDialog();
+  if (focusDialog.open) focusDialog.close();
+  btnFocus.setAttribute('aria-pressed', 'false');
+  setTimeout(fit, 0);
+}
+function toggleFocusLegacy(on){
+  document.body.classList.toggle('focus', on);
+}
+function toggleFocus(force){
+  if (!focusDialog || typeof focusDialog.showModal !== 'function'){
+    var on = typeof force === 'boolean' ? force : !document.body.classList.contains('focus');
+    document.body.classList.toggle('focus', on);
+    btnFocus.setAttribute('aria-pressed', on ? 'true' : 'false');
+    setTimeout(fit, 0);
+    return;
+  }
+  if (typeof force === 'boolean'){
+    force ? openFocusDialog() : closeFocusDialog();
+    return;
+  }
+  if (focusDialog.open) closeFocusDialog();
+  else openFocusDialog();
+}
 btnFocus.addEventListener('click', function(){ toggleFocus(); });
+if (focusDialog){
+  focusDialog.addEventListener('close', function(){
+    restoreStageFromDialog();
+    btnFocus.setAttribute('aria-pressed', 'false');
+    setTimeout(fit, 0);
+  });
+}
+if (focusPrev) focusPrev.addEventListener('click', function(){ show(cur - 1); });
+if (focusNext) focusNext.addEventListener('click', function(){ show(cur + 1); });
 
 /* ---- navigation ---- */
 btnPrev.addEventListener('click', function(){ show(cur - 1); });
@@ -2687,7 +2783,10 @@ document.addEventListener('keydown', function(ev){
   else if (ev.key === '2'){ setMode(true); }
   else if (ev.key === 'f' || ev.key === 'F'){ toggleFocus(); }
   else if (ev.key === 'r' || ev.key === 'R'){ refreshPage(); }
-  else if (ev.key === 'Escape'){ anchor = null; clearSelection(); }
+  else if (ev.key === 'Escape'){
+    if (focusDialog && focusDialog.open){ return; }
+    anchor = null; clearSelection();
+  }
 });
 
 /* ---- right-drag marquee ----

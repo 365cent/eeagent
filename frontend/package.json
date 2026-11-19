@@ -10,7 +10,8 @@
     "fonts:install": "powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/install-platform-fonts.ps1",
     "antd": "antd",
     "antd:lint": "antd lint components --format json && antd lint views --format json && antd lint config --format json && antd lint features --format json",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "pw:smoke": "playwright test tests/e2e/trace-smoke.spec.ts"
   },
   "dependencies": {
     "@ant-design/cssinjs": "^1.24.0",
@@ -32,6 +33,7 @@
   },
   "devDependencies": {
     "@ant-design/cli": "^6.6.8",
+    "@playwright/test": "^1.65.1",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^24",
     "@types/react": "^19",

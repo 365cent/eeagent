@@ -10,6 +10,7 @@ from sqlalchemy import (
     Boolean,
     CHAR,
     DateTime,
+    Float,
     ForeignKey,
     Integer,
     LargeBinary,
@@ -32,6 +33,12 @@ class DocumentChunk(Base):
     chunk_id: Mapped[int] = mapped_column(Integer, primary_key=True)
     text: Mapped[str] = mapped_column(Text, nullable=False)
     content_sha256: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    section_path: Mapped[list | None] = mapped_column(JSONB)
+    heading_level: Mapped[int | None] = mapped_column(Integer)
+    ordinal: Mapped[int | None] = mapped_column(Integer)
+    char_start: Mapped[int | None] = mapped_column(Integer)
+    char_end: Mapped[int | None] = mapped_column(Integer)
+    figure_indices: Mapped[list | None] = mapped_column(JSONB)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -44,8 +51,16 @@ class DocumentFigure(Base):
     figure_index: Mapped[int] = mapped_column(Integer, primary_key=True)
     caption: Mapped[str | None] = mapped_column(Text)
     review_status: Mapped[str] = mapped_column(Text, nullable=False, default="ready", server_default="ready")
+    review_reason: Mapped[str | None] = mapped_column(Text)
+    object_key: Mapped[str | None] = mapped_column(Text)
+    mime: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str | None] = mapped_column(Text)
+    page: Mapped[int | None] = mapped_column(Integer)
+    position: Mapped[int | None] = mapped_column(Integer)
+    section_path: Mapped[list | None] = mapped_column(JSONB)
+    occurrence_count: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    confidence: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
 
 class AgentSession(Base):
     __tablename__ = "eea_agent_session"

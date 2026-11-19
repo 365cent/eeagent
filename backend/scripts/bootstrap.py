@@ -333,6 +333,20 @@ def bootstrap_external_postgres() -> None:
     print(f"external PostgreSQL ready at {host}:{port}/{db}")
 
 
+def sync_app_db_env_for_portable() -> None:
+    """Align app/Alembic settings with the portable instance we just started.
+
+    bootstrap does not load backend/.env before picking PG_PORT (defaults to 54329).
+    Alembic loads .env via pydantic-settings; a copied .env.example often has
+    DB_PORT=5432 for macOS/Linux and causes migration connection timeouts on Windows.
+    """
+    os.environ["DB_HOST"] = "127.0.0.1"
+    os.environ["DB_PORT"] = str(PG_PORT)
+    os.environ["DB_USER"] = PG_USER
+    os.environ["DB_PASSWORD"] = PG_PASSWORD
+    os.environ["DB_NAME"] = PG_DB
+
+
 def migrate_and_seed() -> None:
     # sys.executable, not "uv run": the venv may be pip-created and the server
     # may not have uv (env convention: scripts run under whatever interpreter
@@ -353,5 +367,7 @@ if __name__ == "__main__":
         create_db()
     else:
         bootstrap_external_postgres()
+    if sys.platform == "win32":
+        sync_app_db_env_for_portable()
     migrate_and_seed()
     step("\nbootstrap complete. start the API with:  uv run python scripts/dev.py")

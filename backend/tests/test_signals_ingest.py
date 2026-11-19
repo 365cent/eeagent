@@ -5,7 +5,7 @@ REQ-TAG-01/02/03/04/05, sig-local-collect-submit, CONV-CLOSED-VOCAB)."""
 import pytest
 
 from app.services.objectstore import load_body
-from tests.support import SUPPLY_CHAIN_BODY, create_signal
+from tests.support import DEFAULT_SIGNAL, SUPPLY_CHAIN_BODY, create_signal
 
 pytestmark = pytest.mark.anyio
 
@@ -58,6 +58,7 @@ async def test_create_signal_label_forms_normalize_to_codes(client):
         signal_type_code="技术",  # label
         evolution_node_code="定点/验证",  # label
         evidence_status_code="已留存",  # label
+        body_text="Label normalisation evidence",
     )
     assert sig["value_chain_stage_code"] == "creation_supply"
     assert sig["signal_type_code"] == "technology"
@@ -164,6 +165,17 @@ async def test_explicit_evidence_status_is_not_overridden(client):
     assert sig["evidence_status_code"] == "pending_review"
 
 
+async def test_retained_requires_body_text_on_create(client):
+    bodyless = await client.post(
+        "/api/v1/signals",
+        json={**DEFAULT_SIGNAL, "evidence_status_code": "retained"},
+    )
+    assert bodyless.status_code == 422
+    assert "require stored body text" in bodyless.json()["detail"]
+    sig = await create_signal(client, body_text=SUPPLY_CHAIN_BODY, evidence_status_code="retained")
+    assert sig["evidence_status_code"] == "retained"
+
+
 async def test_signal_exposes_all_req_sig_03_fields(client):
     """REQ-SIG-03: title, link, channel, publisher, publish time, stage,
     type, tags, evolution node, evidence status."""
@@ -250,3 +262,75 @@ async def test_correction_restricted_to_existing_categories(client):
     )
     assert r.status_code == 200
     assert r.json()["value_chain_stage_code"] == "delivery_oem"
+
+
+async def test_signal_records_classification_basis(client):
+    sig = await create_signal(client, body_text=SUPPLY_CHAIN_BODY)
+    basis = sig["classification_basis"]
+    assert isinstance(basis, dict)
+    assert basis["baseline_mode"] is True
+    assert set(basis["sources"]) == {"value_chain_stage", "signal_type", "tech_tags"}
+    assert isinstance(basis["tag_candidates"], list)
+
+
+
+async def test_business_skill_rules_override_fallbacks_and_record_basis(
+    client, tmp_path, monkeypatch
+):
+    import json
+
+    pack = {
+        "schema_version": 1,
+        "name": "signal-rule-test",
+        "version": "1.0",
+        "rules": [
+            {
+                "id": "stage-high",
+                "field": "value_chain_stage",
+                "match": {"any": ["eFuse"]},
+                "value": "creation_supply",
+                "priority": 10,
+            },
+            {
+                "id": "stage-low",
+                "field": "value_chain_stage",
+                "match": {"any": ["eFuse"]},
+                "value": "delivery_oem",
+                "priority": 1,
+            },
+            {
+                "id": "type",
+                "field": "signal_type",
+                "match": {"any": ["eFuse"]},
+                "value": "technology",
+                "priority": 5,
+            },
+            {
+                "id": "tags",
+                "field": "tech_tags",
+                "match": {"any": ["eFuse"]},
+                "add": ["eFuse", "智能配电"],
+                "priority": 5,
+            },
+        ],
+    }
+    (tmp_path / "pack.json").write_text(json.dumps(pack, ensure_ascii=False), encoding="utf-8")
+    from app.services.skills import load_skill_registry
+
+    registry = load_skill_registry(tmp_path)
+    monkeypatch.setattr("app.services.skills.load_skill_registry", lambda root=None: registry)
+
+    sig = await create_signal(
+        client,
+        title="eFuse 智能配电方案",
+        url="https://example.com/skill-rule",
+        body_text="器件厂商发布 eFuse 与智能配电控制器",
+        signal_type_code=None,
+    )
+    assert sig["value_chain_stage_code"] == "creation_supply"
+    assert sig["signal_type_code"] == "technology"
+    assert "eFuse" in sig["tags"]
+    basis = sig["classification_basis"]
+    assert basis["sources"]["value_chain_stage"] == "skill"
+    assert basis["sources"]["signal_type"] == "skill"
+    assert basis["conflicts"]

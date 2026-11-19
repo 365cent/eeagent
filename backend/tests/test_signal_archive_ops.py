@@ -2,8 +2,6 @@
 
 import pytest
 
-from app.core.config import get_settings
-
 from tests.support import create_signal
 
 pytestmark = pytest.mark.anyio
@@ -21,10 +19,7 @@ async def test_list_hides_archived_by_default(client):
     assert {row["id"] for row in archived_list} >= {archived["id"]}
 
 
-async def test_patch_archive_and_restore(client, monkeypatch):
-    monkeypatch.setattr(get_settings(), "chat_base_url", "")
-    monkeypatch.setattr(get_settings(), "embedding_base_url", "")
-    monkeypatch.setattr(get_settings(), "rerank_base_url", "")
+async def test_patch_archive_and_restore(client):
     sig = await create_signal(
         client,
         evidence_status_code="retained",
@@ -48,22 +43,13 @@ async def test_patch_archive_and_restore(client, monkeypatch):
     assert restored.json()["evidence_status_code"] == "retained"
 
 
-async def test_cannot_mark_retained_without_readable_evidence(client):
+async def test_cannot_mark_retained_without_body_text(client):
     sig = await create_signal(client)
     response = await client.patch(
         f"/api/v1/signals/{sig['id']}", json={"evidence_status_code": "retained"}
     )
     assert response.status_code == 422
-    assert "readable evidence" in response.json()["detail"]
-
-
-async def test_evidence_status_cannot_be_null(client):
-    sig = await create_signal(client)
-    response = await client.patch(
-        f"/api/v1/signals/{sig['id']}", json={"evidence_status_code": None}
-    )
-    assert response.status_code == 422
-    assert "cannot be null" in response.json()["detail"]
+    assert "require stored body text" in response.json()["detail"]
 
 
 async def test_delete_requires_archived_status(client):

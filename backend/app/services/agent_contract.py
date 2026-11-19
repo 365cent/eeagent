@@ -39,6 +39,7 @@ class AgentCitation(BaseModel):
     signal_id: uuid.UUID | None = None
     document_id: uuid.UUID | None = None
     chunk_id: int | None = None
+    section_path: list[str] | None = None
     figure_index: int | None = None
     review_status: str | None = None
 

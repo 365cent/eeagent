@@ -73,6 +73,7 @@ import type {
   AgentMessageResponse,
   AgentSkillsStatusOut,
   AgentMemoryOut,
+  DocumentChunkOut,
   DocumentFigureOut,
   DocumentKeywordOut,
   SignalsPage,
@@ -522,6 +523,10 @@ export function fetchPanoramaImportBatch(batchId: string) {
   )
 }
 
+export function fetchLatestPanoramaImport() {
+  return eeaFetch<import('@/lib/api/types').PanoramaImportBatchOut | null>('/imports/panorama')
+}
+
 export async function uploadRawDocument(
   file: File,
   options?: { onUploadProgress?: UploadProgressHandler },
@@ -539,6 +544,13 @@ export function fetchDocumentCanonicalMd(documentId: string) {
   return eeaFetchText(`/documents/${encodeURIComponent(documentId)}/canonical.md`, {
     headers: { Accept: 'text/markdown, text/plain, */*' },
   })
+}
+
+export function retryDocumentFigure(documentId: string, figureIndex: number) {
+  return eeaFetch<DocumentFigureOut>(
+    '/documents/' + encodeURIComponent(documentId) + '/figures/' + figureIndex + '/recaption',
+    { method: 'POST' },
+  )
 }
 
 export function reingestDocument(documentId: string) {
@@ -658,6 +670,10 @@ export function fetchDocumentFigures(documentId: string) {
   return eeaFetch<DocumentFigureOut[]>(`/documents/${encodeURIComponent(documentId)}/figures`)
 }
 
+export function fetchDocumentChunks(documentId: string) {
+  return eeaFetch<DocumentChunkOut[]>('/documents/' + encodeURIComponent(documentId) + '/chunks')
+}
+
 export function fetchDocumentKeywords(documentId: string) {
   return eeaFetch<DocumentKeywordOut[]>(`/documents/${encodeURIComponent(documentId)}/keywords`)
 }
@@ -696,8 +712,9 @@ export function fetchAgentSkillsStatus() {
   return eeaFetch<AgentSkillsStatusOut>('/agent/skills/status')
 }
 
-export function listAgentSessions() {
-  return eeaFetch<AgentSessionOut[]>('/agent/sessions')
+export function listAgentSessions(signalId?: string) {
+  const query = signalId ? '?signal_id=' + encodeURIComponent(signalId) : ''
+  return eeaFetch<AgentSessionOut[]>('/agent/sessions' + query)
 }
 
 export function createAgentSession(payload: {

@@ -213,7 +213,12 @@ export function DeductionChainWorkspace({ onNavigate, initialLandingPointId }: {
                           </Button>
                         ) : <Text type="secondary">尚无可用的规范正文对象</Text>}
                         {signal.document.figure_count > 0 ? (
-                          <Button type="link" onClick={() => onNavigate(`singal/${signal.id}`)}>在证据页查看图片</Button>
+                          <Button
+                            type="link"
+                            onClick={() => onNavigate({ view: 'singal', id: signal.id, query: { doc_figure: '1' } })}
+                          >
+                            查看首张图块
+                          </Button>
                         ) : null}
                       </Space>
                     ) : null}

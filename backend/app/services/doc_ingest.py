@@ -39,6 +39,7 @@ from app.platform.http import open_async_http_client
 from app.services.llm_gateway import resolve_vision_model
 from app.services.llm_prompts import VISION_CAPTION_PROMPT as _CAPTION_PROMPT
 from app.services.llm_usage import log_llm_call, usage_from_chat_payload
+from app.services.doc_structure import assign_figure_locations
 
 MAX_FIGURES = 8  # default only; runtime cap comes from settings.max_figures
 MAX_FIGURE_BYTES = 4 * 1024 * 1024
@@ -110,6 +111,10 @@ class Figure:
     data: bytes
     page: int | None = None
     caption: str = ""
+    occurrence_count: int = 1
+    section_path: list[str] | None = None
+    position: int | None = None
+    confidence: float | None = None
 
 
 @dataclass(slots=True)
@@ -231,18 +236,60 @@ def _document_part_order(zf: zipfile.ZipFile, suffix: str) -> tuple[dict[str, in
     return order, slide_of
 
 
-def _zip_figures(data: bytes, suffix: str, prefix: str) -> list[Figure]:
-    """Embedded media in DOCUMENT order (rels), not zip-lexicographic order.
+def _relationship_targets(zf: zipfile.ZipFile, part: str) -> dict[str, str]:
+    folder, name = part.rsplit("/", 1)
+    rels_name = folder + "/_rels/" + name + ".rels"
+    if rels_name not in zf.namelist():
+        return {}
+    try:
+        root = ET.fromstring(zf.read(rels_name))
+    except ET.ParseError:
+        return {}
+    targets: dict[str, str] = {}
+    for rel in root.findall(f"{_RELS_NS}Relationship"):
+        target = rel.get("Target", "")
+        rid = rel.get("Id", "")
+        if rid and target:
+            targets[rid] = target.rsplit("/", 1)[-1]
+    return targets
 
-    Unreferenced media (layout/master/theme chrome) keeps a stable position
-    after all referenced figures, so captions land where the reader sees them.
-    """
+
+_BODY_PART_RE = {
+    ".docx": re.compile(r"^word/(document|header\d*|footer\d*)\.xml$"),
+    ".pptx": re.compile(r"^ppt/(slides|notesSlides)/(slide|notesSlide)\d+\.xml$"),
+}
+
+
+def _media_occurrence_counts(zf: zipfile.ZipFile, suffix: str) -> dict[str, int]:
+    pattern = _BODY_PART_RE.get(suffix)
+    if pattern is None:
+        return {}
+    counts: dict[str, int] = {}
+    for part in zf.namelist():
+        if not pattern.match(part):
+            continue
+        try:
+            root = ET.fromstring(zf.read(part))
+        except ET.ParseError:
+            continue
+        targets = _relationship_targets(zf, part)
+        for element in root.iter():
+            for key, value in element.attrib.items():
+                if key.endswith("}embed") or key.endswith("}link"):
+                    target = targets.get(value)
+                    if target:
+                        counts[target] = counts.get(target, 0) + 1
+    return counts
+
+
+def _zip_figures(data: bytes, suffix: str, prefix: str) -> list[Figure]:
+    """Embedded media in document order; identical bytes share one asset."""
     figures: list[Figure] = []
-    dedupe = suffix == ".pptx"
-    seen_sha256: set[str] = set()
+    by_digest: dict[str, Figure] = {}
     try:
         with zipfile.ZipFile(io.BytesIO(data)) as zf:
             order, slide_of = _document_part_order(zf, suffix)
+            occurrences = _media_occurrence_counts(zf, suffix)
             names = sorted(
                 (n for n in zf.namelist() if n.startswith(prefix) and not n.endswith("/")),
                 key=lambda n: (order.get(Path(n).name, len(order)), _numeric_part_key(n)),
@@ -254,21 +301,22 @@ def _zip_figures(data: bytes, suffix: str, prefix: str) -> list[Figure]:
                 blob = zf.read(name)
                 if not blob or len(blob) > MAX_FIGURE_BYTES:
                     continue
-                if dedupe:
-                    digest = hashlib.sha256(blob).hexdigest()
-                    if digest in seen_sha256:
-                        continue
-                    seen_sha256.add(digest)
                 base = Path(name).name
-                figures.append(
-                    Figure(
-                        index=len(figures) + 1,
-                        source=base,
-                        page=slide_of.get(base),
-                        mime=_EXT_MIME.get(ext, "image/png"),
-                        data=blob,
-                    )
+                digest = hashlib.sha256(blob).hexdigest()
+                existing = by_digest.get(digest)
+                if existing is not None:
+                    existing.occurrence_count += occurrences.get(base, 1)
+                    continue
+                figure = Figure(
+                    index=len(figures) + 1,
+                    source=base,
+                    page=slide_of.get(base),
+                    mime=_EXT_MIME.get(ext, "image/png"),
+                    data=blob,
+                    occurrence_count=occurrences.get(base, 1),
                 )
+                by_digest[digest] = figure
+                figures.append(figure)
     except zipfile.BadZipFile:
         return []
     return figures
@@ -508,6 +556,7 @@ async def ingest_document(
     if not markdown.strip():
         markdown = f"# {filename or 'document'}\n\n（MarkItDown 未抽取到文本）"
     canonical = apply_captions(markdown, figures)
+    assign_figure_locations(canonical, figures)
     return IngestResult(
         canonical_md=canonical,
         markitdown_version=md_version,

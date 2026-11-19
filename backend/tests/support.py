@@ -68,6 +68,8 @@ def sha256_of(text: str) -> str:
 
 
 async def create_signal(client, **overrides) -> dict:
+    if overrides.get("evidence_status_code") == "retained":
+        overrides.setdefault("body_text", "placeholder evidence body")
     payload = {**DEFAULT_SIGNAL, **overrides}
     r = await client.post("/api/v1/signals", json=payload)
     assert r.status_code == 201, r.text

@@ -112,24 +112,62 @@ async def run_agent_turn(
     model = getattr(agent, "model", None)
     requested_model = str(getattr(model, "model_name", None) or "")
     started = time.perf_counter()
+    seen_tools: set[str] = set()
 
     async def handler(ctx, event) -> None:
+        del ctx
         if event_sink is None:
             return
+        part = getattr(event, "part", None)
+        part_tool = getattr(part, "tool_name", None)
+        if isinstance(part_tool, str) and part_tool and part_tool not in seen_tools:
+            seen_tools.add(part_tool)
+            await event_sink("tool.call", {"tool": part_tool})
         delta = getattr(event, "delta", None)
-        if delta:
-            await event_sink("text.delta", {"delta": delta})
-        tool_name = getattr(event, "tool_name", None)
-        if tool_name:
+        tool_name = getattr(delta, "tool_name_delta", None) or getattr(event, "tool_name", None)
+        if isinstance(tool_name, str) and tool_name and tool_name not in seen_tools:
+            seen_tools.add(tool_name)
             await event_sink("tool.call", {"tool": tool_name})
 
     try:
-        result = await agent.run(
-            user_message,
-            deps=deps,
-            message_history=message_history or [],
-            deferred_tool_results=deferred_tool_results,
-            event_stream_handler=handler if event_sink is not None else None,
+        if event_sink is not None:
+            last_answer = ""
+            async with agent.run_stream(
+                user_message,
+                deps=deps,
+                message_history=message_history or [],
+                deferred_tool_results=deferred_tool_results,
+                event_stream_handler=handler,
+            ) as streamed:
+                async for partial in streamed.stream_output(debounce_by=0.05):
+                    answer = getattr(partial, "answer", None)
+                    if (
+                        isinstance(answer, str)
+                        and answer.startswith(last_answer)
+                        and len(answer) > len(last_answer)
+                    ):
+                        await event_sink("text.delta", {"delta": answer[len(last_answer) :]})
+                        last_answer = answer
+                output = await streamed.get_output()
+                messages = streamed.all_messages()
+                final_answer = getattr(output, "answer", None)
+                if isinstance(final_answer, str) and len(final_answer) > len(last_answer):
+                    await event_sink("text.delta", {"delta": final_answer[len(last_answer) :]})
+        else:
+            result = await agent.run(
+                user_message,
+                deps=deps,
+                message_history=message_history or [],
+                deferred_tool_results=deferred_tool_results,
+            )
+            output = result.output
+            messages = result.all_messages()
+            streamed = result
+        usage = usage_from_agent_result(
+            streamed,
+            task="durable_agent",
+            requested_model=requested_model,
+            latency_ms=int((time.perf_counter() - started) * 1000),
         )
     except Exception as exc:
         log_llm_call(
@@ -141,15 +179,8 @@ async def run_agent_turn(
             )
         )
         raise
-    usage = usage_from_agent_result(
-        result,
-        task="durable_agent",
-        requested_model=requested_model,
-        latency_ms=int((time.perf_counter() - started) * 1000),
-    )
     log_llm_call(usage)
 
-    output = result.output
     if isinstance(output, AgentTurn) and event_sink:
         for ref in output.citation_refs:
             citation = deps.ledger.get(ref)
@@ -161,7 +192,7 @@ async def run_agent_turn(
                 "approval.required",
                 {"tool": call.tool_name, "tool_call_id": call.tool_call_id},
             )
-    return output, result.all_messages(), usage.as_dict()
+    return output, messages, usage.as_dict()
 
 
 def deps_for_session(

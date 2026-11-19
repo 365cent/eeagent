@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
@@ -24,8 +25,8 @@ from app.schemas.agent import (
     AgentSessionOut,
     AgentSkillsStatusOut,
 )
-from app.services.skills import baseline_mode, load_skill_packs
-from app.services.agent_events import format_sse, list_events_after
+from app.services.skills import load_skill_registry
+from app.services.agent_events import format_sse, format_sse_payload, list_events_after
 from app.services.agent_patches import apply_confirmed_patch, get_owned_patch, reject_patch
 from app.services.agent_runtime import cancel_run, execute_user_message, get_owned_session
 
@@ -51,6 +52,7 @@ async def create_session(
         id=session.id,
         title=session.title,
         project_key=session.project_key,
+        page_context=session.page_context,
         status=session.status,
         created_at=session.created_at,
         updated_at=session.updated_at,
@@ -62,11 +64,15 @@ async def list_sessions(
     db: AsyncSession = Depends(get_db),
     actor: OperatorIdentity = Depends(get_operator_identity),
     limit: int = Query(50, ge=1, le=200),
+    signal_id: uuid.UUID | None = Query(None),
 ):
+    conditions = [AgentSession.operator_subject == actor.subject]
+    if signal_id is not None:
+        conditions.append(AgentSession.page_context['signal_id'].astext == str(signal_id))
     rows = (
         await db.execute(
             select(AgentSession)
-            .where(AgentSession.operator_subject == actor.subject)
+            .where(*conditions)
             .order_by(AgentSession.updated_at.desc())
             .limit(limit)
         )
@@ -76,6 +82,7 @@ async def list_sessions(
             id=s.id,
             title=s.title,
             project_key=s.project_key,
+            page_context=s.page_context,
             status=s.status,
             created_at=s.created_at,
             updated_at=s.updated_at,
@@ -86,10 +93,15 @@ async def list_sessions(
 
 @router.get("/skills/status", response_model=AgentSkillsStatusOut)
 async def get_agent_skills_status():
-    packs = load_skill_packs()
+    registry = load_skill_registry()
     return AgentSkillsStatusOut(
-        baseline_mode=baseline_mode(),
-        packs=[{"name": p.name, "version": p.version, "checksum": p.checksum} for p in packs],
+        baseline_mode=registry.baseline_mode,
+        packs=[
+            {"name": p.name, "version": p.version, "checksum": p.checksum}
+            for p in registry.packs
+        ],
+        errors=list(registry.errors),
+        rule_count=registry.rule_count,
     )
 
 
@@ -164,6 +176,7 @@ async def get_session(
         id=session.id,
         title=session.title,
         project_key=session.project_key,
+        page_context=session.page_context,
         status=session.status,
         created_at=session.created_at,
         updated_at=session.updated_at,
@@ -185,6 +198,71 @@ async def post_message(
         status=run.status,  # type: ignore[arg-type]
         output=output,
         error=error,
+    )
+
+
+@router.post("/sessions/{session_id}/messages/stream")
+async def stream_message(
+    session_id: uuid.UUID,
+    payload: AgentMessageIn,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_operator_identity),
+):
+    session = await get_owned_session(db, session_id, actor)
+    queue: asyncio.Queue[tuple[str, dict] | None] = asyncio.Queue()
+
+    async def sink(event_type: str, event_payload: dict) -> None:
+        await queue.put((event_type, event_payload))
+
+    async def runner() -> None:
+        try:
+            run, output, error = await execute_user_message(
+                db,
+                session=session,
+                actor=actor,
+                message=payload.message,
+                event_sink=sink,
+            )
+            await queue.put(
+                (
+                    "message.completed",
+                    {
+                        "session_id": str(session.id),
+                        "run_id": str(run.id),
+                        "status": run.status,
+                        "output": output,
+                        "error": error,
+                    },
+                )
+            )
+        except Exception as exc:  # noqa: BLE001 - stream must end with an error event
+            await queue.put(("message.failed", {"error": str(exc)[:500]}))
+        finally:
+            await queue.put(None)
+
+    task = asyncio.create_task(runner())
+
+    async def generator():
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                event_type, event_payload = item
+                yield format_sse_payload(event_type, event_payload)
+        finally:
+            if not task.done():
+                task.cancel()
+                await asyncio.gather(task, return_exceptions=True)
+                await db.rollback()
+
+    return StreamingResponse(
+        generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
     )
 
 

@@ -6,6 +6,9 @@ import {
   fetchAssessments,
   fetchCorrectionAudit,
   fetchDemands,
+  fetchDocumentChunks,
+  fetchDocumentFigures,
+  fetchDocumentKeywords,
   fetchLandingPoints,
   fetchOverview,
   fetchPanorama,
@@ -57,6 +60,33 @@ export function useOverviewStats(enabled = true) {
     queryKey: eeaQueryKeys.overview,
     queryFn: fetchOverview,
     enabled,
+  })
+}
+
+export function useDocumentFigures(documentId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: eeaQueryKeys.documentFigures(documentId ?? 'none'),
+    queryFn: () => fetchDocumentFigures(documentId!),
+    enabled: Boolean(documentId) && enabled,
+    staleTime: 60_000,
+  })
+}
+
+export function useDocumentChunks(documentId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: eeaQueryKeys.documentChunks(documentId ?? 'none'),
+    queryFn: () => fetchDocumentChunks(documentId!),
+    enabled: Boolean(documentId) && enabled,
+    staleTime: 60_000,
+  })
+}
+
+export function useDocumentKeywords(documentId: string | null, enabled = true) {
+  return useQuery({
+    queryKey: eeaQueryKeys.documentKeywords(documentId ?? 'none'),
+    queryFn: () => fetchDocumentKeywords(documentId!),
+    enabled: Boolean(documentId) && enabled,
+    staleTime: 60_000,
   })
 }
 

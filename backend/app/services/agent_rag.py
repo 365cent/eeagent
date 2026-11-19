@@ -7,7 +7,7 @@ import logging
 import uuid
 
 import numpy as np
-from sqlalchemy import select
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -16,6 +16,7 @@ from app.models.models import Document
 from app.services import semantic_api
 from app.services.agent_citations import make_chunk_citation, make_figure_citation
 from app.services.agent_contract import AgentCitation
+from app.services.doc_structure import split_markdown_sections
 from app.services.objectstore import load_body
 
 logger = logging.getLogger(__name__)
@@ -48,8 +49,8 @@ def _chunk_citation(chunk: DocumentChunk, doc: Document) -> AgentCitation:
         chunk_id=chunk.chunk_id,
         title=doc.filename or str(doc.id),
         summary=chunk.text[:400],
+        section_path=chunk.section_path,
     )
-
 
 async def _semantic_search_document_chunks(
     db: AsyncSession, *, keyword: str, limit: int
@@ -103,32 +104,65 @@ async def _semantic_search_document_chunks(
 async def ensure_document_index(db: AsyncSession, document: Document) -> None:
     existing = (
         await db.execute(
-            select(DocumentChunk.chunk_id).where(DocumentChunk.document_id == document.id).limit(1)
+            select(DocumentChunk.section_path)
+            .where(DocumentChunk.document_id == document.id)
+            .limit(1)
         )
     ).first()
-    if existing:
+    if existing is not None and existing.section_path is not None:
         return
     if not document.canonical_md_object_key:
         return
     body = load_body(document.canonical_md_object_key) or ""
-    size = get_settings().agent_rag_chunk_size
-    chunks = _chunk_text(body, size=size)
-    for idx, text in enumerate(chunks, start=1):
+    if existing is not None:
+        await db.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document.id))
+    chunks = split_markdown_sections(
+        body, max_chars=get_settings().agent_rag_chunk_size
+    )
+    for chunk in chunks:
         db.add(
             DocumentChunk(
                 document_id=document.id,
-                chunk_id=idx,
-                text=text,
-                content_sha256=_sha256_text(text),
+                chunk_id=chunk.chunk_id,
+                text=chunk.text,
+                content_sha256=_sha256_text(chunk.text),
+                section_path=chunk.section_path,
+                heading_level=chunk.heading_level,
+                ordinal=chunk.ordinal,
+                char_start=chunk.char_start,
+                char_end=chunk.char_end,
+                figure_indices=chunk.figure_indices,
             )
         )
-    for index in range(1, document.figure_count + 1):
-        db.add(
-            DocumentFigure(
-                document_id=document.id,
-                figure_index=index,
-                caption=None,
-                review_status="ready",
+    figure_rows = (
+        await db.execute(
+            select(DocumentFigure.figure_index)
+            .where(DocumentFigure.document_id == document.id)
+            .limit(1)
+        )
+    ).first()
+    if figure_rows is None:
+        for index in range(1, document.figure_count + 1):
+            db.add(
+                DocumentFigure(
+                    document_id=document.id,
+                    figure_index=index,
+                    caption=None,
+                    review_status="needs_review",
+                    review_reason="旧文档未保存图块位置，请重新解析",
+                    occurrence_count=1,
+                )
+            )
+    else:
+        await db.execute(
+            update(DocumentFigure)
+            .where(
+                DocumentFigure.document_id == document.id,
+                DocumentFigure.object_key.is_(None),
+            )
+            .values(
+                review_status="needs_review",
+                review_reason="旧文档未保存图块位置，请重新解析",
             )
         )
     await db.flush()
