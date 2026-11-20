@@ -4,6 +4,29 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 ## 2026-11-20
 
+### W1 real eFuse chain: stage-by-stage gate run
+
+Two real captured sources carry the chain (no synthetic evidence): 佐思汽研 report via WeChat (`https://mp.weixin.qq.com/s/E6Q06Gjf2U9B23OmPUd09g`) and EDN 电子技术设计 on NIO ET9 (`https://www.ednchina.com/technews/31623.html`). They differ in URL, channel, publisher and tag set, which the cross-validation gate requires.
+
+| Stage | Check | Result |
+| --- | --- | --- |
+| S1 证据 | Both sources retained with readable bodies (39,042 B / 4,188 B); different URL and channel | PASS |
+| S2 标签与主题 | Publishers set from body/site identity; tag sets differ; theme `低压系统智能化` (creation_supply) with 2 signals / 2 sources | PASS |
+| S3 需求 | Rejections: single evidence (422 REQ-DEM-10), conclusion≠通过 (422), four-of-five steps (422), researcher confirm (403 REQ-DEM-13) | PASS |
+| S3 需求 | Admin confirmation of the two-source demand → `confirmed` | PASS |
+| S4 功能 | Incomplete five-step forward trace refused (422 REQ-MAP-02); full forward + matching reverse coverage published | PASS |
+| S5 落脚点 | Landing point on an unpublished function refused (422); `智能保险丝（eFuse）` created in 硬件 | PASS |
+| S6 标准 | Two substantive clauses + operations row with NULL text; panorama `standard_count=2` | PASS |
+| S7 战略 | No deployment-boundary standard → funnel blocked (422); scoring before Tier1 → 422; score 6 → 422 | PASS |
+| S7 战略 | Tier1 reject exits without scores/classification and cannot then be scored (422); pass path scores 4/4/3/4/5 = **20**, classification 产业投资/生态合作, assessment version persisted | PASS |
+| S8 追溯 | `complete=true`, all five stages present, reaches both real signals, carries 20/25 + 2 substantive standards, `basis_freshness=fresh`, overview counts match | PASS |
+
+Run: **30/30 checks passed**. Chain ids: theme `e8018dc6…`, demand `低压系统智能化（W1 真实链）`, function `全节点智能配电（W1 真实链）`, landing point `695dac19-29bf-49b8-a021-00fa56f1318c`.
+
+A second landing point `智能保险丝（eFuse，适配拒绝样例）` is kept on purpose: it records the Tier1-reject path (one standard, funnel at `rejected`, no scores). The two negative demands used to prove S3 were deleted after the run.
+
+Known limits: the two direct-evidence sources are real web/WeChat articles, but they are **not** the DOC-02 case-specific pair (网页 2026-06 / 微信公众号 2026-03); that material is still missing. Publishers were completed from the article body (佐思汽研) and site identity (EDN), which is metadata completion, not invented attribution. Business sign-off by an electrical engineer and Linux evidence remain open, so BE-06…BE-11 stay open.
+
 ### W0 baseline freeze and DOC-03 sync
 
 - DOC-03 synced with the real schema: migration head `0022_demand_review_baseline`, chain `0001`–`0022`, **31 `eea_*` tables + 2 views** (asserted by `test_db_schema.py`). [ARCHITECTURE-LAYERS.md](../docs/ARCHITECTURE-LAYERS.md) gained a migration/data-model section, the third import-linter contract (`domains` must not import `api`), a recent-contract table, and a new acceptance hook row for `alembic heads` + schema inventory. [docs/TODO.md](../docs/TODO.md) records the same head and the 2026-11-20 interface changes.
