@@ -1,6 +1,26 @@
-# Linux intranet stack: PostgreSQL, API, capture worker, Next.js, Nginx.
-# Copy deploy/.env.compose.example to deploy/.env and adjust before production.
+# EEA production stack for a Linux intranet host: PostgreSQL, migrations,
+# API, capture worker, Next.js, Nginx. This is the only supported production
+# path; the systemd units in this folder are legacy bare-metal templates.
+#
+# Everyday use (see deploy/README.md):
+#   bash deploy/build.sh                  # build + start
+#   bash deploy/build.sh 10.215.8.74      # same, behind an HTTP proxy
 name: eea
+
+x-backend: &backend
+  build:
+    context: ..
+    dockerfile: deploy/Dockerfile.backend
+    args:
+      PIP_INDEX_URL: ${PIP_INDEX_URL:-}
+  image: eea-backend:${EEA_VERSION:-latest}
+  env_file: .env
+  environment: &backend-env
+    APP_ENV: ${APP_ENV:-production}
+    OBJECT_DIR: /var/lib/eea/objects
+  volumes:
+    - objectstore:/var/lib/eea/objects
+  restart: unless-stopped
 
 services:
   postgres:
@@ -8,7 +28,7 @@ services:
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:-eea}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-eea}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?set DB_PASSWORD in deploy/.env}
       POSTGRES_DB: ${DB_NAME:-eea}
     volumes:
       - pgdata:/var/lib/postgresql/data
@@ -16,46 +36,31 @@ services:
       test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-eea} -d ${DB_NAME:-eea}"]
       interval: 5s
       timeout: 5s
-      retries: 12
+      retries: 20
 
   migrate:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.backend
-    env_file:
-      - .env
+    <<: *backend
+    restart: "no"
     environment:
+      <<: *backend-env
       DB_HOST: postgres
       DB_PORT: 5432
-      APP_ENV: ${APP_ENV:-production}
-      OBJECT_DIR: /var/lib/eea/objects
-    volumes:
-      - objectstore:/var/lib/eea/objects
     depends_on:
       postgres:
         condition: service_healthy
     command: ["uv", "run", "alembic", "upgrade", "head"]
-    restart: "no"
 
   api:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.backend
-    restart: unless-stopped
-    env_file:
-      - .env
+    <<: *backend
     environment:
+      <<: *backend-env
       DB_HOST: postgres
       DB_PORT: 5432
-      APP_ENV: ${APP_ENV:-production}
-      CAPTURE_SERVER_FETCH_ENABLED: ${CAPTURE_SERVER_FETCH_ENABLED:-false}
+      CAPTURE_SERVER_FETCH_ENABLED: "false"
       EEA_CAPTURE_EMBEDDED: "0"
-      OBJECT_DIR: /var/lib/eea/objects
       CORS_ORIGINS: ${CORS_ORIGINS:-}
       CORS_ORIGIN_REGEX: ${CORS_ORIGIN_REGEX:-}
       TRUSTED_PROXY_IPS: ${TRUSTED_PROXY_IPS:-172.16.0.0/12,10.0.0.0/8,192.168.0.0/16}
-    volumes:
-      - objectstore:/var/lib/eea/objects
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -65,46 +70,32 @@ services:
       test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/healthz || exit 1"]
       interval: 15s
       timeout: 5s
-      retries: 5
-      start_period: 30s
+      retries: 6
+      start_period: 40s
 
   worker:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.backend
-    restart: unless-stopped
-    env_file:
-      - .env
+    <<: *backend
     environment:
+      <<: *backend-env
       DB_HOST: postgres
       DB_PORT: 5432
-      APP_ENV: ${APP_ENV:-production}
-      OBJECT_DIR: /var/lib/eea/objects
-    volumes:
-      - objectstore:/var/lib/eea/objects
     depends_on:
       migrate:
         condition: service_completed_successfully
     command: ["uv", "run", "python", "-m", "app.worker"]
+
   maintenance:
-    build:
-      context: ..
-      dockerfile: deploy/Dockerfile.backend
-    env_file:
-      - .env
+    <<: *backend
     environment:
+      <<: *backend-env
       DB_HOST: postgres
       DB_PORT: 5432
-      APP_ENV: ${APP_ENV:-production}
-      OBJECT_DIR: /var/lib/eea/objects
-    volumes:
-      - objectstore:/var/lib/eea/objects
+    profiles: ["ops"]
+    restart: "no"
     depends_on:
       migrate:
         condition: service_completed_successfully
     command: ["uv", "run", "python", "-m", "app.services.orphan_maintenance"]
-    profiles: ["ops"]
-    restart: "no"
 
   web:
     build:
@@ -112,9 +103,19 @@ services:
       dockerfile: deploy/Dockerfile.frontend
       args:
         NEXT_PUBLIC_EEA_API_BASE: /api/v1
+    image: eea-web:${EEA_VERSION:-latest}
     restart: unless-stopped
     expose:
       - "3000"
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - >-
+          node -e 'fetch("http://127.0.0.1:3000/").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))'
+      interval: 15s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
 
   nginx:
     image: nginx:1.27-alpine
@@ -127,7 +128,7 @@ services:
       api:
         condition: service_healthy
       web:
-        condition: service_started
+        condition: service_healthy
 
 volumes:
   pgdata:

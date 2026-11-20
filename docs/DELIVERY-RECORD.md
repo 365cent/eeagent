@@ -4,7 +4,7 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 ## 2026-11-20
 
-### W4 (offline part): OPS-02 bundle scripts and artifacts, no Linux host
+### W4 attempt 1 (superseded): offline bundle scripts, no Linux host
 
 Scope: everything OPS-02 can deliver without a Linux host. The install-and-run gate on a clean air-gapped machine stays open.
 
@@ -26,6 +26,35 @@ Real defect found and fixed while building the bundle:
 Checks: backend `uv run pytest -q` (below), `test_offline_bundle_check.py` 5 passed, `test_document_ingest.py` 24 passed, frontend `pnpm build` with standalone succeeded.
 
 Still open for OPS-02: run `build-offline-bundle.sh` on a connected Linux/CI machine, then `verify-bundle.sh` + `install-offline.sh` on the air-gapped target (empty DB, migrations, service start, PDF with CJK font).
+
+### W4: production deploy is Docker Compose, one script
+
+Decision: production runs on Docker Compose only. The offline site-packages bundle was dropped after it proved worse for a zero-knowledge maintainer: a multi-GB Linux dependency tree that could not be built on this host (~20 KB/s), host-specific CJK fonts, and five extra scripts to keep in sync.
+
+What now exists in `deploy/`:
+
+| File | Purpose |
+| --- | --- |
+| `build.sh` | The one command: optional proxy host, creates `.env` with a random `DB_PASSWORD` on first run, builds, starts, waits for health, prints next steps; a failed start tails migrate/api/web logs |
+| `migrate.sh` / `backup.sh` / `restore.sh` | Deliberate migration re-run, pg_dump + object-store tarball with checksums, full restore with services stopped |
+| `docker-compose.yml` | postgres, one-shot migrate, api, worker, web, nginx; `maintenance` behind the `ops` profile; healthchecks on postgres/api/web; migrate gates api/worker; a shared backend anchor so api/worker/migrate/maintenance cannot drift |
+| `Dockerfile.backend` | accepts `PIP_INDEX_URL` for an intranet mirror |
+| `Dockerfile.frontend` | Next `standalone` build, runs `node server.js` |
+| `.env.example` | documented settings only |
+| `README.md` | three-step first deploy, proxy rules, keep-it-running table, TLS/identity note, five common failures |
+
+Removed: `deploy/scripts/` (offline bundle build/install/verify and the old compose wrappers) and the five systemd unit/timer templates. Bare metal is no longer a supported production path; history keeps them.
+
+Checks run here (this host has no Docker daemon):
+
+- `bash -n` passes on build/migrate/backup/restore.
+- `build.sh` driven end to end against a `docker` shim: a plain run issues `up -d --build --wait`; `10.215.8.74` normalizes to `http://10.215.8.74:1000`; an explicit `http://10.1.2.3:3128` is kept as-is; `--no-cache` becomes `build --no-cache --pull` + `up --no-build`; `.env` is generated with a random password only when missing.
+- `docker-compose.yml` parses and resolves the anchor: `api` inherits `APP_ENV`/`OBJECT_DIR`; `web` healthcheck runs `node -e fetch(...)`; migrate/api/worker/maintenance all point at `postgres:5432`.
+- Backend suite passes with the narrowed dependency set (below).
+
+Not verified (needs the Linux host): real `docker compose up`, image build behind a proxy, empty-DB migration on a fresh host, nginx same-origin routing, backup/restore drill, 10k performance.
+
+Dependency change carried over from the bundle work: `markitdown[all]` pulled Azure Document Intelligence/content-understanding SDKs and a much larger tree. Now `markitdown` plus explicit `mammoth` (docx), `pdfminer-six` (pdf), `lxml` (html) and `pandas` (xlsx). `tests/test_document_ingest.py` (24 tests) covers docx/pptx/xlsx/pdf/figure extraction; the first attempt without pandas failed the xlsx case, which is why it is explicit.
 
 ### W3 queue captures: 10 web + 5 WeChat, honest failures
 

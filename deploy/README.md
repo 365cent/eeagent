@@ -1,133 +1,71 @@
-# Linux intranet — Docker Compose (primary)
+# EEA 生产部署（Docker Compose）
 
-Production on Linux uses **Docker Compose** under this directory: PostgreSQL, Alembic migrate job, API, capture worker, Next.js, and Nginx on one host. Systemd unit files (`eea-*.service`) remain optional bare-metal templates; they are not the default install path.
+唯一支持的生产方式：一台 Linux 内网主机，Docker Compose 起全部服务。无需 Python/Node 环境，无需离线依赖包。
 
-## Quick start (intranet host)
-
-1. Install Docker Engine and Docker Compose v2.
-2. Copy secrets and ports:
-
-   ```bash
-   cd deploy
-   cp .env.compose.example .env
-   # Edit DB_PASSWORD, optional CHAT_*/EMBEDDING_*/RERANK_* gateways, EEA_HTTP_PORT
-   ```
-
-3. Build and start:
-
-   ```bash
-   ./scripts/compose-up.sh
-   ```
-
-4. Verify:
-
-   ```bash
-   curl -sS "http://127.0.0.1:${EEA_HTTP_PORT:-8080}/readyz" | jq .
-   curl -sS "http://127.0.0.1:${EEA_HTTP_PORT:-8080}/healthz"
-   ```
-
-Browser entry: `http://<host>:${EEA_HTTP_PORT:-8080}/` (same-origin `/api/v1`).
-
-## Compose layout
-
-| Service   | Role |
-|-----------|------|
-| `postgres` | PostgreSQL 16 persistent volume `pgdata` |
-| `migrate`  | One-shot `alembic upgrade head` before API/worker |
-| `api`      | FastAPI on `:8000` (not published; Nginx only) |
-| `worker`   | `python -m app.worker` (durable capture jobs) |
-| `web`      | Next.js production server |
-| `nginx`    | Same-origin `/api/` + UI, upload 120m, SSE `proxy_buffering off` |
-
-Shared volume `objectstore` → `/var/lib/eea/objects` in API and worker.
-
-`EEA_CAPTURE_EMBEDDED=0` so only the worker consumes the job queue (matches systemd production split).
-
-## Configuration
-
-All runtime settings come from `deploy/.env` (see `.env.compose.example`). Do not commit `deploy/.env`.
-
-Minimum production:
-
-- `APP_ENV=production`
-- `CAPTURE_SERVER_FETCH_ENABLED=false`
-- Strong `DB_PASSWORD`
-- `TRUSTED_PROXY_IPS` narrowed to your authenticating reverse proxy when TLS terminates upstream
-
-Optional model gateways: `CHAT_*`, `EMBEDDING_*`, `RERANK_*` — when unset, `/readyz` reports `semantic_gateway: degraded` but storage/DB remain `ready`.
-
-## TLS and identity (OPS-03)
-
-The bundled [`nginx/eea-intranet.conf`](nginx/eea-intranet.conf) listens on port 80 inside the container. Terminate TLS on an outer proxy or extend the Nginx config with certificates under `/etc/nginx/certs/`. The config clears `X-EEA-Authenticated-User` / `X-EEA-Authenticated-Role` from clients; only a trusted edge proxy may set them after authentication.
-
-## Operations
-
-- Re-run migrations after upgrade: `./scripts/compose-migrate.sh`
-- Backup DB + objects: `./scripts/backup-eea.sh [output-dir]`
-- Restore DB dump: `./scripts/restore-eea.sh ./backups/eea-YYYYMMDD.dump`
-
-Object files are in the `eea_objectstore` Docker volume; restore requires extracting the objects tarball onto that volume during a maintenance window.
-
-## Systemd alternative
-
-For hosts that forbid containers, use `eea-api.service`, `eea-web.service`, and `eea-worker.service` with the paths described in the previous README revision. Build frontend with `NEXT_PUBLIC_EEA_API_BASE=/api/v1`, run Alembic once per release, and point Nginx at loopback `127.0.0.1:8000` / `:3000`.
-
-## Offline bundle (OPS-02)
-
-One host, no network: build the bundle on a connected machine, carry it in, install it.
-
-```bash
-# connected machine (Linux with python3.12, Node/pnpm, fonts-noto-cjk)
-deploy/scripts/build-offline-bundle.sh --version v0.1.0 --out dist
-
-# intranet host
-sudo deploy/scripts/verify-bundle.sh /media/usb/eea-offline-v0.1.0
-sudo deploy/scripts/install-offline.sh /media/usb/eea-offline-v0.1.0 --version v0.1.0
-```
-
-The bundle contains:
-
-| Path | Contents |
+| 容器 | 作用 |
 | --- | --- |
-| `backend/wheels` + `requirements.txt` | Linux `cp312` wheelhouse, pinned by `uv export --frozen` |
-| `backend/app`, `migrations`, `alembic.ini` | service code and migrations |
-| `web/` | Next **standalone** server plus `.next/static` and `public` (Next does not trace static assets) |
-| `runtime/fonts` | Noto CJK `.ttc` for ReportLab PDFs |
-| `deploy/` | systemd units, nginx config |
-| `capture-*-windows-amd64.zip` | Windows client package when built |
-| `SHA256SUMS`, `MANIFEST.txt` | integrity and build metadata |
+| postgres | 数据库（卷 `pgdata`） |
+| migrate | 一次性：`alembic upgrade head`，每次启动自动执行 |
+| api | FastAPI，仅内网监听 |
+| worker | 采集任务后台处理（与 api 同一镜像） |
+| maintenance | 孤儿对象清理，按需 `--profile ops` 运行 |
+| web | Next.js（standalone），仅内网监听 |
+| nginx | 唯一对外入口：页面与 `/api` 同源（卷 `objectstore` 存原始证据） |
 
-`install-offline.sh` creates the venv with `PIP_NO_INDEX=1 --find-links backend/wheels`, runs `alembic upgrade head` with the installed env file, then enables `eea-api`, `eea-web`, `eea-worker` and `eea-maintenance.timer`. It writes `/etc/eea/eea-api.env` with placeholders on first install and refuses to overwrite an existing file.
-
-`verify-bundle.sh` delegates to `check_offline_bundle.py`, which verifies the manifest, every checksum, the layout, wheelhouse coverage of every pinned requirement, and that a CJK font ships. It runs from the build script too, so an incomplete bundle fails before it is carried anywhere.
-
-The Docker path stays available: `deploy/scripts/compose-up.sh` builds images with the same lockfiles; the frontend image now runs `node server.js` from the standalone output.
-
-## Maintenance
-
-Resolved object-store orphans are pruned by `python -m app.services.orphan_maintenance`. The command only removes resolved or missing blobs; it does not prune capture jobs or signals.
-
-Compose installs run it explicitly:
+## 首次部署（三步）
 
 ```bash
-cd deploy
-docker compose --profile ops run --rm maintenance
+git clone <repo> eea && cd eea
+
+# 1）构建并启动；内网需要代理出网时把代理地址放第一个参数
+bash deploy/build.sh 10.215.8.74
+
+# 没有代理时：
+bash deploy/build.sh
 ```
 
-Bare-metal installs use the included timer:
+脚本会：缺 `deploy/.env` 时从 `.env.example` 生成并写入随机 `DB_PASSWORD` → 构建镜像 → 迁移 → 启动 → 等待健康检查。
 
-```bash
-install -m 0644 deploy/eea-maintenance.service /etc/systemd/system/
-install -m 0644 deploy/eea-maintenance.timer /etc/systemd/system/
-systemctl daemon-reload
-systemctl enable --now eea-maintenance.timer
-```
+打开 `http://<主机IP>:8080/` 即用；`http://<主机IP>:8080/api/docs` 是接口文档。
 
-Check `journalctl -u eea-maintenance.service` after the first run.
+## 代理说明
 
+- 代理只在**构建**阶段使用，运行中的容器不带 `HTTP_PROXY`。
+- Docker 守护进程本身也要能访问 `docker.io`（主机级 systemd 代理），否则拉基础镜像会失败。
+- 默认代理端口 1000，可用 `DEFAULT_PROXY_PORT` 覆盖；pip 默认清华镜像，可用 `PIP_INDEX_URL` 覆盖。
 
-## Limits (honest)
+## 日常维护（照着敲）
 
-- Compose stack is implemented in-repo; **Linux acceptance on customer hardware** (TLS, identity, backup restore) remains OPS-06.
-- No synthetic eFuse seed in production images; vocabulary-only migrations apply.
-- macOS `docker compose build` validates images; Windows client and browser checks are separate.
+| 要做的事 | 命令 |
+| --- | --- |
+| 看状态 | `docker compose -f deploy/docker-compose.yml ps` |
+| 看日志 | `docker compose -f deploy/docker-compose.yml logs -f api worker web` |
+| 改代码后更新 | `bash deploy/build.sh`（加 `--no-cache` 强制全量重建） |
+| 手动迁移 | `bash deploy/migrate.sh` |
+| 备份 | `bash deploy/backup.sh` → `deploy/backups/eea-<时间>.{dump,tar.gz,manifest.txt}` |
+| 恢复 | `bash deploy/restore.sh <备份时间戳>` |
+| 清理孤立对象 | `docker compose -f deploy/docker-compose.yml --profile ops run --rm maintenance` |
+| 回退版本 | `EEA_VERSION=<旧版本> bash deploy/build.sh`（镜像按 `EEA_VERSION` 打标签） |
+
+## 配置
+
+所有配置在 `deploy/.env`（不要提交）：数据库口令、对外端口 `EEA_HTTP_PORT`、`TRUSTED_PROXY_IPS`（只有这些地址可以带身份头）、`CORS_*`、模型网关 `CHAT_*`/`EMBEDDING_*`/`RERANK_*`。生产默认关闭服务端公网抓取（`CAPTURE_SERVER_FETCH_ENABLED=false`），网页由用户侧 EEA Capture 客户端采集后上传。
+
+## TLS 与身份
+
+Nginx 已剥离客户端自带的身份头；TLS 与可信身份由更外层的企业代理终止，并把 `TRUSTED_PROXY_IPS` 设为该代理地址。证书挂载点见 `nginx/eea-intranet.conf` 注释。未接身份代理前，审计写入只能是开发身份，不能作为生产验收。
+
+## 常见故障
+
+| 现象 | 处理 |
+| --- | --- |
+| 构建拉不到基础镜像 / pip 超时 | 确认主机级代理，然后 `bash deploy/build.sh <proxy>` |
+| `api` 反复重启 | `docker compose logs api`；多为 `.env` 里 `DB_PASSWORD` 与已有卷不一致 |
+| 迁移失败 | 先备份，再 `bash deploy/migrate.sh` 看完整报错；不要手改已发布迁移 |
+| 页面 502 | `web` 未就绪：`docker compose logs web`，或 `docker compose up -d --wait` |
+| 端口冲突 | 改 `.env` 的 `EEA_HTTP_PORT` 后重跑 `bash deploy/build.sh` |
+
+## 说明
+
+- 旧版 `deploy/scripts/` 离线包与 systemd 单元已移除；生产只用 Compose。历史仍可在 git 中找到。
+- 开发机 macOS/Windows 上的构建结果不等于 Linux 主机验收；OPS-06 的空库安装、备份恢复、断网与 10k 性能仍需在目标主机执行。

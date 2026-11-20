@@ -16,7 +16,7 @@
 
 ## OPS-02 可重现离线交付
 
-- 2026-11-20 离线制品切片（无 Linux 主机）：新增 `build-offline-bundle.sh`（按 `uv export --frozen` 生成 Linux cp312 站点包 + Next standalone + CJK 字体 + systemd/nginx 模板 + SHA256SUMS/MANIFEST）、`install-offline.sh`（无网络、无编译器：拷贝 → 写 env → `python3 -m alembic upgrade head` → 启服务）、`check_offline_bundle.py` 与 `verify-bundle.sh`（清单/哈希/布局/依赖覆盖/字体）。前端启用 `output: 'standalone'`，镜像改为 `node server.js`。主机到位后仍需断网实装验证。
+- 2026-11-20 生产方式定为 Docker Compose：新增单一入口 `deploy/build.sh`（可选代理、自动生成 .env、`up -d --build --wait`）、`migrate.sh` / `backup.sh` / `restore.sh`；compose 增加 healthcheck、migrate 一次性服务、maintenance 的 ops profile 与 PIP_INDEX_URL 构建参数；Dockerfile 后端镜像按 `PIP_INDEX_URL` 走内网镜像源。离线站点包与 systemd 单元已移除（git 历史保留）。主机到位后仍需断网构建、空库迁移、备份恢复与 10k 性能实装验证。
 
 - [ ] P0 · 未开始 · 依赖 OPS-01、BE-16、FE-12 的构建结果（可逐次集成）。
 - 来源：WBS 1.6.1/1.6.4。
@@ -40,7 +40,7 @@
 
 ## OPS-04 服务、任务与可观测性
 
-- [ ] P0 · 部分实现（未在 Linux 验证）· 本目录已有 `eea-api.service` 与 `eea-web.service`；其余依赖 OPS-01/02、BE-01/03/12/14。
+- [ ] P0 · 部分实现（未在 Linux 验证）· Compose 已含 api/worker/web/nginx 的 restart 与 healthcheck、migrate 一次性服务；systemd 单元已移除，生产仅用 Compose。其余依赖 OPS-01/02、BE-01/03/12/14。
 - 来源：WBS 1.6/1.7；持久证据、人工审计和会话要求。
 - API/Next/worker systemd 模板首版已交付，证据见[交付记录](../docs/DELIVERY-RECORD.md#ops-04--service-unit-templates)；路径、权限、生命周期及代理行为仍须按实际 Linux 主机验证。
 - [ ] 在目标 Linux 验证 API/Next/worker 服务启动、停止、重启、健康路由与反向代理。

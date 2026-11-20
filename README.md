@@ -2,7 +2,7 @@
 
 Foresight / signal intelligence: **FastAPI** backend, **Next.js** UI, **Windows** capture client for public-web ingestion.
 
-**Production (Linux intranet):** [deploy/README.md](deploy/README.md) — **Docker Compose** (`deploy/docker-compose.yml`); not the portable-Postgres dev flow below.
+**Production (Linux intranet):** [deploy/README.md](deploy/README.md) — one command: `bash deploy/build.sh [proxy-host]` (**Docker Compose**); not the portable-Postgres dev flow below.
 
 ## Setup
 
