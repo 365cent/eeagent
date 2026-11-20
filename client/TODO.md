@@ -10,6 +10,8 @@
 
 ## CC-01 浏览器采集与来源
 
+- 2026-11-20 W3：队列采集 10 篇网页 + 5 篇微信标题正文准确；新增拒绝 JSON 错误体与服务错误页（<1200 字符）判定，两条真实用例；知乎拦截体、samr Error 页不再入库。
+
 - [ ] P0 · 部分实现 · 可独立开展；验收依赖 DOC-02 真实材料。
 - 来源：Word §2.1、图2-1-1/2-1-2、表A；REQ-SIG-01/02/07/11；WBS 1.3.2。
 - 入口：[engine.go](internal/capture/engine.go)、[archive.go](internal/archive/archive.go)、[cdp/](internal/cdp/)。
@@ -22,6 +24,8 @@
 - 验收：静态/延迟渲染/微信验证/无正文/崩溃/取消/无来源 HTML 均有结果；原 URL 与正文一致。
 
 ## CC-02 统一 API 与任务恢复
+
+- 2026-11-20 W3：单任务超时（`EEA_CAPTURE_JOB_TIMEOUT`，默认 3m）修复「一条挂起阻塞整队列」；超时记为失败不无限重排；`--drain-server` 现打印 `server drain: N ok, M failed`；客户端被杀后 `client-release` 归还任务、重启继续。
 
 - [ ] P0 · 部分实现 · 依赖 BE-01/02、OPS-03。
 - 来源：REQ-SIG-01/07/10/11、会议统一采集入口；WBS 1.3.2、1.6.1。

@@ -154,10 +154,13 @@ func runUpload(args []string, out io.Writer) int {
 		}
 	}
 	q.Start()
+	var drainOK, drainFail int
 	if *drainServer {
 		ctx := context.Background()
 		for round := 0; round < 500; round++ {
 			okN, failN := importdrain.DrainAwaitingJobs(ctx, out, api, engineImpl, rt.PublicHTTP, *channel)
+			drainOK += okN
+			drainFail += failN
 			if okN == 0 && failN == 0 {
 				break
 			}
@@ -209,6 +212,9 @@ func runUpload(args []string, out io.Writer) int {
 			failed++
 			fmt.Fprintf(out, "FAIL  %s  %s\n", target, j.Err)
 		}
+	}
+	if *drainServer {
+		fmt.Fprintf(out, "server drain: %d ok, %d failed\n", drainOK, drainFail)
 	}
 	fmt.Fprintf(out, "%d ok, %d failed\n", len(jobs)-failed, failed)
 	if failed > 0 {

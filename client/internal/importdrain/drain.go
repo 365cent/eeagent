@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"path"
 	"strings"
 	"time"
@@ -15,6 +16,20 @@ import (
 )
 
 const WorkerID = "capture-client"
+
+// jobCaptureTimeout bounds one page capture so a single hanging site cannot
+// stall the rest of the server queue. Timeouts are recorded as failures
+// (not re-queued) to avoid an endless retry loop on a page that never loads.
+// EEA_CAPTURE_JOB_TIMEOUT overrides the per-job cap (Go duration, e.g. 8m).
+var jobCaptureTimeout = 3 * time.Minute
+
+func init() {
+	if raw := strings.TrimSpace(os.Getenv("EEA_CAPTURE_JOB_TIMEOUT")); raw != "" {
+		if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
+			jobCaptureTimeout = parsed
+		}
+	}
+}
 
 // API is the server-job capability needed by the import drainer.
 type API interface {
@@ -111,8 +126,11 @@ func drainOne(
 		contentType = "text/html; charset=utf-8"
 		payload     []byte
 	)
+	jobCtx, cancelJob := context.WithTimeout(ctx, jobCaptureTimeout)
+	defer cancelJob()
+
 	if platform.IsPDFImportJob(rawURL, "") {
-		payload, err = downloadURL(ctx, rawURL, api.MaxUploadBytes(), publicHTTP)
+		payload, err = downloadURL(jobCtx, rawURL, api.MaxUploadBytes(), publicHTTP)
 		if err != nil {
 			fmt.Fprintf(out, "FAIL  pdf %s: %v\n", rawURL, err)
 			return err
@@ -124,7 +142,10 @@ func drainOne(
 		contentType = "application/pdf"
 	} else {
 		var archive *capture.Archive
-		archive, err = engine.Capture(ctx, rawURL)
+		archive, err = engine.Capture(jobCtx, rawURL)
+		if err != nil && errors.Is(err, context.DeadlineExceeded) && ctx.Err() == nil {
+			err = fmt.Errorf("capture did not finish within %s", jobCaptureTimeout)
+		}
 		if err != nil {
 			fmt.Fprintf(out, "FAIL  capture %s: %v\n", rawURL, err)
 			return err

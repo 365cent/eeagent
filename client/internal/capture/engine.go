@@ -411,8 +411,10 @@ const stateExpr = `(() => {
   // with a challenge title is a challenge even when hasArticle is true.
   const challengeText = !hasArticle && challengeWords.test(text) ||
     (challengeWords.test(title) && text.length < 800);
-  // A login wall or blocked page keeps the URL as its title.
-  const shell = (title === "" || title === href) && text.length < 800;
+  // A login wall or blocked page keeps the URL as its title; API error pages
+  // answer with a JSON body instead of an article.
+  const errText = /(An error occurred|page you are looking for is currently unavailable|Internal Server Error|Access Denied|Bad Gateway)/i.test(text) && text.length < 1200;
+  const shell = title === "" || title === href || errText || text.trimStart().startsWith(String.fromCharCode(123,34,101,114,114,111,114,34));
   const errorPage = location.protocol === "chrome-error:" ||
     /chromewebdata/i.test(href) ||
     !!document.querySelector("#main-message, .interstitial-wrapper, .error-code, .neterror");
@@ -499,6 +501,14 @@ func (b *Browser) waitForContent(ctx context.Context, sess *cdp.Session) error {
 					interactiveWait, state.URL,
 				)
 			}
+		case state.Shell:
+			stable = 0
+			if time.Now().After(readyDeadline) {
+				return fmt.Errorf(
+					"page has no readable title or returned an error payload (login wall or empty shell): %s",
+					state.URL,
+				)
+			}
 		case state.Ready == "complete" && state.TextLen >= minText:
 			if state.TextLen == lastLen {
 				stable++
@@ -508,14 +518,6 @@ func (b *Browser) waitForContent(ctx context.Context, sess *cdp.Session) error {
 			}
 			if stable >= 2 {
 				return nil
-			}
-		case state.Shell:
-			stable = 0
-			if time.Now().After(readyDeadline) {
-				return fmt.Errorf(
-					"page has no readable title (login wall or empty shell): %s",
-					state.URL,
-				)
 			}
 		default:
 			stable = 0

@@ -4,6 +4,33 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 ## 2026-11-20
 
+### W3 queue captures: 10 web + 5 WeChat, honest failures
+
+All captures went through the durable queue (`POST /api/v1/imports/capture-urls` → `awaiting_client` → Windows client `capture upload --drain-server` → server worker). No server-side public fetching.
+
+| Gate | Result |
+| --- | --- |
+| Web sources with accurate title + readable body | **10 / 10** (3,628–32,883 chars) |
+| WeChat sources with accurate title + readable body | **5 / 5** (483–65,337 chars) |
+| Honest failures (no signal created) | 27+ jobs: HTTP 403 (nvidia CN? no — sciopen 403), Cloudflare/UNECE challenges, `chrome-error`, SingleFile errors |
+| Duplicate submissions reuse the same batch | PASS (same `sha256` → same batch) |
+| Queue survives client kill and restart | PASS (killed client, `POST /capture/jobs/{id}/client-release`, next run claimed the remaining jobs) |
+| One hanging page no longer blocks the queue | PASS (see fix 1) |
+
+Web set: CCC Digital Key 3.0, book118 固态储能专利文档, eet-china 60GHz 舱内监控, sohu 60GHz, UML TSN, UML AUTOSAR 软件架构, UML AUTOSAR SecOC, 百家号 从单体到芯粒, 百家号 MIPI A-PHY v2.0, zsc L2/L4 章节。微信：EEA 总结报告、技术与标准化、座舱团体标准、AutoE/E 2025、UWB 数字钥匙。
+
+Three real defects found and fixed this wave:
+
+1. **A single hanging page stalled the whole queue.** `importdrain` passed the batch context to `engine.Capture`, so one 9-minute page blocked every remaining job. Added a per-job timeout (`EEA_CAPTURE_JOB_TIMEOUT`, default 3m); a timeout is recorded as a failure instead of being re-queued forever. Test: `TestDrainTimesOutOneHangingJobAndContinues`.
+2. **JSON error payloads became evidence.** A blocked Zhihu page returned `{"error":{...}}` with the URL as title; it was archived as “retained”. The page-state probe now treats a JSON error body and server error pages (“An error occurred”, “page you are looking for is currently unavailable”, 404/5xx, Access Denied) under 1,200 chars as unreadable shells, checked before the ready branch. Tests: `TestCaptureRejectsJSONErrorPayload`, `TestCaptureRejectsServerErrorPage`.
+3. **`--drain-server` printed `0 ok, 0 failed`.** The summary only counted the local queue, so a run that captured 12 pages looked like a no-op. It now also prints `server drain: N ok, M failed`.
+
+Also removed two false-positive signals (`samr` “Error” pages) that the previous detection let through; their jobs remain failed with a readable reason.
+
+Checks: `go test -short ./...` all packages pass, `go vet ./internal/...`, `gofmt -l internal cmd` clean; backend suite unchanged (run below). Real-browser tests for the three rejection paths pass on Edge 157.
+
+Still open: nvidia.cn blog page never finishes within 9m (needs a visible browser / longer budget), eefocus redirects to a captcha, cnblogs trips a SingleFile JS bug, `std.samr.gov.cn` now returns an error page. WeChat paywalled articles and the 10-page clinical acceptance on a clean business machine remain DOC-02/DOC-05 items.
+
 ### W2 document blocks, agent and report gates
 
 **B. 文档图块（真实 eFuse Word，经 API 上传）**

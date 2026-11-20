@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 
 	"eea/capture/internal/capture"
 	"eea/capture/internal/platform"
@@ -73,6 +74,44 @@ func awaitingJob(id, url string) platform.CaptureJobAwaiting {
 	return platform.CaptureJobAwaiting{
 		CaptureJob: platform.CaptureJob{ID: id, Status: "awaiting_client"},
 		SourceURL:  url,
+	}
+}
+
+type hangingEngine struct {
+	calls int
+}
+
+func (e *hangingEngine) Capture(ctx context.Context, url string) (*capture.Archive, error) {
+	e.calls++
+	if e.calls == 1 {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
+	return &capture.Archive{URL: url, Title: "B", HTML: []byte("<html>b</html>")}, nil
+}
+
+func TestDrainTimesOutOneHangingJobAndContinues(t *testing.T) {
+	previous := jobCaptureTimeout
+	jobCaptureTimeout = 50 * time.Millisecond
+	defer func() { jobCaptureTimeout = previous }()
+
+	api := &fakeAPI{jobs: []platform.CaptureJobAwaiting{
+		awaitingJob("job-hang", "https://example.com/hang"),
+		awaitingJob("job-ok", "https://example.com/b"),
+	}}
+	engine := &hangingEngine{}
+	ok, failed := DrainAwaitingJobs(context.Background(), io.Discard, api, engine, nil, "")
+	if ok != 1 || failed != 1 {
+		t.Fatalf("ok=%d failed=%d", ok, failed)
+	}
+	if len(api.failed) != 1 || api.failed[0] != "job-hang" {
+		t.Fatalf("hanging job must be recorded as failed, got %v", api.failed)
+	}
+	if len(api.released) != 0 {
+		t.Fatalf("timeout must not be re-queued forever, released=%v", api.released)
+	}
+	if len(api.submitted) != 1 || api.submitted[0].jobID != "job-ok" {
+		t.Fatalf("second job must still upload, got %v", api.submitted)
 	}
 }
 
