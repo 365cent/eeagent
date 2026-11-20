@@ -2,6 +2,8 @@ const apiOrigin = (process.env.EEA_API_ORIGIN ?? 'http://127.0.0.1:8000').replac
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  // OPS-02: ship a self-contained server bundle so the offline install needs no node_modules.
+  output: 'standalone',
   // LAN access: the platform is opened at http://10.215.8.74:3000.
   allowedDevOrigins: ['10.215.8.74', '192.168.184.1', 'localhost', '127.0.0.1'],
   poweredByHeader: false,

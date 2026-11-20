@@ -16,6 +16,8 @@
 
 ## OPS-02 可重现离线交付
 
+- 2026-11-20 离线制品切片（无 Linux 主机）：新增 `build-offline-bundle.sh`（按 `uv export --frozen` 生成 Linux cp312 站点包 + Next standalone + CJK 字体 + systemd/nginx 模板 + SHA256SUMS/MANIFEST）、`install-offline.sh`（无网络、无编译器：拷贝 → 写 env → `python3 -m alembic upgrade head` → 启服务）、`check_offline_bundle.py` 与 `verify-bundle.sh`（清单/哈希/布局/依赖覆盖/字体）。前端启用 `output: 'standalone'`，镜像改为 `node server.js`。主机到位后仍需断网实装验证。
+
 - [ ] P0 · 未开始 · 依赖 OPS-01、BE-16、FE-12 的构建结果（可逐次集成）。
 - 来源：WBS 1.6.1/1.6.4。
 - 固定 Python 依赖及 Linux 对应 wheel、Node/pnpm 与 lockfile、Go Windows 工具链和第三方资源；不得把 macOS/Windows wheel 混作 Linux 包。

@@ -9,8 +9,9 @@ User=eea
 Group=eea
 WorkingDirectory=/opt/eea/current/backend
 EnvironmentFile=/etc/eea/eea-api.env
+Environment=PYTHONPATH=/opt/eea/current/backend/site-packages
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/eea/current/backend/.venv/bin/python -m app.services.orphan_maintenance
+ExecStart=/usr/bin/python3 -m app.services.orphan_maintenance
 UMask=0027
 NoNewPrivileges=true
 PrivateTmp=true

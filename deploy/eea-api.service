@@ -9,8 +9,9 @@ User=eea
 Group=eea
 WorkingDirectory=/opt/eea/current/backend
 EnvironmentFile=/etc/eea/eea-api.env
+Environment=PYTHONPATH=/opt/eea/current/backend/site-packages
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/eea/current/backend/.venv/bin/python -m uvicorn app.main:app --host 127.0.0.1 --port 8000
+ExecStart=/usr/bin/python3 -m uvicorn app.main:app --host 127.0.0.1 --port 8000
 Restart=on-failure
 RestartSec=3s
 TimeoutStopSec=30s

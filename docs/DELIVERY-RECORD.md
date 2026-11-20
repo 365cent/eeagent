@@ -4,6 +4,29 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 ## 2026-11-20
 
+### W4 (offline part): OPS-02 bundle scripts and artifacts, no Linux host
+
+Scope: everything OPS-02 can deliver without a Linux host. The install-and-run gate on a clean air-gapped machine stays open.
+
+| Gate | Result |
+| --- | --- |
+| Next ships a self-contained server | PASS - `output: 'standalone'`; build produces `server.js` + traced `node_modules` (18.9 MB), `.next/static` and `public` copied alongside; Dockerfile runtime now runs `node server.js` instead of `pnpm start` |
+| Bundle assembles with one command | PASS (layout) - `deploy/scripts/build-offline-bundle.sh` produces backend source + Linux site-packages + web + fonts + deploy templates + Windows client zip + `SHA256SUMS` + `MANIFEST.txt` |
+| Install without network or compiler | SCRIPTED - `install-offline.sh` copies the tree, writes `/etc/eea/eea-api.env` once, runs `python3 -m alembic upgrade head`, enables 4 units; systemd units now use `/usr/bin/python3 -m ...` with `PYTHONPATH=/opt/eea/current/backend/site-packages` |
+| Integrity gate | PASS - `check_offline_bundle.py` (used by build, verify and install) checks manifest, every checksum, layout, wheelhouse/dependency coverage and CJK font; 5 pytest cases cover pass, missing site-packages, missing font, tampered file, missing manifest |
+| Bundle on disk here | PARTIAL - `dist/eea-offline-v0.1.0` assembled: 3,179 files, 53 MB, checksums verify, web standalone complete |
+| Linux dependency tree | BLOCKED by network - this host downloads at ~20 KB/s; the ~150 MB Linux cp312 set does not finish. `uv pip install --python-platform x86_64-manylinux_2_28 --target ...` was proven to unpack Linux wheels correctly (fastapi probe), so the build step is expected to work on a connected build machine |
+| CJK font | BLOCKED by host - no Noto CJK on Windows; the build script requires `fonts-noto-cjk` and the checker fails the bundle without it |
+| Clean-host offline install | NOT RUN - needs the Linux target |
+
+Real defect found and fixed while building the bundle:
+
+- `markitdown[all]` pulled Azure Document Intelligence/content-understanding SDKs plus pandas (multi-GB wheelhouse, and the download never completed). Production only needs local converters, so the dependency is now plain `markitdown` plus explicit `mammoth` (docx), `pdfminer-six` (pdf), `lxml` (html) and `pandas` (xlsx). `tests/test_document_ingest.py` (24 tests: docx, pptx, xlsx, pdf, figures) passes with the narrowed set; the first attempt without pandas failed the xlsx test, which is why pandas is explicit.
+
+Checks: backend `uv run pytest -q` (below), `test_offline_bundle_check.py` 5 passed, `test_document_ingest.py` 24 passed, frontend `pnpm build` with standalone succeeded.
+
+Still open for OPS-02: run `build-offline-bundle.sh` on a connected Linux/CI machine, then `verify-bundle.sh` + `install-offline.sh` on the air-gapped target (empty DB, migrations, service start, PDF with CJK font).
+
 ### W3 queue captures: 10 web + 5 WeChat, honest failures
 
 All captures went through the durable queue (`POST /api/v1/imports/capture-urls` → `awaiting_client` → Windows client `capture upload --drain-server` → server worker). No server-side public fetching.

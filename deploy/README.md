@@ -72,6 +72,37 @@ Object files are in the `eea_objectstore` Docker volume; restore requires extrac
 
 For hosts that forbid containers, use `eea-api.service`, `eea-web.service`, and `eea-worker.service` with the paths described in the previous README revision. Build frontend with `NEXT_PUBLIC_EEA_API_BASE=/api/v1`, run Alembic once per release, and point Nginx at loopback `127.0.0.1:8000` / `:3000`.
 
+## Offline bundle (OPS-02)
+
+One host, no network: build the bundle on a connected machine, carry it in, install it.
+
+```bash
+# connected machine (Linux with python3.12, Node/pnpm, fonts-noto-cjk)
+deploy/scripts/build-offline-bundle.sh --version v0.1.0 --out dist
+
+# intranet host
+sudo deploy/scripts/verify-bundle.sh /media/usb/eea-offline-v0.1.0
+sudo deploy/scripts/install-offline.sh /media/usb/eea-offline-v0.1.0 --version v0.1.0
+```
+
+The bundle contains:
+
+| Path | Contents |
+| --- | --- |
+| `backend/wheels` + `requirements.txt` | Linux `cp312` wheelhouse, pinned by `uv export --frozen` |
+| `backend/app`, `migrations`, `alembic.ini` | service code and migrations |
+| `web/` | Next **standalone** server plus `.next/static` and `public` (Next does not trace static assets) |
+| `runtime/fonts` | Noto CJK `.ttc` for ReportLab PDFs |
+| `deploy/` | systemd units, nginx config |
+| `capture-*-windows-amd64.zip` | Windows client package when built |
+| `SHA256SUMS`, `MANIFEST.txt` | integrity and build metadata |
+
+`install-offline.sh` creates the venv with `PIP_NO_INDEX=1 --find-links backend/wheels`, runs `alembic upgrade head` with the installed env file, then enables `eea-api`, `eea-web`, `eea-worker` and `eea-maintenance.timer`. It writes `/etc/eea/eea-api.env` with placeholders on first install and refuses to overwrite an existing file.
+
+`verify-bundle.sh` delegates to `check_offline_bundle.py`, which verifies the manifest, every checksum, the layout, wheelhouse coverage of every pinned requirement, and that a CJK font ships. It runs from the build script too, so an incomplete bundle fails before it is carried anywhere.
+
+The Docker path stays available: `deploy/scripts/compose-up.sh` builds images with the same lockfiles; the frontend image now runs `node server.js` from the standalone output.
+
 ## Maintenance
 
 Resolved object-store orphans are pruned by `python -m app.services.orphan_maintenance`. The command only removes resolved or missing blobs; it does not prune capture jobs or signals.
