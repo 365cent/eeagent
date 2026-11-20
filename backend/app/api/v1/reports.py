@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import PlainTextResponse, Response
@@ -32,6 +33,9 @@ class ChainReportOut(BaseModel):
     error: str | None
     demand_point_id: uuid.UUID | None
     landing_point_id: uuid.UUID | None
+    created_at: datetime
+    finished_at: datetime | None = None
+    data_snapshot_json: dict | None = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -51,6 +55,8 @@ async def post_chain_report(
             subject=actor.subject,
             role=actor.role,
         )
+    except LookupError as exc:
+        raise HTTPException(404, str(exc)) from exc
     except ValueError as exc:
         raise HTTPException(422, str(exc)) from exc
     return report

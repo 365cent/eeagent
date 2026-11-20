@@ -177,6 +177,8 @@
 
 ## BE-12 文档图块与章节检索
 
+- 2026-11-20 W2：真实 eFuse Word 经 API 上传 7 图/8 次插入全部成注（qwen3.8-27b-fp8），图 1–7 分别落在环节一…六，18 个标题路径 chunk、7/7 图片端点与关键词提取均通过；扫描 PDF 失败并拒绝建信号。人工语义核对与 Linux 仍待。
+
 - [ ] P1 · 部分实现 · 依赖 BE-01、BE-04、BE-03。
 - 来源：实施计划 §7.1 REQ-DOC-01…05；Word 七图；WBS 1.3.11、1.4.5。
 - 入口：[doc_ingest.py](app/services/doc_ingest.py)、[doc_summary.py](app/services/doc_summary.py)、[documents.py](app/api/v1/documents.py)。
@@ -209,6 +211,8 @@
 
 ## BE-14 产品内 Agent 与确认写回
 
+- 2026-11-20 W2：真实网关一轮回答成功（served_model 回传，一次 504 如实记为 turn.failed）；引用可核验、伪造引用被拒；记忆按用户隔离并可删除；变更单重复确认 409 且审计仅 1 条、过期 409、拒绝不写入、已人工确认字段 409 保护。
+
 - [~] P1 · 后端工作流与验收测试已落地（`POST /api/v1/agent/*`、SSE、变更单、记忆）；FE-11 与网关真机签字仍开放 · 依赖 BE-03/04/12/13。
 - 聊天韧性（2026-11-19，网关调速）：HedgedChatModel 首 token 竞速默认 2s 窗口、最多 4 路并行；`CHAT_MODEL` 为空时按网关对话候选与实测 TPS 排序，尝试上限 `max(CHAT_ATTEMPT_BUDGET_FLOOR=30, 候选数)`，同一模型连续尝试 ≤2 次；TPS 为进程内 Pydantic 榜单（EWMA α=0.4、TTL 1200s，失败/空响应只降级不记速度），`GET /llm/status` 暴露榜单、预算与并发参数；非流式入口 25s 墙钟、`_chat_sem=6`；turn.progress 每 5s 心跳；message.completed 与 POST 返回 served_model，FE-11 在完成后显示实际服务模型。
 - 网关实测（2026-11-19，企业内网）：`scripts/probe_model_speed.py` 测得 glm-5.3-o-anthropic 32.3 TPS / TTFT 0.58s，desaysv-anthropic 11.8、desaysv 10.8；Qwen3.6-35B 与 deepseek-v4.1-flash-1017 返回空内容（降级不记速度），d3-mini/fasth3 为 404 model_not_found、jev-27b-vl 503；浏览器实战单轮 14.9s 完成，回复脚注显示 `glm-5.3-w4a8-o`，`GET /llm/status` 返回 attempt_budget=30、hedge 2s/4。验收：52 项模型相关测试通过（榜单/预算/竞速/状态/用量）。
@@ -225,6 +229,8 @@
 - **macOS 证据（2026-11-11）**：`uv run pytest -q tests/test_agent_workflow.py tests/test_pydantic_ai_wiring.py` → 18 passed（含 10 步 smoke、SSE、`model_messages_json` 持久化）；可选 `EEA_LLM_INTEGRATION=1 … test_agent_live.py`。
 
 ## BE-15 链路报告
+
+- 2026-11-20 W2：报告新增「原始证据」段落（逐条 URL/渠道/主体/时间/状态），补 created_at/finished_at 响应字段，失效目标由 500 改为 404；PDF 中文 2,415 字符可提取。电气工程师签字与 Linux 字体仍待。
 
 - [~] P1 · Markdown + ReportLab PDF 已落地（`chain_report.py` / `chain_report_pdf.py`，`GET …/download?format=pdf`）；黄金集与 Linux 字体容器验收仍开放 · 依赖 BE-11、BE-12、BE-14。
 - 2026-11-19：PDF 中文可提取回归通过（`tests/test_chain_reports.py` 用 pdfplumber 断言“链路报告/智能保险丝”）；`pdfplumber` 已声明并锁定；Linux 字体容器与业务签字仍待。

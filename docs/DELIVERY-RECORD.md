@@ -4,6 +4,54 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 ## 2026-11-20
 
+### W2 document blocks, agent and report gates
+
+**B. 文档图块（真实 eFuse Word，经 API 上传）**
+
+| Check | Result |
+| --- | --- |
+| 7 张不同图片 / 8 次插入（图 1 插入两次） | PASS |
+| 7/7 图注由 qwen3.8-27b-fp8 生成，review_status=ready | PASS |
+| 图 1–7 分别落在环节一…环节六的 section_path | PASS |
+| 18 个标题路径 chunk，正文可读（每条 13–861 字符） | PASS |
+| 7/7 图块图片端点返回 >1 KB 二进制 | PASS |
+| /extract-keywords 返回分层关键词与来源 | PASS |
+| 扫描型 PDF：ingest_status=failed + OCR 指引；再建信号被 422 拒绝 | PASS |
+
+**A. 产品内 Agent（真实网关 glm-5.3-w4a8-o）**
+
+| Check | Result |
+| --- | --- |
+| 会话创建绑定信号，按 signal_id 过滤可查 | PASS |
+| 真实网关完成回答并回传 served_model | PASS（一次上游 504 被如实记为 turn.failed，重试成功，未伪造回答） |
+| 回答携带 doc:id:chunk 引用，可用 | PASS |
+| 事件流可重放：turn.started → tool.call → citation → turn.completed | PASS |
+| 负例：伪造引用不能生成变更单 | PASS |
+| 记忆写入 / 按用户列出 / 删除 | PASS（200 / 204） |
+| 变更单确认只应用一次（重复确认 409），审计仅 1 条 | PASS |
+| 负例：已人工确认字段禁止自动覆盖 | PASS（409，人工确认保护） |
+| 负例：基线变更后过期变更单被拒 | PASS（409） |
+| 负例：拒绝变更单后业务数据不变 | PASS |
+| 文档研究问答引用真实章节/图块 | PASS |
+
+**R. 链路报告**
+
+| Check | Result |
+| --- | --- |
+| Markdown 报告含落脚点/功能五步/需求五步/交叉验证/九宫格/战略段落 | PASS |
+| PDF 中文可提取（2,415 字符，7.7 KB），含 20 分与实质标准 | PASS |
+| 九宫格区分“实质条款 / 未填写 / 明确留空” | PASS |
+| 报告与追溯使用同一落脚点与两条真实证据 | PASS |
+
+本轮修复的三个真实缺陷：
+
+1. 报告此前只取主题下第一条信号做“追溯摘要”，第二条直接证据不可见，且不含任何链接。改为新增「## 原始证据」段落，逐条列出标题、URL、渠道、发布主体、发布时间、证据状态与信号 ID，并标注失效引用。
+2. GET/POST /reports 不返回 created_at、finished_at、data_snapshot_json，无法追溯生成时间；已补入响应契约。
+3. 失效落脚点曾被外键约束打成 500；现于建行前校验目标，返回 404 landing point not found。
+
+回归用例：tests/test_chain_reports.py 新增 3 条（证据链接齐全、失效目标 404、时间戳字段），合计 5 passed；全量 505 passed / 2 skipped，lint-imports 3/3，客户端 go test -short ./...、go vet、gofmt 干净。
+
+仍开放：电气工程师业务签字、Linux 字体容器与网关时延、pw:chain 浏览器用例、真实业务黄金集。
 ### W1 real eFuse chain: stage-by-stage gate run
 
 Two real captured sources carry the chain (no synthetic evidence): 佐思汽研 report via WeChat (`https://mp.weixin.qq.com/s/E6Q06Gjf2U9B23OmPUd09g`) and EDN 电子技术设计 on NIO ET9 (`https://www.ednchina.com/technews/31623.html`). They differ in URL, channel, publisher and tag set, which the cross-validation gate requires.

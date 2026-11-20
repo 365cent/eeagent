@@ -20,7 +20,6 @@ from app.models.models import (
     TechTheme,
     VehicleFunction,
 )
-from app.services.agent_trace import build_signal_trace_markdown
 from app.services.chain_report_pdf import render_markdown_to_pdf_bytes
 from app.services.objectstore import save_bytes
 
@@ -36,6 +35,10 @@ async def create_chain_report(
 ) -> ChainReport:
     if bool(demand_point_id) == bool(landing_point_id):
         raise ValueError("specify exactly one of demand_point_id or landing_point_id")
+    if landing_point_id is not None and await db.get(TechLandingPoint, landing_point_id) is None:
+        raise LookupError("landing point not found")
+    if demand_point_id is not None and await db.get(DemandPoint, demand_point_id) is None:
+        raise LookupError("demand point not found")
     report = ChainReport(
         id=uuid.uuid4(),
         demand_point_id=demand_point_id,
@@ -180,6 +183,57 @@ def _append_strategy(lines: list[str], lp_id: uuid.UUID, assessments: list[Strat
         lines.append("- 无战略记录")
 
 
+async def _append_evidence(
+    lines: list[str], db: AsyncSession, demand: DemandPoint | None, theme: TechTheme | None
+) -> None:
+    """List every cited evidence signal with a source link (REQ-RULE-03)."""
+    from app.models.models import Signal
+
+    tick = chr(96)
+    ids: list[uuid.UUID] = []
+    raw = demand.cross_validation if demand and isinstance(demand.cross_validation, dict) else {}
+    for item in raw.get("evidence_signal_ids") or []:
+        try:
+            ids.append(uuid.UUID(str(item)))
+        except (ValueError, TypeError):
+            continue
+    trace = demand.derivation_trace if demand and isinstance(demand.derivation_trace, Mapping) else {}
+    for step in trace.get("steps") or []:
+        if not isinstance(step, Mapping):
+            continue
+        for item in step.get("evidence_signal_ids") or []:
+            try:
+                sid = uuid.UUID(str(item))
+            except (ValueError, TypeError):
+                continue
+            if sid not in ids:
+                ids.append(sid)
+
+    lines.extend(["", "## 原始证据"])
+    if not ids:
+        lines.append("- 无可追溯的原始信号")
+        return
+    rows = (
+        await db.execute(select(Signal).where(Signal.id.in_(ids)).order_by(Signal.created_at))
+    ).scalars().all()
+    for index, signal in enumerate(rows, start=1):
+        published = signal.published_at.date().isoformat() if signal.published_at else "未知"
+        lines.extend(
+            [
+                f"### 证据 {index}：{signal.title}",
+                f"- 链接：{signal.url}",
+                f"- 渠道：{signal.channel_code}",
+                f"- 发布主体：{signal.publisher or '未记录'}",
+                f"- 发布时间：{published}",
+                f"- 证据状态：{signal.evidence_status_code}",
+                f"- 信号 ID：{tick}{signal.id}{tick}",
+            ]
+        )
+    missing = {str(i) for i in ids} - {str(r.id) for r in rows}
+    if missing:
+        lines.append("- 失效引用（未找到信号）：" + ", ".join(sorted(missing)))
+
+
 async def _load_landing_point(db: AsyncSession, landing_point_id: uuid.UUID) -> TechLandingPoint:
     lp = (
         await db.execute(
@@ -247,20 +301,7 @@ async def build_chain_report_markdown(
             theme = await db.get(TechTheme, demand.source_tech_theme_id)
         if theme:
             lines.extend(["", "## 来源主题", f"- {theme.working_name} (`{theme.id}`)"])
-        signal = None
-        if theme:
-            from app.models.models import Signal
-
-            signal = (
-                await db.execute(
-                    select(Signal).where(Signal.tech_theme_id == theme.id).limit(1)
-                )
-            ).scalar_one_or_none()
-        if signal is not None:
-            trace_md, _ = await build_signal_trace_markdown(db, signal.id)
-            lines.extend(["", "## 追溯摘要", trace_md])
-        else:
-            lines.extend(["", "## 追溯摘要", "_无可追溯信号_"])
+        await _append_evidence(lines, db, demand, theme)
     else:
         demand = await db.get(DemandPoint, demand_point_id)
         if demand is None:
@@ -272,16 +313,7 @@ async def build_chain_report_markdown(
             theme = await db.get(TechTheme, demand.source_tech_theme_id)
             if theme:
                 lines.extend(["", "## 来源主题", f"- {theme.working_name} (`{theme.id}`)"])
-                from app.models.models import Signal
-
-                signal = (
-                    await db.execute(
-                        select(Signal).where(Signal.tech_theme_id == theme.id).limit(1)
-                    )
-                ).scalar_one_or_none()
-                if signal is not None:
-                    trace_md, _ = await build_signal_trace_markdown(db, signal.id)
-                    lines.extend(["", "## 追溯摘要", trace_md])
+        await _append_evidence(lines, db, demand, theme)
 
     lines.extend(
         [
