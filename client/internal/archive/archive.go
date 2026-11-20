@@ -14,12 +14,23 @@ import (
 // ErrNoURL means the file carries no canonical/og:url pointing at http(s).
 var ErrNoURL = errors.New("no source url in html")
 
-const scanLimit = 2 << 20 // canonical/og:url live in <head>; 2 MiB is plenty
+const scanLimit = 2 << 20 // the provenance comment and canonical/og:url live in <head>; 2 MiB is plenty
 
 var (
-	linkTag = regexp.MustCompile(`(?is)<link\b[^>]*>`)
-	metaTag = regexp.MustCompile(`(?is)<meta\b[^>]*>`)
-	attrRe  = regexp.MustCompile(`(?is)([a-z0-9_:-]+)\s*=\s*(?:"([^"]*)"|'([^']*)')`)
+	// SingleFile prepends its provenance comment before the saved content:
+	//   <!--
+	//    Page saved with SingleFile
+	//    url: https://example.com/page
+	//    saved date: Thu Nov 19 2026 16:55:30 GMT+0800
+	//   -->
+	singleFileURL = regexp.MustCompile(`(?is)<!--[\s\S]{0,1000}?saved with single[\s-]?file\b[\s\S]{0,1000}?\burl:[ \t]*(https?://[^\s"'<>]+)`)
+	// Legacy archives: MSIE "Save as" and old Safari exports.
+	savedFromURL = regexp.MustCompile(`(?is)<!--[\s\S]{0,200}?saved from url=\(\d+\)[ \t]*(https?://[^\s"'<>]+)`)
+	linkTag      = regexp.MustCompile(`(?is)<link\b[^>]*>`)
+	metaTag      = regexp.MustCompile(`(?is)<meta\b[^>]*>`)
+	// Values may be double-quoted, single-quoted or unquoted; SingleFile rewrites
+	// tags unquoted (`<link rel=canonical href=https://…>`).
+	attrRe = regexp.MustCompile("(?is)([a-z0-9_:-]+)\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s\"'=<>`]+))")
 )
 
 // Read loads a saved archive from disk.
@@ -39,10 +50,18 @@ func SourceURL(path string) (string, error) {
 	return Infer(head), nil
 }
 
-// Infer returns the canonical or og:url of an HTML document, or "" when absent.
+// Infer returns the SingleFile provenance URL, canonical or og:url of an HTML
+// document, or "" when absent.
 func Infer(html []byte) string {
 	doc := bytes.TrimPrefix(html, []byte{0xEF, 0xBB, 0xBF})
 
+	for _, re := range []*regexp.Regexp{singleFileURL, savedFromURL} {
+		if m := re.FindSubmatch(doc); m != nil {
+			if u := usable(string(m[1])); u != "" {
+				return u
+			}
+		}
+	}
 	for _, tag := range linkTag.FindAll(doc, -1) {
 		attrs := attrsOf(tag)
 		if !hasToken(attrs["rel"], "canonical") {
@@ -76,6 +95,9 @@ func attrsOf(tag []byte) map[string]string {
 		if val == "" {
 			val = string(m[3])
 		}
+		if val == "" {
+			val = string(m[4])
+		}
 		out[key] = strings.TrimSpace(val)
 	}
 	return out
@@ -91,7 +113,7 @@ func hasToken(list, want string) bool {
 }
 
 func usable(raw string) string {
-	raw = strings.TrimSpace(raw)
+	raw = strings.TrimSpace(strings.ReplaceAll(raw, "&amp;", "&"))
 	if raw == "" {
 		return ""
 	}

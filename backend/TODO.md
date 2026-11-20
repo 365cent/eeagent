@@ -27,7 +27,8 @@
 - `GET /capture/jobs/{id}` 返回当前状态和成功结果；`POST .../retry` 重排失败任务，`POST .../cancel` 仅取消尚未领取的任务。自动重试有次数上限和退避；同一 submission ID 不会重复创建信号。
 - 失败保留 URL、时间和原因；恢复后复用任务关联。重复文档复用 blob，信号创建的幂等范围须单独按 submission_id 控制。
 - 对象写入采用临时文件加原子替换；阻止对象键路径越界；数据库提交失败后保留可清理孤立对象记录，不能误报成功。
-- 剩余：孤立对象与终态任务清理策略（`orphan_maintenance` 仅报告/可选清理入口）；任务暂未绑定可信用户，跨用户查询/操作须等 OPS-03；Linux 数据库迁移、worker 重启及端到端证据未验证。运行中任务协作式取消已实现（`cancel_requested_at` + worker 检查）。
+- 2026-11-20 修复：URL 批量粘贴创建的采集任务现在写入调用者 owner_subject，否则研究者客户端按 subject 过滤后看不到自己的任务（新增回归用例）。
+- 剩余：孤立对象清理已提供 Compose `maintenance` profile 与 `eea-maintenance.timer`；终态采集任务的历史保留/清理策略仍待定；任务暂未绑定可信用户，跨用户查询/操作须等 OPS-03；Linux 数据库迁移、worker 重启及端到端证据未验证。运行中任务协作式取消已实现（`cancel_requested_at` + worker 检查）。
 - 剩余验收：URL/HTML/文档/粘贴统一留存；空、超限、错误 MIME、幂等冲突/并发、进程中断和重试；前端与 Go 客户端必须显示真实任务状态和最终结果。生产公网页面必须由用户侧浏览器采集上传，生产环境不调用服务端 `fetch_url()`。
 
 ## BE-02 证据生命周期与查询
@@ -65,6 +66,7 @@
 - 网关批量最多 16、限制并发、超时和退避；校验空响应、索引、向量维度和有限数值。无配置时返回不可用状态和降级理由。
 - 已交付独立语义网关与索引校验：chat、embedding、rerank 分别读取 `CHAT_*`、`EMBEDDING_*`、`RERANK_*` 的 URL/key/model，旧 `LLM_*`/`MAAS_*` 已移除；实际网关 embedding 返回 4096 维，rerank 正常；embedding 按 `data[].index` 排序后返回。
 - 新增内容哈希+模型版本的 JSONB 向量缓存，numpy 余弦；词表/主题内容变化失效。直接声明所用依赖，不能依赖开发机偶然安装。
+- 视觉识别链（2026-11-19）：`VISION_MODEL` 严格按配置顺序重试（当前 3.8 → 3.6），重试间隔 `VISION_RETRY_BASE_DELAY_SECONDS`（默认 0.8s）可调；文档元数据记录实际应答的视觉模型；`scripts/probe_model_speed.py` 只读测量对话模型 TTFT/TPS。
 - 阈值可配置，0.85 仅作旧方案初始实验值，生产阈值由黄金集确认。保留能力边界，不新增向量服务或 pgvector。
 - 入库、建议、auto-tag 共用同一服务。POST /signals/{id}/auto-tag 返回三维建议、分数/理由；已人工确认字段默认不写。
 - TagSuggestion 保留 suggested_tags/source，新增逐候选 details，含词频、相似度、精排分与证据；前端旧字段继续可用。
@@ -159,7 +161,7 @@
 - 验收：多分支、空库、归档历史、删除/缺失对象及修正后刷新，所有计数与底层记录相符。
 - 已实现切片：`/overview` 返回去重来源、信号状态、待复核/失败任务、实质标准、UTC 本周新增与独占四步战略计数；计数口径写入 OpenAPI 描述。追溯返回链路缺项/失效引用、主题成员与需求证据分支、文件/网页存档引用、归档状态及当前/历史战略版本。
 - 检查：macOS 隔离 `eea_test` 上 trace/overview 焦点用例 **20 passed**，含空/失效链接、归档、文档引用、每步战略计数、周窗口、失败重试和规范化来源去重。本次集成后全量回归 300 项通过、1 项跳过。
-- 仍需：需求/证据修改后是否过期目前为 `unknown_untracked`；`DemandPoint` 没有复核时间基线，不能可靠提示“依据已更新”。对象引用存在不代表存储对象可读；Linux、真实来源、刷新走查与完整图块定位仍待验。
+- 仍需：旧确认记录的复核基线已由迁移 0022 回填（无基线的已确认行不再返回 `unknown_untracked`）；真实来源、Linux、刷新走查与完整图块定位仍待验。对象引用存在不代表存储对象可读。
 
 ## BE-12 文档图块与章节检索
 
@@ -175,6 +177,10 @@
 - 高频细粒度词升格为开放标签前输出候选和出现文档数，人工确认后复用词表 API。
 - 已实现切片：图块资产与元数据（source/page/position/section_path/occurrence_count/review_reason）、OOXML 7 图/8 次插入计数、标题路径 chunks、图块图片端点；证据见[交付记录](../docs/DELIVERY-RECORD.md#2026-11-18)。仍需真实 Word 视觉验收、PDF 缺 OCR 专项和 Linux 验收。
 - 2026-11-19 追加：单图 `POST /documents/{id}/figures/{n}/recaption` 局部重试，成功改写 canonical 图注并重建 chunks，失败保留正文并标记 needs_review；真实网关验证待复核图恢复为已就绪。
+- 2026-11-19 真实源文件回归：`tests/test_document_ingest.py::test_real_efuse_word_has_seven_images_and_eight_insertions` 对仓库内 Word 断言 7 张图/8 次插入（image1 插入两次）；视觉图注、人工语义核对与 Linux 验收仍待。
+- 2026-11-19 真实视觉验收（开发机）：源 Word 7 张图全部由 qwen3.8-27b-fp8 生成图注，canonical 9426 字符；人工语义核对、PDF 视觉与 Linux 网关仍待。
+- 2026-11-20：解析失败的文档不再生成“已留存”信号（返回 422 并保留原始 blob）；PDF 可读文本门槛 120 字符；摘要过短时补正文摘录并剔除 HTML 注释/base64/图块语义噪声。
+- 2026-11-19 追加：扫描型 PDF 无可提取文本层时 ingest 明确失败（`ingest_error` 含 OCR 指引），原始 blob 保留；`tests/test_document_ingest.py` 新增单测与上传回归。
 - 验收：原始 Word 的七图都有文本和可定位引用，重复插图不乱号；部分失败/重跑幂等/章节路径/摘要与全文分离。
 
 ## BE-13 业务 skills 与评估
@@ -192,6 +198,9 @@
 ## BE-14 产品内 Agent 与确认写回
 
 - [~] P1 · 后端工作流与验收测试已落地（`POST /api/v1/agent/*`、SSE、变更单、记忆）；FE-11 与网关真机签字仍开放 · 依赖 BE-03/04/12/13。
+- 聊天韧性（2026-11-19，网关调速）：HedgedChatModel 首 token 竞速默认 2s 窗口、最多 4 路并行；`CHAT_MODEL` 为空时按网关对话候选与实测 TPS 排序，尝试上限 `max(CHAT_ATTEMPT_BUDGET_FLOOR=30, 候选数)`，同一模型连续尝试 ≤2 次；TPS 为进程内 Pydantic 榜单（EWMA α=0.4、TTL 1200s，失败/空响应只降级不记速度），`GET /llm/status` 暴露榜单、预算与并发参数；非流式入口 25s 墙钟、`_chat_sem=6`；turn.progress 每 5s 心跳；message.completed 与 POST 返回 served_model，FE-11 在完成后显示实际服务模型。
+- 网关实测（2026-11-19，企业内网）：`scripts/probe_model_speed.py` 测得 glm-5.3-o-anthropic 32.3 TPS / TTFT 0.58s，desaysv-anthropic 11.8、desaysv 10.8；Qwen3.6-35B 与 deepseek-v4.1-flash-1017 返回空内容（降级不记速度），d3-mini/fasth3 为 404 model_not_found、jev-27b-vl 503；浏览器实战单轮 14.9s 完成，回复脚注显示 `glm-5.3-w4a8-o`，`GET /llm/status` 返回 attempt_budget=30、hedge 2s/4。验收：52 项模型相关测试通过（榜单/预算/竞速/状态/用量）。
+- 流式文本（2026-11-19）：`run_agent_turn` 消费 pydantic-ai 2.x 交给 `event_stream_handler` 的事件流（异步可迭代，而不是单事件），把推理模型 `ThinkingPart` 增量转发为 `thinking.delta`、函数工具调用转发为 `tool.call`；最终答案仍由 `stream_output` 的部分校验增量给出 `text.delta`，校验回退重写时用 `text.replace` 校正。token 增量与心跳不落 `agent_events`（最终消息已单独存库），重连重放只保留工具、引用和审批事件。
 - 来源：实施计划 §7.2 REQ-AGT-01…06；WBS 1.3.10。
 - 入口：[agent_workflow.py](app/services/agent_workflow.py)、[agent_runtime.py](app/services/agent_runtime.py)、[api/v1/agent.py](app/api/v1/agent.py)；遗留 [`/signals/{id}/assistant/messages`](app/api/v1/signals.py) 保持兼容。
 - 单一 Pydantic AI 编排；新增 sessions/messages 持久化和 SSE，支持重连、取消、错误结束；使用已安装版本支持的序列化 API。
@@ -206,6 +215,7 @@
 ## BE-15 链路报告
 
 - [~] P1 · Markdown + ReportLab PDF 已落地（`chain_report.py` / `chain_report_pdf.py`，`GET …/download?format=pdf`）；黄金集与 Linux 字体容器验收仍开放 · 依赖 BE-11、BE-12、BE-14。
+- 2026-11-19：PDF 中文可提取回归通过（`tests/test_chain_reports.py` 用 pdfplumber 断言“链路报告/智能保险丝”）；`pdfplumber` 已声明并锁定；Linux 字体容器与业务签字仍待。
 - 来源：WBS 1.3.12；REQ-RULE-03、REQ-AGT-03；Word 表1/A/B/C。
 - 按需求点或落脚点生成 Markdown 与 PDF，包含原始证据、方法推导、审查结论、技术角色、空标准格、战略理由/版本、引用和局限。
 - 生成可留存/下载的报告任务与元数据，标明生成时间、使用数据版本和模型；无 LLM 时仍可导出确定性链路摘要。
@@ -217,7 +227,7 @@
 - [ ] P0 · 未验证 · 依赖代码任务的组件实现、迁移与验证；集成部署/离线包/恢复验收由 OPS-06 在 BE-16 后完成。
 - 来源：WBS 1.2.6、1.5.1…1.5.5、1.6、1.7。
 - [tests/](tests/) 按需求补负面/并发/持久性测试；pytest 单进程，隔离 eea_test 与临时对象目录，不接真实生产数据。
-- 新迁移覆盖来源、review、funnel、缓存、图块、会话等；以当前 0012_strategy_funnel 为 head 按实施顺序分配后续 revision，旧方案中 embedding/document keyword 的编号不可复用为既有迁移证据。
+- 新迁移覆盖来源、review、funnel、缓存、图块、会话等；以当前 0022_demand_review_baseline 为 head 按实施顺序分配后续 revision，旧方案中 embedding/document keyword 的编号不可复用为既有迁移证据。
 - 完成需求对应的组件级回归、OpenAPI 与前端类型契约检查、迁移升级/降级检查；未知旧 JSON 不自动批准，历史快照与评分保持可读。
 - 交付代码仓库层面的依赖锁定、启动/配置契约与组件验证证据；不把 macOS 检查描述为 Linux worker 或生产存储验收。
 - Linux 集成、离线 wheel 包、生产升级、备份/恢复及 10,000 条性能报告由 OPS-06 在 BE-16 后统一验收，避免 BE-16 ↔ OPS-02/05 循环依赖。

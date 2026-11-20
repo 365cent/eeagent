@@ -2,7 +2,95 @@
 
 This record keeps evidence for implementation slices removed from the remaining-work TODOs. A slice does not close its parent task; acceptance stays open until the subsystem TODO criteria and required platform evidence pass.
 
+## 2026-11-20
+
+### W0 baseline freeze and DOC-03 sync
+
+- DOC-03 synced with the real schema: migration head `0022_demand_review_baseline`, chain `0001`–`0022`, **31 `eea_*` tables + 2 views** (asserted by `test_db_schema.py`). [ARCHITECTURE-LAYERS.md](../docs/ARCHITECTURE-LAYERS.md) gained a migration/data-model section, the third import-linter contract (`domains` must not import `api`), a recent-contract table, and a new acceptance hook row for `alembic heads` + schema inventory. [docs/TODO.md](../docs/TODO.md) records the same head and the 2026-11-20 interface changes.
+- Full matrix on the Windows dev host (portable PostgreSQL): `uv run pytest -q` **502 passed, 2 skipped**; `uv run lint-imports` **3/3 kept**; `alembic downgrade -1` + `upgrade head` back to `0022_demand_review_baseline`; frontend `pnpm typecheck`, `pnpm build`, `pnpm antd:lint` (0 errors, 4 pre-existing deprecation warnings), `node --test tests/*.test.cjs` **22 passed**; Playwright `pw:smoke` **2 passed** and `pw:roles` **3 passed**; client `go test -short ./...`, `go vet ./internal/...`, `gofmt -l internal cmd` clean.
+- `pw:chain` was not part of this run: it needs `EEA_PW_SEED_FILE` from `scripts/seed_smoke_chain.py`, and the dev database currently holds the 49 real panorama signals rather than a seeded sample chain. It passed earlier on 2026-11-19 against a seeded chain.
+- Scope note: the commit freezes the whole working tree (W0 = freeze current changes), including concurrent backend/client/frontend slices whose tests are green in this run. `docs/samples/` (customer-provided 亿欧 panorama workbook) stays untracked: it is a private source document.
+
+### Panorama sample capture run (real sources)
+
+- Cleared the dev database (`eea`) of business chain data with a `pg_dump` backup first: signals 32 -> 0, themes 5 -> 0, landing points 3 -> 0, demands/functions/documents/capture jobs -> 0; `eea_vocab` (39 rows) and migrations preserved.
+- Parsed `docs/samples/【德赛西威-亿欧】EEA技术全景图 1105 (1).xlsx` with the workbook parser: 88 sources, 285 chain rows, 18 difference rows, 32 demand names, 5 domains. The server rejects workbook upload by design, so the 93 unique 「数据来源」 links were imported through `POST /api/v1/imports/capture-urls`.
+- Fixed a real routing gap: URL-list jobs were created without `owner_subject`, so a `researcher` client could not list them (`/capture/jobs` filters by subject). Jobs now carry the importing operator; `test_capture_url_list_jobs_belong_to_the_importing_operator` covers it. Re-importing the same list returns the same batch.
+- Drained the queue through the Windows client (`capture upload --drain-server --headless`, Edge + SingleFile). Result: **49 signals retained, 23 honest failures** (HTTP 403, refused connections, Cloudflare/UNECE challenges, SingleFile errors), 14 still awaiting, 1 held by a killed client until its 30-minute lease expires.
+- Fixed three false-success paths found by this run: (1) challenge pages that ship an `<article>` shell were accepted because detection required `!hasArticle` — a challenge title with a short body now rejects; (2) login walls that leave the URL as the document title now reject as empty shells; (3) documents whose parse failed still produced a retained signal, and PDFs whose only text was the figure section looked readable — parse failure now returns 422 (raw blob kept) and PDFs need 120+ characters of text.
+- Fixed thin document summaries: a PDF with no Markdown headings produced a 42-character body even with a 92 KB canonical. The summary now appends a sanitized prose lead (no HTML comments, base64 images, or 「图块语义」) when the heading summary is short; the 5 affected signals were re-written through `PATCH /signals/{id}` with audit rows.
+- Quality audit of the 49 signals: 0 suspicious (no URL-as-title, no verification shell, no tiny body); 5 WeChat, 44 web, 5 document-backed.
+- Checks: `test_document_ingest`, `test_document_signals`, `test_panorama_import`, `test_url_list_capture`, `test_capture_jobs` **52 passed**; `go test -short ./internal/capture ./internal/importdrain` passed; `gofmt -l` clean; `uv run lint-imports` 3/3.
+- Still open: 14 queued URLs were not captured in this run; paywalled/verification sources need a visible logged-in browser; no Linux evidence.
+
 ## 2026-11-19
+
+### Baseline matrix and review-baseline slice
+
+- Full local matrix on the Windows dev host (portable PostgreSQL `eea_test`): `uv run pytest -q` **469 passed, 2 skipped**; `uv run lint-imports` **3/3 kept**; `pnpm typecheck`, `pnpm build`, `pnpm antd:lint` (0 issues; 4 pre-existing deprecation warnings), `node --test tests/*.test.cjs` **22 passed**; `go test -short ./...` passed; Playwright **2 trace + 2 seeded chain + 3 role tests passed**; the chain asserts both substantive standards and 20/25. The chain seed ran through a temporary `platform_admin` instance on :8010 because the dev API operator is `researcher`.
+- Fixed the stale schema inventory for `0021_signal_studio_artifact`; the backend suite had been red on `test_migration_creates_exactly_the_enumerated_tables_and_views`.
+- Added migration `0022_demand_review_baseline`: backfills `confirmed_at = updated_at` for already-confirmed demands without a baseline, removing `unknown_untracked` for legacy rows. Downgrade is a deliberate no-op.
+- Trace responses now include `document.figure_indices`; the trace page renders one evidence link per stored figure and falls back to the first figure when an older API omits the field.
+- Added a real-source regression test for the supplied eFuse Word: `doc_ingest.extract_figures` returns 7 images and 8 insertions (image1 twice); the test skips when the source file is absent.
+- Ran the real eFuse Word through vision ingest on the dev host: **7/7 figures captioned** by qwen3.8-27b-fp8, canonical 9,426 chars. Human semantic review and Linux gateway evidence remain open.
+- Scanned PDFs without a text layer now fail explicitly with an OCR hint and keep the raw blob; unit and upload regressions were added in `tests/test_document_ingest.py` (20 passed).
+- Declared and locked `pdfplumber` (PDF figure extraction already imported it but it was missing from the lock). The PDF report test now extracts text with pdfplumber and asserts Chinese content (`链路报告`, `智能保险丝（eFuse）`).
+- Built the Windows client package `v0.1.0`: `capture.exe`, `capture-v0.1.0-windows-amd64.zip`, and `SHA256SUMS`. After `capture doctor` staged the SingleFile extension, the rebuilt zip has 193 entries including `data/extensions/singlefile/manifest.json`. `doctor` reported Edge, backend, auth, capture, and SingleFile all OK. Real browser capture is covered below; clean-machine acceptance remains open. `gofmt -w` cleaned the pre-existing `internal/capture/extension_resolve.go`.
+- Verified a real Windows capture end to end: Edge 157 + SingleFile loaded after adding `DisableLoadExtensionCommandLineSwitch`; `capture upload --url --headless` created server job `68b47471…` (succeeded) and retained signal `c8d9a463…`; archive (387 B) and body (122 B) both return 200. This closes the local-page path only; CAPTCHA/WeChat/queue-restart cases remain open.
+- Scheduled the existing orphan cleanup in deployment: Compose `maintenance` profile (`docker compose --profile ops run --rm maintenance`) and `deploy/eea-maintenance.service`/`.timer` for bare metal. It still prunes only resolved blobs; terminal capture-job retention remains open.
+- Later full-suite run after the PDF/client slices: **495 passed, 2 skipped, 1 timing-flaky failure** in `test_stream_winner_notifies_the_resolver`; the isolated file rerun passed **11/11**. Concurrent additions to `tests/test_llm_*` landed during this run, so the total is not directly comparable to the 469 baseline. `uv lock --check` passed.
+- Still open: real Word human semantic review, Linux and real-business evidence; the figure links are not yet exercised by a Playwright document fixture.
+
+
+
+### SingleFile saved-page source URL
+
+- [ingest-source-url.ts](../frontend/lib/ingest-source-url.ts) now reads the URL from the `Page saved with SingleFile` provenance comment first (and the legacy `saved from url=(…)` form), before falling back to `canonical` / `og:url` / `twitter:url`. Tags are parsed attribute-wise, so SingleFile's unquoted rewrite (`<link rel=canonical href=https://…>`, `<meta property=og:url content=…>`) resolves, and `&amp;` is decoded.
+- Dragging a saved `.html`/`.htm` onto 导入证据 no longer fails with “HTML 中找不到 http(s) 来源链接” for SingleFile pages. A file with no usable source URL still refuses rather than fabricating one, and a URL pasted in the text box remains the fallback.
+- [archive.go](../client/internal/archive/archive.go) applies the same order and unquoted-attribute support, so the Windows GUI drop and `capture upload --html` agree with the web importer.
+- Checks: new `frontend/tests/ingest-source-url.test.cjs` 9 passed (`node --test tests/*.test.cjs` → 16 passed); `go test ./internal/archive ./internal/queue` passed; `pnpm typecheck`, `pnpm build` and scoped `antd lint components/import/new-signal-import.tsx` passed. The reported sample (`07ff4a69-bf49-4b62-a928-1e56e82787a8.htm`) resolves to `https://www.eet-china.com/mp/a491751.html` in both the browser and Go parsers.
+- Still open: a real Windows run that drops the file into the packaged client, and Linux intranet evidence.
+
+### Dashboard import guidance for client capture
+
+- 导入证据面加入常驻说明：网页采集调用本机 EEA Capture 客户端（需保持客户端在线）；拖入的 HTML 快照与文档由平台直接解析入库。
+- 粘贴多条链接时显示“N 条链接由本机 EEA Capture 客户端采集”提示条和「复制链接」按钮，复制后可直接粘贴到客户端窗口；平台排队按钮改名为「排队等待客户端采集」，排队任务仍由在线客户端领取后回传快照。复制使用 Clipboard API，被浏览器拒绝时提示手动复制。
+- 侧栏说明和提交提示同步改写，避免把“已排队”误读成“已抓取”。
+- Windows GUI ([app.go](../client/internal/ui/app.go)) 补齐后台领取：每 20 秒领取 `awaiting_client` 链接任务，在本机浏览器采集后回传；与本地队列通过 capture ownership 互斥共用浏览器，关闭窗口或取消时交还领取中的任务，完成后在状态行提示成功/失败数。
+- [drain_test.go](../client/internal/importdrain/drain_test.go) 覆盖领取→采集→回传顺序、无 URL 跳过、采集失败标记与取消时释放。
+- Checks: Playwright (Edge, dev API + worker) confirmed both hints render, `复制链接` puts the two links on the clipboard, and copying issues no `/imports/capture-urls` request; `pnpm typecheck`, `pnpm build`, scoped `antd lint components/import/import-unified-surface.tsx` passed; `node --test tests/*.test.cjs` 16 passed. Client (Windows host): `go test -short ./...` passed including the 4 new importdrain tests, `go build ./...`, `go vet ./internal/ui ./internal/importdrain` and `gofmt -l` clean.
+- Still open: the packaged Windows client was not driven against a real queued batch in this slice (unit tests and a Windows build only), and the copy was reviewed on the dev host only.
+
+### Chat model first-byte hedge, progress heartbeat and model disclosure
+
+- Added [hedged_model.py](../backend/app/services/hedged_model.py): `race_first` and `HedgedChatModel` start candidate 1 immediately, start the next only when no first stream event arrives within `CHAT_HEDGE_DELAY_SECONDS` (default 10s), cap parallel candidates at `CHAT_HEDGE_MAX_MODELS` (default 3), and cancel/close every loser once one candidate emits its first event. A candidate that fails before its first event frees its slot immediately.
+- `llm_gateway.chat_completion` uses the same race for non-streaming calls; `pydantic_agent.build_hedged_model` wraps the existing model chain for the durable agent, so one configured model keeps the old behavior.
+- `agent_runtime` emits `turn.progress` every 5 seconds with elapsed seconds and bounds the whole turn by `AGENT_TURN_TIMEOUT_SECONDS` (default 90s). `POST /agent/sessions/{id}/messages` and the final SSE `message.completed` now return `served_model`, read from the winning provider response.
+- The frontend stream keeps the cancel button alive while enforcing a client deadline via `AbortSignal.any` + `AbortSignal.timeout`, and shows the serving model under the answer after a completed turn.
+- New env knobs are documented in [backend/.env.example](../backend/.env.example): `CHAT_HEDGE_DELAY_SECONDS`, `CHAT_HEDGE_MAX_MODELS`, `CHAT_REQUEST_TOTAL_TIMEOUT_SECONDS`, `AGENT_TURN_TIMEOUT_SECONDS`.
+- Checks (dev host, portable PostgreSQL `eea_test`): targeted `test_hedged_model` + `test_agent_workflow` + `test_agent_runtime_stream_buffer` + `test_llm_gateway_models` **36 passed**, including a streaming first-token winner/loser-cancellation case; full suite **458 passed, 2 skipped** (an early run hit a wall-clock flake in `test_basis_freshness_turns_stale_after_signal_patch`; it passed on isolated rerun and both subsequent full runs); `pnpm typecheck`, `pnpm build`, `pnpm antd:lint` passed (four pre-existing deprecation warnings outside this slice). Live SSE against the real gateway completed with 13 `turn.progress` events, one `text.delta` and `served_model` populated.
+- Still open: Linux intranet gateway latency/cancellation timing, and Playwright coverage of the post-answer model line.
+
+### Chat stream carries reasoning and tool events
+
+- `run_agent_turn` now consumes the event stream pydantic-ai 2.x hands to `event_stream_handler` (an async iterable; the old handler took one event at a time, so tool events never fired). [agent_workflow.py](../backend/app/services/agent_workflow.py) translates `ThinkingPart`/`ThinkingPartDelta` into `thinking.delta` and `FunctionToolCallEvent` into `tool.call`; the output tool (`final_result`) stays hidden. Final answers keep streaming as `text.delta` from the validated partial output, with `text.replace` when partial validation rewrites earlier text.
+- `agent_runtime` still buffers durable events for replay but no longer writes `text.delta`, `thinking.delta` or `turn.progress` rows per token; the stored assistant message is the transcript.
+- The evidence chat renders a muted 思考过程 bubble while the model reasons, names tools by business action (检索证据/检索文档/…), shows a caret on the streaming answer, and follows the message list to the bottom until the reader scrolls up ([dashboard.css](../frontend/app/dashboard.css)).
+- Checks (Windows dev host, no PostgreSQL running): `tests/test_agent_stream_events.py` + `tests/test_agent_runtime_stream_buffer.py` **4 passed**; `pytest -m no_db` **107 passed, 1 skipped, 1 failed** — `test_skills_eval_cli_json` fails on a pre-existing console-encoding read of its subprocess (GBK), not on this change. Live probe against the model gateway: reasoning produced 11 `thinking.delta` chunks whose text equals the stored `ThinkingPart`, then 32 `text.delta` chunks, completed in about 8s. `pnpm typecheck`, `pnpm antd:lint` (0 issues) and `pnpm build` passed.
+- Not run here: DB-backed `test_agent_workflow`/SSE suite (needs the portable `eea_test` database) and browser verification of the thinking bubble. Still open: Linux intranet latency and a Playwright case for streamed tokens.
+
+### Role-restriction and seven-stage Playwright smoke
+
+- Added backend/scripts/seed_smoke_chain.py: builds one labelled acceptance chain through the public REST API (signal → theme → confirmed demand → published function → landing point → two standards → assessment) and prints the ids. Demand confirmation needs an admin role, so the seed is run against an isolated dev DB with DEV_OPERATOR_ROLE=taxonomy_admin, then the API is restarted with the normal role.
+- Added frontend/tests/e2e/role-restrictions.spec.ts (OPS-03):
+  - a researcher cannot issue or list capture tokens (403),
+  - a caller cannot promote itself by putting role: platform_admin in the request body (403/422),
+  - a direct x-eea-authenticated-user / -role header does not become the server identity; whoami keeps the real subject and role, and session ownership stays scoped to it.
+- Added frontend/tests/e2e/chain-smoke.spec.ts: walks the seeded chain across /signals, /topics, /trace, /technology and /traceDetail/{lp} and asserts the real titles, theme, relation rows, the two standard texts, and that no /api/v1 request fails. The first test also cross-checks the trace API reaches the seeded signal and that completeness reports all five stages present.
+- Added frontend/tests/e2e/README.md documenting the three commands, the seeding prerequisite, and what is deliberately not asserted.
+- Playwright config keeps the host Edge channel; scripts pw:smoke (trace), pw:chain (chain), pw:roles (roles).
+- Checks: backend full suite 452 passed, 2 skipped; frontend pnpm typecheck and pnpm build passed; Playwright 7 passed in one run (2 trace + 2 chain + 3 role) against the dev API and Next dev server.
+- Still open: Linux intranet proxy/TLS evidence; the role matrix covers capture tokens, body-role escalation and identity headers only; real Word figure acceptance and PDF OCR remain open.
 
 ### Figure retry authorization (OPS-03 slice) and trace smoke test
 

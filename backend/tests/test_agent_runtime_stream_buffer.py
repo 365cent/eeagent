@@ -39,6 +39,7 @@ async def test_stream_buffer_not_duplicated_when_terminal_append_fails(monkeypat
 
     async def fake_turn(agent, **kwargs):
         sink = kwargs["event_sink"]
+        await sink("tool.call", {"tool": "search_evidence"})
         await sink("text.delta", {"delta": "x"})
         output = AgentRunOutput(answer="ok", citation_refs=[], patch_ids=[])
         return output, [], None
@@ -53,7 +54,7 @@ async def test_stream_buffer_not_duplicated_when_terminal_append_fails(monkeypat
         AsyncMock(return_value=""),
     )
 
-    run, _, error = await execute_user_message(
+    run, _, error, _ = await execute_user_message(
         db,
         session=session,
         actor=actor,
@@ -61,7 +62,8 @@ async def test_stream_buffer_not_duplicated_when_terminal_append_fails(monkeypat
     )
     assert error == "Agent 运行失败"
     assert run.status == "failed"
-    delta_count = sum(1 for t in append_calls if t == "text.delta")
-    assert delta_count == 1
+    # Durable events are buffered once; token deltas are not persisted at all.
+    assert append_calls.count("tool.call") == 1
+    assert append_calls.count("text.delta") == 0
     assert append_calls.count("turn.started") == 1
     assert append_calls.count("turn.failed") == 1

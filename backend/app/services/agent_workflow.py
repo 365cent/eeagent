@@ -7,7 +7,15 @@ import uuid
 from typing import Any, Awaitable, Callable
 
 from pydantic_ai import Agent, DeferredToolRequests, ModelRetry, RunContext
-from pydantic_ai.messages import ModelMessagesTypeAdapter
+from pydantic_ai.messages import (
+    FunctionToolCallEvent,
+    ModelMessagesTypeAdapter,
+    PartDeltaEvent,
+    PartStartEvent,
+    ThinkingPart,
+    ThinkingPartDelta,
+)
+from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
 
 from app.core.identity import OperatorIdentity
@@ -29,25 +37,25 @@ from app.services.agent_tools import (
     suggest_signal_tags_tool,
     suggest_theme_membership_tool,
 )
-from app.services.llm_gateway import LLMNotConfiguredError, resolve_chat_model
+from app.services import model_speed
+from app.services.llm_gateway import LLMNotConfiguredError
 from app.services.llm_usage import (
     http_status_of,
     log_llm_call,
     usage_from_agent_result,
     usage_without_result,
 )
-from app.services.pydantic_agent import build_model
+from app.services.pydantic_agent import build_hedged_model, build_model
 from app.core.config import get_settings
 
 
-async def build_eea_agent(*, model: OpenAIChatModel | None = None) -> Agent[AgentDeps, AgentRunOutput]:
+async def build_eea_agent(*, model: Model | None = None) -> Agent[AgentDeps, AgentRunOutput]:
     if model is None:
         settings = get_settings()
         base = settings.chat_base_url_normalized
         if not base:
             raise LLMNotConfiguredError("CHAT_BASE_URL must be set in backend/.env")
-        chosen = await resolve_chat_model()
-        model = build_model(chosen, base_url=base, api_key=settings.chat_api_key_value)
+        model = await build_hedged_model()
 
     agent: Agent[AgentDeps, AgentRunOutput] = Agent(
         model,
@@ -100,6 +108,48 @@ def loads_message_history(raw: bytes | None) -> list[Any]:
 EventSink = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
+async def forward_stream_event(
+    event: Any, event_sink: EventSink, seen_tools: set[str]
+) -> None:
+    """Translate one pydantic-ai stream event into a chat event.
+
+    Only the parts a reader can act on are forwarded: reasoning tokens
+    (`thinking.delta`) and function tool calls (`tool.call`). The model's final
+    answer is streamed from the validated output in `run_agent_turn`, and the
+    output tool call (`final_result`) is not a business tool. Dispatching on
+    the concrete event classes keeps this working with the event kinds the
+    installed pydantic-ai version actually emits.
+    """
+    if isinstance(event, PartStartEvent):
+        part = event.part
+        if isinstance(part, ThinkingPart) and part.content:
+            await event_sink("thinking.delta", {"delta": part.content})
+        return
+    if isinstance(event, PartDeltaEvent):
+        delta = event.delta
+        if isinstance(delta, ThinkingPartDelta) and delta.content_delta:
+            await event_sink("thinking.delta", {"delta": delta.content_delta})
+        return
+    if isinstance(event, FunctionToolCallEvent):
+        name = getattr(event.part, "tool_name", None)
+        if isinstance(name, str) and name and name not in seen_tools:
+            seen_tools.add(name)
+            await event_sink("tool.call", {"tool": name})
+
+
+async def _drain_stream_events(
+    ctx: Any, events: Any, event_sink: EventSink, seen_tools: set[str]
+) -> None:
+    """Consume the handler stream; pydantic-ai hands over an async iterable."""
+    del ctx
+    if hasattr(events, "__aiter__"):
+        async for event in events:
+            await forward_stream_event(event, event_sink, seen_tools)
+        return
+    # Older pydantic-ai versions called the handler once per event.
+    await forward_stream_event(events, event_sink, seen_tools)
+
+
 async def run_agent_turn(
     agent: Agent[AgentDeps, AgentRunOutput],
     *,
@@ -114,20 +164,10 @@ async def run_agent_turn(
     started = time.perf_counter()
     seen_tools: set[str] = set()
 
-    async def handler(ctx, event) -> None:
-        del ctx
+    async def handler(ctx, events) -> None:
         if event_sink is None:
             return
-        part = getattr(event, "part", None)
-        part_tool = getattr(part, "tool_name", None)
-        if isinstance(part_tool, str) and part_tool and part_tool not in seen_tools:
-            seen_tools.add(part_tool)
-            await event_sink("tool.call", {"tool": part_tool})
-        delta = getattr(event, "delta", None)
-        tool_name = getattr(delta, "tool_name_delta", None) or getattr(event, "tool_name", None)
-        if isinstance(tool_name, str) and tool_name and tool_name not in seen_tools:
-            seen_tools.add(tool_name)
-            await event_sink("tool.call", {"tool": tool_name})
+        await _drain_stream_events(ctx, events, event_sink, seen_tools)
 
     try:
         if event_sink is not None:
@@ -141,18 +181,25 @@ async def run_agent_turn(
             ) as streamed:
                 async for partial in streamed.stream_output(debounce_by=0.05):
                     answer = getattr(partial, "answer", None)
-                    if (
-                        isinstance(answer, str)
-                        and answer.startswith(last_answer)
-                        and len(answer) > len(last_answer)
-                    ):
+                    if not isinstance(answer, str) or answer == last_answer:
+                        continue
+                    if answer.startswith(last_answer):
                         await event_sink("text.delta", {"delta": answer[len(last_answer) :]})
-                        last_answer = answer
+                    else:
+                        # Partial validation rewrote earlier text; replace it so
+                        # the client never shows a broken concatenation.
+                        await event_sink("text.replace", {"text": answer})
+                    last_answer = answer
                 output = await streamed.get_output()
                 messages = streamed.all_messages()
                 final_answer = getattr(output, "answer", None)
-                if isinstance(final_answer, str) and len(final_answer) > len(last_answer):
-                    await event_sink("text.delta", {"delta": final_answer[len(last_answer) :]})
+                if isinstance(final_answer, str) and final_answer.startswith(last_answer):
+                    if len(final_answer) > len(last_answer):
+                        await event_sink(
+                            "text.delta", {"delta": final_answer[len(last_answer) :]}
+                        )
+                elif isinstance(final_answer, str):
+                    await event_sink("text.replace", {"text": final_answer})
         else:
             result = await agent.run(
                 user_message,
@@ -170,6 +217,13 @@ async def run_agent_turn(
             latency_ms=int((time.perf_counter() - started) * 1000),
         )
     except Exception as exc:
+        # A model that wins the stream but breaks the agent contract costs the
+        # user a whole reply: demote it hard so the next turn starts elsewhere.
+        winner = getattr(getattr(agent, "model", None), "last_winner", None)
+        if winner:
+            await model_speed.record_failure(
+                winner, error=f"{type(exc).__name__}: {exc}", kind="turn", weight=3
+            )
         log_llm_call(
             usage_without_result(
                 task="durable_agent",

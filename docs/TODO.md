@@ -41,7 +41,9 @@
 
 - [ ] P0 · 随 BE/FE/CC/OPS 实现更新。
 - 2026-11-17 同步：模型网关拆为 `CHAT_*` / `EMBEDDING_*` / `RERANK_*`；采集凭据表 0018 与服务端签发/撤销 API；`search_rag` 已接入 embedding + rerank。
-- 持久采集接口、worker 与索引首批同步已交付，证据见[交付记录](DELIVERY-RECORD.md#doc-03--current-capture-route-and-worker-index-slice)。2026-11-09 补充：前端导入与 Go 文件队列默认走 `POST /api/v1/capture/jobs`，`POST /documents/raw` 保留为 legacy；见[交付记录](DELIVERY-RECORD.md#be-01--fe-02--cc-02--durable-document-and-html-ingest-slice)。**分层与契约**初稿见 [ARCHITECTURE-LAYERS.md](ARCHITECTURE-LAYERS.md)（对齐 [BE-17](../backend/TODO.md#be-17-领域分层与依赖边界)、[FE-13](../frontend/TODO.md#fe-13-领域特性与-workspace-拆分)、[CC-07](../client/TODO.md#cc-07-客户端分层与-http-复用)）。完整部署拓扑图、身份/审计/业务状态机仍待更新。
+- 2026-11-20 同步：迁移头 `0022_demand_review_baseline`（0001–0022 共 22 个加法修订），schema 清单 **31 张 `eea_*` 表 + 2 个视图**，由 [test_db_schema.py](../backend/tests/test_db_schema.py) 精确断言；接口契约变化见 [ARCHITECTURE-LAYERS.md](ARCHITECTURE-LAYERS.md#迁移与数据模型2026-11-20)。
+- 2026-11-20 契约：`POST /api/v1/imports/capture-urls` 生成的采集任务写入调用者 `owner_subject`（研究者客户端可见自身任务）；文档解析失败返回 422 且保留原始 blob；PDF 需 ≥120 字符文本层；文档摘要过短时追加净化后的正文摘录。
+- 持久采集接口、worker 与索引首批同步已交付，证据见[交付记录](DELIVERY-RECORD.md#doc-03--current-capture-route-and-worker-index-slice)。2026-11-09 补充：前端导入与 Go 文件队列默认走 `POST /api/v1/capture/jobs`，`POST /documents/raw` 保留为 legacy；见[交付记录](DELIVERY-RECORD.md#be-01--fe-02--cc-02--durable-document-and-html-ingest-slice)。**分层与契约**初稿见 [ARCHITECTURE-LAYERS.md](ARCHITECTURE-LAYERS.md)（对齐 [BE-17](../backend/TODO.md#be-17-领域分层与依赖边界)、[FE-13](../frontend/TODO.md#fe-13-领域特性与-workspace-拆分)、[CC-07](../client/TODO.md#cc-07-客户端分层与-http-复用)）。迁移顺序、schema 清单与导入契约已同步；**部署拓扑图、身份/审计/业务状态机仍待更新**（受 OPS-03 与 DOC-02 制约）。
 - 来源：WBS 1.2.2…1.2.6；入口 [figures.md](figures.md)、[平台实施计划](platform-implementation-plan.md)、[ARCHITECTURE-LAYERS.md](ARCHITECTURE-LAYERS.md)、各 README。
 - 将已落地设计形成当前架构说明：实际 Next.js、嵌入式文档模块、Pydantic AI、Linux 单主机服务和持久对象存储；保留旧技术提案的来源身份；`app/platform` / `app/domains`、import-linter 与 OpenAPI 路径快照按 ARCHITECTURE-LAYERS 维护。
 - 为摄取/job/身份/审计/复核/funnel/来源/文档/Agent/报告给出请求响应、状态迁移、错误码、幂等/版本和权限说明。

@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily EEA orphan-object maintenance
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+
+[Install]
+WantedBy=timers.target

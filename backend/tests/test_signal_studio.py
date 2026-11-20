@@ -123,6 +123,42 @@ async def test_mindmap_depth_is_trimmed_to_three(client, monkeypatch):
     assert depth(payload["children"][0]) == 2
 
 
+async def test_studio_serves_db_cache_without_second_llm_call(client, monkeypatch):
+    sig = await _signal(client)
+    calls = _stub(monkeypatch, ["## 缓存报告\n\n已生成。"])
+    first = await client.post(f"/api/v1/signals/{sig['id']}/studio", json={"kind": "report"})
+    assert first.status_code == 200, first.text
+    assert len(calls) == 1
+
+    async def boom(*_a, **_k):
+        raise AssertionError("LLM should not run when cached artifact exists")
+
+    monkeypatch.setattr("app.api.v1.signals.chat_completion", boom)
+    second = await client.post(f"/api/v1/signals/{sig['id']}/studio", json={"kind": "report"})
+    assert second.status_code == 200, second.text
+    assert second.text == first.text
+
+    bundle = await client.get(f"/api/v1/signals/{sig['id']}/studio")
+    assert bundle.status_code == 200, bundle.text
+    assert bundle.json().get("report")
+
+
+async def test_studio_regenerate_hits_llm_again(client, monkeypatch):
+    sig = await _signal(client)
+    calls = _stub(
+        monkeypatch,
+        ["## 第一版\n", "## 第二版\n"],
+    )
+    await client.post(f"/api/v1/signals/{sig['id']}/studio", json={"kind": "report"})
+    r = await client.post(
+        f"/api/v1/signals/{sig['id']}/studio",
+        json={"kind": "report", "regenerate": True},
+    )
+    assert r.status_code == 200, r.text
+    assert "第二版" in r.text
+    assert len(calls) == 2
+
+
 async def test_studio_requires_llm_config(client, monkeypatch):
     sig = await _signal(client)
 

@@ -112,6 +112,68 @@ async def test_capture_body_and_archive_round_trip(client):
     assert "48V低压供电网络研究".encode() in r.content
     assert b'<base href="https://mp.weixin.qq.com/s/"' in r.content
 
+    # The workspace embeds the replay in an iframe served from :3000 while this
+    # API answers on :8000, so SAMEORIGIN refuses the embed (blank pane). The
+    # replay must name the configured web origins instead, and never allow all.
+    csp = r.headers["content-security-policy"]
+    assert "script-src 'none'" in csp
+    assert "x-frame-options" not in r.headers
+    ancestors = csp.split("frame-ancestors", 1)[1].split()
+    assert "'self'" in ancestors
+    assert "*" not in ancestors
+    from app.core.config import get_settings
+
+    for origin in get_settings().origins:
+        assert origin in ancestors
+
+    # The workspace on a LAN address cannot be named in CSP as a range, so it
+    # declares its own origin; only CORS-allowed origins may join frame-ancestors.
+    lan = await client.get(
+        f"/api/v1/signals/{sig['id']}/archive",
+        params={"embed_origin": "http://10.215.8.74:3000"},
+    )
+    assert "http://10.215.8.74:3000" in lan.headers["content-security-policy"].split(
+        "frame-ancestors", 1
+    )[1]
+    rejected = await client.get(
+        f"/api/v1/signals/{sig['id']}/archive",
+        params={"embed_origin": "https://evil.example"},
+    )
+    assert "evil.example" not in rejected.headers["content-security-policy"]
+
+
+async def test_archive_frame_ancestor_policy_lists_web_origins():
+    """Only 'self' plus the configured web origins may frame the replay."""
+    from app.core.config import get_settings
+
+    settings = get_settings().model_copy(
+        update={
+            "cors_origins": "http://localhost:3000,http://127.0.0.1:3000,http://localhost:3000",
+            "archive_frame_ancestors": "https://eea.example.internal",
+        }
+    )
+    assert settings.archive_frame_ancestor_policy.split() == [
+        "'self'",
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "https://eea.example.internal",
+    ]
+    assert settings.archive_frame_ancestors_for("http://10.215.8.74:3000").split()[-1] == (
+        "http://10.215.8.74:3000"
+    )
+    rejected = settings.archive_frame_ancestors_for("https://evil.example")
+    assert "https://evil.example" not in rejected
+    assert rejected.split() == settings.archive_frame_ancestor_policy.split()
+    # Only a bare tuple origin may join the list: not a prefix/suffix lookalike,
+    # not an URL with a path, and not a wildcard.
+    for spoof in (
+        "http://localhost:3000.evil.example",
+        "http://localhost:3000/path",
+        "http://localhost:3000?x=1",
+        "*",
+    ):
+        assert spoof not in settings.archive_frame_ancestors_for(spoof).split()
+
 
 async def test_capture_figures_endpoint_lists_inlined_images(client):
     import base64

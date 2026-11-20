@@ -56,6 +56,7 @@ EXPECTED_TABLES = {
     "eea_embedding_cache",
     "eea_signal_source",
     "eea_stored_object_orphan",
+    "eea_signal_studio_artifact",
 }
 
 EXPECTED_VIEWS = {"eea_v_tech_theme_metrics", "eea_v_tech_theme_display_tags"}

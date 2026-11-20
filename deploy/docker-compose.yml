@@ -86,6 +86,25 @@ services:
       migrate:
         condition: service_completed_successfully
     command: ["uv", "run", "python", "-m", "app.worker"]
+  maintenance:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile.backend
+    env_file:
+      - .env
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      APP_ENV: ${APP_ENV:-production}
+      OBJECT_DIR: /var/lib/eea/objects
+    volumes:
+      - objectstore:/var/lib/eea/objects
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    command: ["uv", "run", "python", "-m", "app.services.orphan_maintenance"]
+    profiles: ["ops"]
+    restart: "no"
 
   web:
     build:

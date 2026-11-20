@@ -23,6 +23,7 @@ import base64
 import hashlib
 import io
 import os
+import random
 import re
 import tempfile
 import time
@@ -34,7 +35,7 @@ from pathlib import Path
 import httpx
 from starlette.concurrency import run_in_threadpool
 
-from app.core.config import get_settings
+from app.core.config import get_settings, model_chain
 from app.platform.http import open_async_http_client
 from app.services.llm_gateway import resolve_vision_model
 from app.services.llm_prompts import VISION_CAPTION_PROMPT as _CAPTION_PROMPT
@@ -111,6 +112,7 @@ class Figure:
     data: bytes
     page: int | None = None
     caption: str = ""
+    caption_model: str | None = None
     occurrence_count: int = 1
     section_path: list[str] | None = None
     position: int | None = None
@@ -151,6 +153,11 @@ def normalize_document_mime(filename: str | None, mime: str | None) -> str | Non
         if suffix in _FILENAME_MIME:
             return _FILENAME_MIME[suffix]
     return lowered or None
+
+
+# A cover page or a caption-only section still yields a few characters; require
+# enough text to be readable evidence when the text layer is missing.
+_PDF_MIN_TEXT_CHARS = 120
 
 
 def _convert_sync(data: bytes, suffix: str) -> tuple[str, str | None]:
@@ -365,34 +372,46 @@ def _pdf_figures(data: bytes) -> list[Figure]:
 
 
 async def caption_figure(figure: Figure, *, model: str, retries: int = 0) -> str:
-    """One vision call; empty responses retried up to `retries` extra times.
+    """Caption one figure; retries rotate through the configured vision models.
 
-    The first attempt on a figure occasionally returns an empty body from the
-    gateway (transient upstream error); one retry recovers most of those.
+    `model` may be a comma-separated list (``VISION_MODEL``), e.g.
+    ``Qwen3.8-27B,Qwen3.6-35B``. Every listed model is tried at least once, and
+    `retries` extra attempts are spread across the list in order, so a gateway
+    that rejects one id (404/503) still gets the next one. The first attempt on
+    a figure occasionally returns an empty body from a transient upstream error.
     """
     settings = get_settings()
     base = settings.chat_base_url_normalized
-    if not base or not model:
+    models = model_chain(model)
+    if not base or not models:
         return ""
-    for attempt in range(retries + 1):
+    attempts = max(retries + 1, len(models))
+    delay_base = float(getattr(settings, "vision_retry_base_delay_seconds", 0.8))
+    for attempt in range(attempts):
         if attempt:
-            # gateway rate-limits long batches; give it a beat before retrying
-            await asyncio.sleep(2.0 * attempt)
-        caption = await _caption_once(
-            figure, model=model, settings=settings, base=base, attempt=attempt + 1
+            # gateway rate-limits long batches; short jittered beat, in model order
+            await asyncio.sleep(delay_base * attempt + random.uniform(0, 0.2))
+        current = models[attempt % len(models)]
+        caption, served = await _caption_once(
+            figure, model=current, settings=settings, base=base, attempt=attempt + 1
         )
         if caption:
+            figure.caption_model = served or current
             return caption
     return ""
 
 
 async def _caption_once(
     figure: Figure, *, model: str, settings, base: str, attempt: int = 1
-) -> str:
+) -> tuple[str, str]:
+    """One vision attempt: returns (caption, model that answered)."""
     encoded = base64.b64encode(figure.data).decode("ascii")
     payload = {
         "model": model,
-        "max_tokens": 128,
+        # Reasoning-only ids (Qwen3.6-35B) spend the whole budget on reasoning
+        # and return finish_reason=length with empty content at 128 tokens, so
+        # the ceiling must leave room for the caption itself.
+        "max_tokens": int(getattr(settings, "vision_caption_max_tokens", 1024)),
         "temperature": 0,
         "messages": [
             {
@@ -430,7 +449,7 @@ async def _caption_once(
                 model_requests=None,
             )
         )
-        return ""
+        return "", ""
     latency_ms = int((time.perf_counter() - started) * 1000)
     data: object = None
     try:
@@ -456,7 +475,7 @@ async def _caption_once(
                 model_requests=1 if usage else None,
             )
         )
-        return ""
+        return "", served or model
     log_llm_call(
         usage_from_chat_payload(
             usage,
@@ -472,10 +491,10 @@ async def _caption_once(
     try:
         content = data["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError):
-        return ""
+        return "", served or model
     if not isinstance(content, str):
-        return ""
-    return content.strip().replace("\n", " ")[:300]
+        return "", served or model
+    return content.strip().replace("\n", " ")[:300], served or model
 
 
 def apply_captions(markdown: str, figures: list[Figure]) -> str:
@@ -516,13 +535,17 @@ async def ingest_document(
     figures = await run_in_threadpool(extract_figures, data, suffix)
     figures = figures[: settings.max_figures]
 
+    vision_chain: str = ""
     vision_model: str | None = None
     if figures and vision_captions:
         try:
-            vision_model = await resolve_vision_model()
+            vision_chain = await resolve_vision_model()
         except Exception:  # noqa: BLE001 - captions are best-effort
-            vision_model = None
-        if vision_model:
+            vision_chain = ""
+        # ``VISION_MODEL`` may list fallbacks (``A,B``); keep the whole chain for
+        # the caption calls and record the id that actually answered below.
+        vision_model = (model_chain(vision_chain) or [None])[0]
+        if vision_chain:
 
             async def caption_figures() -> None:
                 semaphore = asyncio.Semaphore(3)
@@ -531,7 +554,7 @@ async def ingest_document(
                     async with semaphore:
                         figure.caption = await caption_figure(
                             figure,
-                            model=vision_model,
+                            model=vision_chain,
                             retries=settings.vision_caption_retry,
                         )
 
@@ -540,7 +563,7 @@ async def ingest_document(
                     if not figure.caption:
                         figure.caption = await caption_figure(
                             figure,
-                            model=vision_model,
+                            model=vision_chain,
                             retries=settings.vision_caption_retry,
                         )
                         await asyncio.sleep(0.5)
@@ -552,7 +575,16 @@ async def ingest_document(
                 )
             except asyncio.TimeoutError:
                 pass
+        # Prefer the model that really answered over the head of the chain.
+        served = next((f.caption_model for f in figures if f.caption_model), None)
+        if served:
+            vision_model = served
 
+    if suffix == ".pdf" and len(markdown.strip()) < _PDF_MIN_TEXT_CHARS:
+        # Figure captions must not make a text-less scan look readable.
+        raise ValueError(
+            "PDF 没有可提取的文本层（可能需要 OCR）；原始文件已保留，请 OCR 后重新上传"
+        )
     if not markdown.strip():
         markdown = f"# {filename or 'document'}\n\n（MarkItDown 未抽取到文本）"
     canonical = apply_captions(markdown, figures)

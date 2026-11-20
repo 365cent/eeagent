@@ -164,7 +164,8 @@ func Launch(ctx context.Context, opts Options) (*Browser, error) {
 		"--user-data-dir=" + absProfile,
 		"--no-first-run",
 		"--no-default-browser-check",
-		"--disable-features=Translate,MediaRouter",
+		// Edge/Chrome 137+ block --load-extension without this feature override.
+		"--disable-features=Translate,MediaRouter,DisableLoadExtensionCommandLineSwitch",
 		"about:blank",
 	}
 	if extensionPath != "" {
@@ -403,9 +404,15 @@ const stateExpr = `(() => {
   const hasArticle = !!document.querySelector(
     "#js_content, .rich_media_content, .article_body, .article_text, .art-con.article_body, article, main"
   );
+  const title = ((document.title || "").trim());
   const challengeUrl = /wappoc_appmsgcaptcha|wappoc_appmsg/i.test(href);
-  const challengeText = !hasArticle &&
-    /(环境异常|完成验证|安全验证|Just a moment|Checking your browser|Enable JavaScript and cookies)/i.test(text);
+  const challengeWords = /(环境异常|完成验证|安全验证|验证码|Just a moment|Checking your browser|Enable JavaScript and cookies)/i;
+  // A challenge page can still ship an empty <article> shell, so a short body
+  // with a challenge title is a challenge even when hasArticle is true.
+  const challengeText = !hasArticle && challengeWords.test(text) ||
+    (challengeWords.test(title) && text.length < 800);
+  // A login wall or blocked page keeps the URL as its title.
+  const shell = (title === "" || title === href) && text.length < 800;
   const errorPage = location.protocol === "chrome-error:" ||
     /chromewebdata/i.test(href) ||
     !!document.querySelector("#main-message, .interstitial-wrapper, .error-code, .neterror");
@@ -414,6 +421,7 @@ const stateExpr = `(() => {
     textLen: text.length,
     challenge: challengeUrl || challengeText,
     hasArticle,
+    shell,
     errorPage,
     url: href
   };
@@ -424,6 +432,7 @@ type pageState struct {
 	TextLen    int    `json:"textLen"`
 	Challenge  bool   `json:"challenge"`
 	HasArticle bool   `json:"hasArticle"`
+	Shell      bool   `json:"shell"`
 	ErrorPage  bool   `json:"errorPage"`
 	URL        string `json:"url"`
 }
@@ -499,6 +508,14 @@ func (b *Browser) waitForContent(ctx context.Context, sess *cdp.Session) error {
 			}
 			if stable >= 2 {
 				return nil
+			}
+		case state.Shell:
+			stable = 0
+			if time.Now().After(readyDeadline) {
+				return fmt.Errorf(
+					"page has no readable title (login wall or empty shell): %s",
+					state.URL,
+				)
 			}
 		default:
 			stable = 0

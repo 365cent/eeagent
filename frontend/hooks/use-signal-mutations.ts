@@ -9,20 +9,13 @@ import {
 } from '@/lib/api/eea-api'
 import type { SignalUpdatePayload, TagAssignmentPayload, ThemeAssignmentPayload } from '@/lib/api/types'
 import { eeaQueryKeys } from '@/lib/query/eea-query-keys'
+import { invalidateSignalCaches } from '@/lib/query/invalidate-signal-caches'
 
 export function useSignalMutations(signalId: string | undefined, expectedUpdatedAt?: string | null) {
   const queryClient = useQueryClient()
 
   const invalidate = async () => {
-    await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.signalsRoot })
-    await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.signalsPageRoot })
-    await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.overview })
-    if (signalId) {
-      await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.signal(signalId) })
-      await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.audit(signalId) })
-    }
-    await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.themes })
-    await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.vocabUsage })
+    await invalidateSignalCaches(queryClient, { signalId })
     await queryClient.invalidateQueries({ queryKey: eeaQueryKeys.vocab('tech_tag') })
   }
 

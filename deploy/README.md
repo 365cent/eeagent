@@ -72,6 +72,29 @@ Object files are in the `eea_objectstore` Docker volume; restore requires extrac
 
 For hosts that forbid containers, use `eea-api.service`, `eea-web.service`, and `eea-worker.service` with the paths described in the previous README revision. Build frontend with `NEXT_PUBLIC_EEA_API_BASE=/api/v1`, run Alembic once per release, and point Nginx at loopback `127.0.0.1:8000` / `:3000`.
 
+## Maintenance
+
+Resolved object-store orphans are pruned by `python -m app.services.orphan_maintenance`. The command only removes resolved or missing blobs; it does not prune capture jobs or signals.
+
+Compose installs run it explicitly:
+
+```bash
+cd deploy
+docker compose --profile ops run --rm maintenance
+```
+
+Bare-metal installs use the included timer:
+
+```bash
+install -m 0644 deploy/eea-maintenance.service /etc/systemd/system/
+install -m 0644 deploy/eea-maintenance.timer /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable --now eea-maintenance.timer
+```
+
+Check `journalctl -u eea-maintenance.service` after the first run.
+
+
 ## Limits (honest)
 
 - Compose stack is implemented in-repo; **Linux acceptance on customer hardware** (TLS, identity, backup restore) remains OPS-06.

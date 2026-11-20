@@ -101,14 +101,16 @@ export function EvidenceStudioPane({
     setLoading(true)
     setError(null)
     try {
-      const payload = await fetchSignalStudio(signalId, kind)
+      const payload = await fetchSignalStudio(signalId, kind, {
+        regenerate: fetchGeneration > 0,
+      })
       onLoadedRef.current(payload as string | StudioMindmapPayload | StudioInfographicPayload)
     } catch (err) {
       setError(eeaErrorMessage(err, '生成失败'))
     } finally {
       setLoading(false)
     }
-  }, [signalId, kind, cached])
+  }, [signalId, kind, fetchGeneration])
 
   useEffect(() => {
     setError(null)

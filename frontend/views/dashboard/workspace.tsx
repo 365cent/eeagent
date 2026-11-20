@@ -90,7 +90,7 @@ import {
   parseDocumentResearchFocus,
   type DocumentResearchFocus,
 } from '@/lib/document-research'
-import { fetchDocument, patchSignal } from '@/lib/api/eea-api'
+import { fetchDocument, fetchSignalStudioBundle, patchSignal } from '@/lib/api/eea-api'
 import { buildAppPath } from '@/lib/navigation'
 import { excerptLooksLikeChrome, sourceExcerptSnippet } from '@/lib/evidence/audio-overview-segments'
 import type { AppRouteOptions, NavigateFn, Signal } from '@/types/platform'
@@ -99,6 +99,7 @@ import {
   clearStudioKind,
   loadStudioCache,
   persistStudioKind,
+  studioBundleToCacheEntry,
   type StudioCacheEntry,
 } from '@/lib/studio-cache'
 import { EvidenceAssistantChat } from '@/components/evidence/evidence-assistant-chat'
@@ -200,13 +201,14 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
   const [documentRefreshKey, setDocumentRefreshKey] = useState(0)
   const [studioCacheBySignal, setStudioCacheBySignal] = useState<Record<string, StudioCacheEntry>>({})
   const markdownArticleRef = useRef<HTMLElement>(null)
+  const stageViewLockedRef = useRef(false)
   const { signal: liveSignal, detail, isLoading, isError } = useSignalDetail(signalId)
   const { maps } = useRefCodeMaps()
   const queryClient = useQueryClient()
   const apiId = detail?.id ?? (isUuid(signalId) ? signalId : null)
   const documentId = detail?.document_id ?? null
   const documentQuery = useQuery({
-    queryKey: ['eea', 'document', documentId ?? 'none'] as const,
+    queryKey: documentId ? eeaQueryKeys.documentDetail(documentId) : (['eea', 'document', 'none'] as const),
     queryFn: () => fetchDocument(documentId!),
     enabled: Boolean(documentId),
     staleTime: 60_000,
@@ -238,12 +240,32 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
 
   useEffect(() => {
     if (!studioCacheKey || !isUuid(studioCacheKey)) return
-    const persisted = loadStudioCache(studioCacheKey)
-    if (!persisted.mindmap && !persisted.report && !persisted.infographic) return
-    setStudioCacheBySignal((prev) => ({
-      ...prev,
-      [studioCacheKey]: { ...persisted, ...prev[studioCacheKey] },
-    }))
+    const fromSession = loadStudioCache(studioCacheKey)
+    let cancelled = false
+    void fetchSignalStudioBundle(studioCacheKey)
+      .then((bundle) => {
+        if (cancelled) return
+        const fromServer = studioBundleToCacheEntry(bundle)
+        const merged: StudioCacheEntry = { ...fromServer, ...fromSession }
+        if (!merged.mindmap && !merged.report && !merged.infographic && !merged.audio) return
+        setStudioCacheBySignal((prev) => ({
+          ...prev,
+          [studioCacheKey]: { ...merged, ...prev[studioCacheKey] },
+        }))
+      })
+      .catch(() => {
+        if (cancelled) return
+        if (!fromSession.mindmap && !fromSession.report && !fromSession.infographic && !fromSession.audio) {
+          return
+        }
+        setStudioCacheBySignal((prev) => ({
+          ...prev,
+          [studioCacheKey]: { ...fromSession, ...prev[studioCacheKey] },
+        }))
+      })
+    return () => {
+      cancelled = true
+    }
   }, [studioCacheKey])
 
   const rememberStudioResult = useCallback(
@@ -314,6 +336,11 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
   )
 
   useEffect(() => {
+    stageViewLockedRef.current = false
+  }, [signalId])
+
+  useEffect(() => {
+    if (stageViewLockedRef.current) return
     if (documentPreviewPending) {
       if (hasBody) setStageView('markdown')
       return
@@ -374,7 +401,8 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
 
   useEffect(() => {
     setArchiveFrameLoaded(false)
-  }, [apiId, stageView])
+  }, [apiId, stageView, detail?.updated_at, detail?.evidence_status_code])
+
 
   useEffect(() => {
     if (!hasBody || !apiId) {
@@ -413,6 +441,8 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
     if (!focus.chunkId && !focus.figureIndex) return
     setResearchFocus(focus)
     setStageView('research')
+    setPreviewOpen(false)
+    stageViewLockedRef.current = true
   }, [canResearch, signalId])
 
   const updateResearchFocus = useCallback((focus: DocumentResearchFocus) => {
@@ -427,6 +457,7 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
     if (!parsed || parsed.documentId !== documentId) return
     setStageView('research')
     setPreviewOpen(false)
+    stageViewLockedRef.current = true
     updateResearchFocus(
       parsed.kind === 'chunk' ? { chunkId: parsed.chunkId } : { figureIndex: parsed.figureIndex },
     )
@@ -470,6 +501,7 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
   ].join(' ')
 
   const onStageTabChange = (value: EvidenceStageView) => {
+    stageViewLockedRef.current = true
     if (value === 'assistant') {
       setPreviewOpen(true)
     }
@@ -674,6 +706,7 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
           <div className={['evidence-stage-tab-pane', stageView === 'research' ? 'is-active' : ''].filter(Boolean).join(' ')}>
             {documentId ? (
               <DocumentResearchPanel
+                key={`${documentId}-${documentRefreshKey}`}
                 documentId={documentId}
                 focus={researchFocus}
                 onFocusChange={updateResearchFocus}
@@ -1018,6 +1051,16 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
     }
     navigateTo(target)
   }
+
+  const handleSignalRemoved = useCallback(
+    (removedId: string) => {
+      if (signalPreview?.key === removedId) setSignalPreview(null)
+      if (activeMenu === 'singal' && activeSignalId === removedId) {
+        navigate('signals')
+      }
+    },
+    [activeMenu, activeSignalId, navigate, signalPreview],
+  )
   useEffect(() => {
     if (activeMenu !== 'signals') return
     const params = new URLSearchParams(window.location.search)
@@ -1072,7 +1115,9 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
       >
             {activeMenu !== 'overview' ? (
             <div className={isEvidenceStudio ? 'content-wrap content-wrap-evidence-studio' : 'content-wrap'}>
-              {activeMenu === 'archived' && <ArchivedSignalsView onNavigate={navigate} />}
+              {activeMenu === 'archived' && (
+                <ArchivedSignalsView onNavigate={navigate} onSignalRemoved={handleSignalRemoved} />
+              )}
               {activeMenu === 'signals' && (
                 <SignalsView
                   query={query}
@@ -1085,6 +1130,7 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
                     window.history.pushState({ view: 'signals' }, '', path)
                   }}
                   onNavigate={navigate}
+                  onSignalRemoved={handleSignalRemoved}
                 />
               )}
               {activeMenu === 'topics' && <TopicsView onNavigate={navigate} />}

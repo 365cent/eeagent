@@ -146,6 +146,35 @@ class Signal(Base):
     sources: Mapped[list["SignalSource"]] = relationship(
         back_populates="signal", cascade="all, delete-orphan"
     )
+    studio_artifacts: Mapped[list["SignalStudioArtifact"]] = relationship(
+        back_populates="signal", cascade="all, delete-orphan"
+    )
+
+
+class SignalStudioArtifact(Base):
+    """Cached LLM studio output (mindmap / report / infographic / audio)."""
+
+    __tablename__ = "eea_signal_studio_artifact"
+    __table_args__ = (
+        UniqueConstraint("signal_id", "kind", name="uq_signal_studio_kind"),
+        Index("eea_signal_studio_signal_idx", "signal_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    signal_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eea_signal.id", ondelete="CASCADE"), nullable=False
+    )
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    content_json: Mapped[dict | list | None] = mapped_column(JSONB)
+    content_text: Mapped[str | None] = mapped_column(Text)
+    source_body_sha256: Mapped[str | None] = mapped_column(CHAR(64))
+    llm_model: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    signal: Mapped[Signal] = relationship(back_populates="studio_artifacts")
 
 
 class SignalSource(Base):

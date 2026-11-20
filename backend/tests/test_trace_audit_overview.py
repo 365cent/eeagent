@@ -5,9 +5,10 @@ from datetime import datetime, timedelta
 import uuid
 
 import pytest
-from sqlalchemy import update
+from sqlalchemy import text, update
 
 from app.db.base import SessionLocal
+from app.models.agent_models import DocumentFigure
 from app.models.models import CaptureJob, DemandPoint, Signal
 
 from tests.support import (
@@ -572,10 +573,79 @@ async def test_overview_capture_job_todos_follow_persisted_retry_status(client):
     overview = (await client.get("/api/v1/overview")).json()
     assert overview["capture_jobs_open"] == 0
     assert overview["capture_jobs_failed"] == 1
-
     retried = await client.post(f"/api/v1/capture/jobs/{job_id}/retry")
     assert retried.status_code == 202, retried.text
     assert retried.json()["status"] == "queued"
     overview = (await client.get("/api/v1/overview")).json()
     assert overview["capture_jobs_open"] == 1
     assert overview["capture_jobs_failed"] == 0
+
+
+async def test_trace_document_lists_figure_indices(client):
+    chain = await build_chain(client)
+    uploaded = await client.post(
+        "/api/v1/documents/raw",
+        files={"file": ("trace-figures.txt", b"Figure source text.", "text/plain")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    document = uploaded.json()
+    signal = await create_signal(
+        client,
+        url="https://example.com/trace-figure-source",
+        document_id=document["id"],
+        evidence_status_code="retained",
+    )
+    await assign_signal_theme(client, signal["id"], chain["theme"]["id"])
+    async with SessionLocal() as db:
+        db.add_all(
+            [
+                DocumentFigure(
+                    document_id=uuid.UUID(document["id"]),
+                    figure_index=1,
+                    caption="figure one",
+                ),
+                DocumentFigure(
+                    document_id=uuid.UUID(document["id"]),
+                    figure_index=2,
+                    caption="figure two",
+                ),
+            ]
+        )
+        await db.commit()
+
+    trace = (
+        await client.get(f"/api/v1/trace/landing-points/{chain['landing_point']['id']}")
+    ).json()
+    row = next(item for item in trace["signals"] if item["id"] == signal["id"])
+    assert row["document"]["figure_indices"] == [1, 2]
+
+
+async def test_legacy_confirmed_demand_baseline_is_backfilled(client):
+    """Migration 0022 gives legacy confirmed rows a comparable review baseline."""
+    chain = await build_chain(client)
+    async with SessionLocal() as db:
+        await db.execute(
+            update(DemandPoint)
+            .where(DemandPoint.id == chain["demand"]["id"])
+            .values(confirmed_at=None)
+        )
+        await db.commit()
+
+    trace = (
+        await client.get(f"/api/v1/trace/landing-points/{chain['landing_point']['id']}")
+    ).json()
+    assert trace["basis_freshness"] == "unknown_untracked"
+
+    async with SessionLocal() as db:
+        await db.execute(
+            text(
+                "UPDATE eea_demand_point SET confirmed_at = updated_at "
+                "WHERE review_status = 'confirmed' AND confirmed_at IS NULL"
+            )
+        )
+        await db.commit()
+
+    trace = (
+        await client.get(f"/api/v1/trace/landing-points/{chain['landing_point']['id']}")
+    ).json()
+    assert trace["basis_freshness"] == "fresh"

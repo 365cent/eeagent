@@ -1,8 +1,8 @@
 'use client'
 
 import { useRef, useState } from 'react'
-import { FileAddOutlined, LinkOutlined, PaperClipOutlined } from '@ant-design/icons'
-import { Button, Input, Typography } from 'antd'
+import { CopyOutlined, FileAddOutlined, LinkOutlined, PaperClipOutlined } from '@ant-design/icons'
+import { Alert, App as AntApp, Button, Input, Typography } from 'antd'
 import type { PasteAnalysis } from '@/lib/import-paste-analysis'
 import { importModeHint, primarySubmitLabel } from '@/lib/import-paste-analysis'
 
@@ -36,11 +36,24 @@ export function ImportUnifiedSurface({
   onNavigateSignals,
   onFiles,
 }: ImportUnifiedSurfaceProps) {
+  const { message } = AntApp.useApp()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
+  const isBatch = analysis.mode === 'batch-capture'
 
   const pickFiles = () => {
     fileInputRef.current?.click()
+  }
+
+  const copyLinkList = async () => {
+    try {
+      await navigator.clipboard.writeText(analysis.urls.join('\n'))
+      message.success(
+        `已复制 ${analysis.urls.length} 条链接，请粘贴到 EEA Capture 客户端窗口采集`,
+      )
+    } catch {
+      message.warning('浏览器未允许自动复制，请手动选中链接后复制到 EEA Capture 客户端')
+    }
   }
 
   const forwardFiles = (list: FileList | null) => {
@@ -117,6 +130,9 @@ export function ImportUnifiedSurface({
             </Button>
             · PDF / Word / PPT / Markdown / 图片 / HTML
           </Text>
+          <Text type="secondary" className="import-unified-client-hint">
+            网页采集调用本机 EEA Capture 客户端（需保持客户端运行）；拖入的 HTML 快照与文档由平台直接解析入库。
+          </Text>
         </div>
         <input
           ref={fileInputRef}
@@ -132,6 +148,20 @@ export function ImportUnifiedSurface({
           }}
         />
       </div>
+      {isBatch ? (
+        <Alert
+          className="import-unified-client-note"
+          type="info"
+          showIcon
+          title={`${analysis.urls.length} 条链接由本机 EEA Capture 客户端采集`}
+          description="请复制链接并粘贴到客户端窗口采集；也可以在平台排队，客户端在线时会自动领取任务。"
+          action={
+            <Button size="small" icon={<CopyOutlined />} onClick={() => void copyLinkList()}>
+              复制链接
+            </Button>
+          }
+        />
+      ) : null}
       <Text id={pasteHintId} type="secondary" className="import-pastebin-hint">
         {importModeHint(analysis)} · Ctrl+Enter 提交
       </Text>

@@ -164,6 +164,8 @@ async def test_sse_replay_order(client, monkeypatch):
         json={"message": "hello"},
     )
     assert resp.status_code == 200
+    served_model = resp.json().get("served_model")
+    assert served_model and served_model.startswith("function:"), served_model
 
     events = await client.get(
         f"/api/v1/agent/sessions/{session['id']}/events",
@@ -301,6 +303,21 @@ async def test_expired_patch_confirmation_rejected(client, monkeypatch):
         f"/api/v1/agent/sessions/{session['id']}/patches/{patch_id}/confirm"
     )
     assert expired.status_code == 409
+
+
+async def test_session_messages_list_user_before_assistant(client, monkeypatch):
+    monkeypatch.setattr("app.services.agent_runtime.build_eea_agent", _agent_with_test_model)
+    session = (await client.post("/api/v1/agent/sessions", json={})).json()
+    post = await client.post(
+        f"/api/v1/agent/sessions/{session['id']}/messages",
+        json={"message": "用户问题"},
+    )
+    assert post.status_code == 200, post.text
+    listed = (await client.get(f"/api/v1/agent/sessions/{session['id']}/messages")).json()
+    assert len(listed) == 2
+    assert listed[0]["role"] == "user"
+    assert listed[0]["content"] == "用户问题"
+    assert listed[1]["role"] == "assistant"
 
 
 async def test_session_message_history_persists(client, monkeypatch):
@@ -445,8 +462,58 @@ async def test_message_stream_returns_completed_sse(client, monkeypatch):
     assert response.headers["content-type"].startswith("text/event-stream")
     assert "event: message.completed" in response.text
     assert '"status": "completed"' in response.text
+    assert '"served_model"' in response.text
 
     messages = (
         await client.get(f"/api/v1/agent/sessions/{session['id']}/messages")
     ).json()
     assert [row["role"] for row in messages] == ["user", "assistant"]
+    reply = messages[1]
+    assert reply["served_model"] and reply["served_model"].startswith("function:")
+    assert reply["finished_at"]
+    assert messages[0]["served_model"] is None
+async def test_agent_turn_timeout_marks_the_run_failed(client, monkeypatch):
+    import asyncio
+
+    from pydantic_ai.messages import ModelResponse, TextPart
+
+    from app.core.config import get_settings
+    from app.services.agent_workflow import build_eea_agent
+
+    settings = get_settings().model_copy(update={"agent_turn_timeout_seconds": 0.5})
+    monkeypatch.setattr("app.services.agent_runtime.get_settings", lambda: settings)
+
+    async def hang(messages, info):
+        del messages, info
+        await asyncio.sleep(30)
+        return ModelResponse(parts=[TextPart("late")])
+
+    async def hang_stream(messages, info):
+        del messages, info
+        await asyncio.sleep(30)
+        yield {}
+
+    async def slow_agent(*, model=None):
+        del model
+        return await build_eea_agent(
+            model=FunctionModel(hang, stream_function=hang_stream)
+        )
+
+    monkeypatch.setattr("app.services.agent_runtime.build_eea_agent", slow_agent)
+
+    session = (await client.post("/api/v1/agent/sessions", json={})).json()
+    response = await client.post(
+        f"/api/v1/agent/sessions/{session['id']}/messages",
+        json={"message": "hello"},
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "failed"
+    from sqlalchemy import select
+    from app.db.base import SessionLocal
+    from app.models.agent_models import AgentRun
+    async with SessionLocal() as db:
+        run = (
+            await db.execute(select(AgentRun).where(AgentRun.id == uuid.UUID(body["run_id"])))
+        ).scalar_one()
+    assert "未返回完整结果" in (body["error"] or ""), (body, run.error_message)

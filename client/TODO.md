@@ -13,9 +13,11 @@
 - [ ] P0 · 部分实现 · 可独立开展；验收依赖 DOC-02 真实材料。
 - 来源：Word §2.1、图2-1-1/2-1-2、表A；REQ-SIG-01/02/07/11；WBS 1.3.2。
 - 入口：[engine.go](internal/capture/engine.go)、[archive.go](internal/archive/archive.go)、[cdp/](internal/cdp/)。
+- 2026-11-20 验证页/空壳判定收紧：页标题命中验证词且正文 <800 字符、或标题为空/等于 URL 且正文 <800 字符时拒绝采集（不再只依赖缺少 article 元素）；新增两个真浏览器用例，真实素材试采中 eefocus/知乎/UNECE 均按失败记录，不再生成“安全验证”类假证据。
+- 2026-11-19 Windows 真机切片：Edge 157 需在启动参数加 `DisableLoadExtensionCommandLineSwitch` 才能加载未打包 SingleFile；修复后本地页面采集成功，服务端任务 `68b47471…` succeeded、信号 `c8d9a463…` retained，归档 387B/正文 122B 可读。验证码/微信/崩溃等场景仍未覆盖。
 - 普通网页/微信公众号分别识别渠道，等待可读正文稳定；保留用户 URL、最终 URL 和采集时间。
 - 识别验证码、登录墙、空正文和错误页；允许可见浏览器人工处理，超时给出具体原因，不能把验证壳上传成成功证据。
-- 保存 HTML 从 canonical/og:url/twitter:url 推断来源；没有可靠来源则要求显式输入，不生成虚构公网地址。
+- 保存 HTML 先读 SingleFile 头注释（`Page saved with SingleFile` 的 `url:`），再取 canonical/og:url/twitter:url（含 SingleFile 改写后的无引号属性）；没有可靠来源则要求显式输入，不生成虚构公网地址。
 - 单例浏览器、多标签任务的关闭/取消不能结束用户其他会话；保护 profile 登录态。
 - 验收：静态/延迟渲染/微信验证/无正文/崩溃/取消/无来源 HTML 均有结果；原 URL 与正文一致。
 
@@ -25,7 +27,8 @@
 - 来源：REQ-SIG-01/07/10/11、会议统一采集入口；WBS 1.3.2、1.6.1。
 - 入口：[client.go](internal/platform/client.go)、[queue.go](internal/queue/queue.go)、[cli.go](internal/cli/cli.go)。
 - 网页异步上传、幂等重试、本地持久队列和 Retry-After 切片已交付；具体实现与检查证据见[交付记录](../docs/DELIVERY-RECORD.md#cc-02--asynchronous-capture-and-durable-client-queue-slice)。CC-02 验收仍未完成。
-- 服务端幂等和原子对象写入见 BE-01；部署必须升级到当前 Alembic head（现为 0012_strategy_funnel）。旧端点没有幂等键时不自动重试不确定结果。
+- 2026-11-19 Windows 真机：`upload --url --headless` 经 `POST /capture/jobs` 完成一次真实采集；服务端终态 succeeded 后才显示成功。跨重启恢复、取消与失败重试仍待。
+- 服务端幂等和原子对象写入见 BE-01；部署必须升级到当前 Alembic head（现为 0022_demand_review_baseline）。旧端点没有幂等键时不自动重试不确定结果。
 - 文档文件队列已迁至统一任务（见[交付记录](../docs/DELIVERY-RECORD.md#be-01--fe-02--cc-02--durable-document-and-html-ingest-slice)）；在 Windows 验证已接入的安全重试和本地未开始任务取消；设计终态历史保留与清理；并在 Windows 真机验证客户端队列重启恢复。服务端 worker 已可轮询处理，但只有收到 succeeded 终态后才显示采集完成。
 - 分开抓取超时、上传超时和服务器处理超时；上传完成后继续轮询，不能提前显示“入库成功”。
 - 明确的 4xx 验证错误不进入自动重试；429/5xx 有限重试并优先采用 `Retry-After`（最多等待 10 分钟）。401/403身份提示仍待身份接入。
@@ -53,6 +56,8 @@
 - 来源：Word §2.1；REQ-SIG-10/11；WBS 1.3.2。
 - 入口：[ui/](internal/ui/)、[queue.go](internal/queue/queue.go)。
 - 已有逐项状态、打开信号、安全重试、本地排队取消与微信原 URL 手工补录。剩余工作为核对 Windows GUI 的状态与真实 API 终态，覆盖多个文件与重启恢复。
+- 2026-11-19 Windows 真机：CLI 路径已打通 Edge + SingleFile + 任务轮询；GUI 状态、多个文件与重启恢复仍待真机走查。
+- GUI 每 20 秒领取平台导入面排队的 `awaiting_client` 链接任务，在本机浏览器采集后回传；与本地队列互斥共用浏览器，关闭窗口或取消时释放未完成的领取任务。
 - Windows 验证一项失败后其他项可继续处理，已被服务器接受的任务保持可追踪。补齐复制脱敏诊断的操作和验收。
 - 微信失败提示在平台保留原 URL 粘贴正文；明确这是补救而非已成功抓取。
 - 验收：真实 API 下 GUI/CLI 同等可追溯，操作结果重启后可见；无虚假成功消息。
@@ -72,6 +77,7 @@
 - [ ] P0 · 未验证 · 依赖 CC-01…04、BE-16、OPS-03/04、DOC-02；独立 Windows 构建与浏览器证据供 OPS-06 汇总。
 - 来源：WBS 1.3.2、1.5、1.6、1.7。
 - 入口：[release.ps1](scripts/release.ps1)、[vendor-singlefile.sh](scripts/vendor-singlefile.sh)、[README](README.md)。
+- 2026-11-19 构建切片：Windows `release.ps1 -Version v0.1.0` 产出 `capture.exe`、`capture-v0.1.0-windows-amd64.zip`、`SHA256SUMS`；zip 193 项，含 README/config/exe 与 SingleFile 扩展（manifest 4452 字节）。`capture doctor` 识别 Edge、后端、凭据与扩展；真浏览器本地页面采集已通过；10 篇网页/5 篇微信与干净业务机验收仍待；`gofmt` 已清理。
 - 锁定工具链和 SingleFile 来源/版本；Windows runner 编译 GUI 和 CLI，go test -short ./...，并在 Windows Edge/Chrome 跑真浏览器集成。
 - 输出版本化 zip、SHA256SUMS、配置示例、第三方许可证/源码获取说明；SingleFile AGPL 分发处理列入交付记录。
 - 文档说明安装/升级/凭据配置、profile、采集失败和正文补救；升级不覆盖用户配置/profile/未完成队列。

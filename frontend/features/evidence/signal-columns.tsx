@@ -14,8 +14,10 @@ import { App as AntApp, Button, Dropdown, Space, Tag, Tooltip, Typography } from
 import type { ColumnsType } from 'antd/es/table'
 import type { MenuProps } from 'antd'
 import { useQueryClient } from '@tanstack/react-query'
-import { eeaQueryKeys } from '@/hooks/use-eea-queries'
 import { patchSignal } from '@/lib/api/eea-api'
+import { eeaQueryKeys } from '@/lib/query/eea-query-keys'
+import { invalidateSignalCaches } from '@/lib/query/invalidate-signal-caches'
+import type { SignalDetail } from '@/lib/api/types'
 import { EeaApiError } from '@/lib/api/client'
 import { buildAppPath } from '@/lib/navigation'
 import type { Signal } from '@/types/platform'
@@ -37,10 +39,13 @@ export function SignalRowActions({
   record,
   onNavigate,
   onQuickPreview,
+  onSignalRemoved,
 }: {
   record: Signal
   onNavigate: (target: string) => void
   onQuickPreview?: (signal: Signal) => void
+  /** Archive or other removal from the active list (refresh previews / detail). */
+  onSignalRemoved?: (signalId: string) => void
 }) {
   const { message: messageApi, modal: modalApi } = AntApp.useApp()
   const queryClient = useQueryClient()
@@ -94,10 +99,12 @@ export function SignalRowActions({
             try {
               await patchSignal(record.key, { evidence_status_code: 'archived' })
               messageApi.success('已归档停用，可在「归档证据库」管理')
-              await Promise.all([
-                queryClient.invalidateQueries({ queryKey: ['eea', 'signals'] }),
-                queryClient.invalidateQueries({ queryKey: eeaQueryKeys.overview }),
-              ])
+              const cachedDetail = queryClient.getQueryData<SignalDetail>(eeaQueryKeys.signal(record.key))
+              await invalidateSignalCaches(queryClient, {
+                signalId: record.key,
+                documentId: cachedDetail?.document_id,
+              })
+              onSignalRemoved?.(record.key)
             } catch (err) {
               const detail = err instanceof EeaApiError ? err.message : String(err)
               messageApi.error(detail || '归档失败')
@@ -126,10 +133,12 @@ export function buildSignalTableColumns({
   onNavigate,
   onTitleClick,
   onQuickPreview,
+  onSignalRemoved,
 }: {
   onNavigate: (target: string) => void
   onTitleClick: (signal: Signal) => void
   onQuickPreview?: (signal: Signal) => void
+  onSignalRemoved?: (signalId: string) => void
 }): ColumnsType<Signal> {
   return [
     {
@@ -173,7 +182,12 @@ export function buildSignalTableColumns({
       key: 'action',
       width: 44,
       render: (_value: unknown, record: Signal) => (
-        <SignalRowActions record={record} onNavigate={onNavigate} onQuickPreview={onQuickPreview} />
+        <SignalRowActions
+          record={record}
+          onNavigate={onNavigate}
+          onQuickPreview={onQuickPreview}
+          onSignalRemoved={onSignalRemoved}
+        />
       ),
     },
   ]

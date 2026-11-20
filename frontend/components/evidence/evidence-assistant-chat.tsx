@@ -32,6 +32,47 @@ import { streamAgentSessionMessage } from '@/lib/api/agent-stream'
 
 const { Text } = Typography
 
+const TOOL_LABELS: Record<string, string> = {
+  search_evidence: '检索证据',
+  search_rag: '检索文档',
+  suggest_signal_tags: '生成标签建议',
+  suggest_theme_membership: '生成主题建议',
+  propose_db_patch: '生成变更单',
+  apply_confirmed_patch: '应用已确认变更',
+  draft_trace_report: '起草追溯报告',
+}
+
+function toolLabel(name: string): string {
+  return TOOL_LABELS[name] ?? name
+}
+
+const FINISH_TIME_FORMAT = new Intl.DateTimeFormat('zh-CN', {
+  hour: '2-digit',
+  minute: '2-digit',
+  second: '2-digit',
+  hour12: false,
+})
+
+function finishTimeLabel(value: string | null | undefined): string | null {
+  if (!value) return null
+  const at = new Date(value)
+  if (Number.isNaN(at.getTime())) return null
+  return FINISH_TIME_FORMAT.format(at)
+}
+
+/** Model id and finish time for one reply, small and right-aligned like opencode's message footer. */
+function ReplyMeta({ model, finishedAt }: { model?: string | null; finishedAt?: string | null }) {
+  const time = finishTimeLabel(finishedAt)
+  if (!model && !time) return null
+  return (
+    <div className="chat-message-meta">
+      {model ? <span className="chat-message-meta-model">{model}</span> : null}
+      {model && time ? <span aria-hidden="true">·</span> : null}
+      {time ? <time dateTime={finishedAt ?? undefined}>{time}</time> : null}
+    </div>
+  )
+}
+
 type EvidenceAssistantChatProps = {
   signalId?: string | null
   onCitation?: (refId: string, kind: string) => void
@@ -49,9 +90,15 @@ export function EvidenceAssistantChat({ signalId, onCitation }: EvidenceAssistan
   const [streamNote, setStreamNote] = useState<string | null>(null)
   const [citations, setCitations] = useState<{ refId: string; kind: string }[]>([])
   const [liveAnswer, setLiveAnswer] = useState('' )
+  const [thinking, setThinking] = useState('')
+  const [inFlightUser, setInFlightUser] = useState<string | null>(null)
+  const [historyError, setHistoryError] = useState<string | null>(null)
+  const [historyReloadKey, setHistoryReloadKey] = useState(0)
   const streamAbortRef = useRef<AbortController | null>(null)
   const lastEventSeqRef = useRef(0)
   const eventSourceRef = useRef<EventSource | null>(null)
+  const chatListRef = useRef<HTMLDivElement | null>(null)
+  const pinnedToBottomRef = useRef(true)
 
   const apiSignalId = signalId && isUuid(signalId) ? signalId : null
   const sessionStorageKey = apiSignalId ? `eea-agent-session:${apiSignalId}` : null
@@ -83,6 +130,10 @@ export function EvidenceAssistantChat({ signalId, onCitation }: EvidenceAssistan
     if (payload.type === 'turn.failed') return `运行失败：${payload.error ?? '未知错误'}`
     if (payload.type === 'turn.cancelled') return '运行已取消'
     if (payload.type === 'approval.required') return '待确认工具调用'
+    if (payload.type === 'turn.progress') {
+      const elapsed = typeof payload.elapsed_s === 'number' ? payload.elapsed_s : null
+      return elapsed !== null ? `模型仍在生成… ${elapsed}s` : '模型仍在生成…'
+    }
     return null
   }, [])
 
@@ -140,6 +191,8 @@ export function EvidenceAssistantChat({ signalId, onCitation }: EvidenceAssistan
       setPatches([])
       setCitations([])
       setLiveAnswer('')
+      setThinking('')
+      setInFlightUser(null)
       setStreamNote(null)
       rememberSession(sid)
     },
@@ -156,6 +209,8 @@ export function EvidenceAssistantChat({ signalId, onCitation }: EvidenceAssistan
       setPatches([])
       setCitations([])
       setLiveAnswer('')
+      setThinking('')
+      setInFlightUser(null)
       rememberSession(created.id)
       void sessionsQuery.refetch()
     } catch (err) {
@@ -172,8 +227,31 @@ export function EvidenceAssistantChat({ signalId, onCitation }: EvidenceAssistan
 
   useEffect(() => {
     if (!sessionId) return
-    void refreshConversation(sessionId)
-  }, [refreshConversation, sessionId])
+    let cancelled = false
+    let retryTimer: number | undefined
+    const load = async (attempt: number) => {
+      if (attempt === 0) setHistoryError(null)
+      try {
+        await refreshConversation(sessionId)
+        if (!cancelled) setHistoryError(null)
+      } catch (err) {
+        if (cancelled) return
+        // A restarted API drops the socket mid-flight; one quiet retry usually
+        // lands. Only a persistent outage gets a message, never an unhandled
+        // rejection that would blank the whole page in dev.
+        if (attempt === 0) {
+          retryTimer = window.setTimeout(() => void load(1), 1200)
+          return
+        }
+        setHistoryError(err instanceof EeaApiError && err.message ? err.message : '会话消息加载失败')
+      }
+    }
+    void load(0)
+    return () => {
+      cancelled = true
+      if (retryTimer !== undefined) window.clearTimeout(retryTimer)
+    }
+  }, [historyReloadKey, refreshConversation, sessionId])
 
   useEffect(() => () => {
     closeEventSource()
@@ -185,10 +263,70 @@ export function EvidenceAssistantChat({ signalId, onCitation }: EvidenceAssistan
   }, [apiSignalId])
 
   useEffect(() => {
-    if (!sessionStorageKey || typeof window === 'undefined') return
-    const stored = window.sessionStorage.getItem(sessionStorageKey)
-    if (stored) setSessionId(stored)
-  }, [sessionStorageKey])
+    if (!apiSignalId || busy) return
+    const sessions = sessionsQuery.data ?? []
+    if (sessionId) {
+      const stillValid = sessions.some((row) => row.id === sessionId)
+      if (!stillValid && sessions[0]) rememberSession(sessions[0].id)
+      return
+    }
+    const stored =
+      sessionStorageKey && typeof window !== 'undefined'
+        ? window.sessionStorage.getItem(sessionStorageKey)
+        : null
+    const fromStore = stored && sessions.some((row) => row.id === stored) ? stored : null
+    const pick = fromStore ?? sessions[0]?.id
+    if (pick) rememberSession(pick)
+  }, [apiSignalId, busy, rememberSession, sessionId, sessionStorageKey, sessionsQuery.data])
+
+  const baseMessages =
+    messages.length > 0
+      ? messages
+      : legacyTurns.map((turn, index) => ({
+          id: `legacy-${index}`,
+          session_id: '',
+          run_id: null,
+          role: turn.role,
+          content: turn.content,
+          created_at: '',
+          served_model: null,
+          finished_at: null,
+        }))
+
+  const displayMessages =
+    inFlightUser &&
+    !baseMessages.some((turn) => turn.role === 'user' && turn.content === inFlightUser)
+      ? [
+          ...baseMessages,
+          {
+            id: '__pending-user__',
+            session_id: sessionId ?? '',
+            run_id: null,
+            role: 'user',
+            content: inFlightUser,
+            created_at: '',
+            served_model: null,
+            finished_at: null,
+          },
+        ]
+      : baseMessages
+
+  // Follow new tokens while the reader stays at the bottom; scrolling up stops
+  // the chase until they return. Only the message list scrolls - the page keeps
+  // its position so the reader is not yanked away from the preview column.
+  const rememberScrollPosition = useCallback(() => {
+    const list = chatListRef.current
+    if (!list) return
+    pinnedToBottomRef.current =
+      list.scrollHeight - list.scrollTop - list.clientHeight < 96
+  }, [])
+
+  useEffect(() => {
+    const list = chatListRef.current
+    if (!list || !pinnedToBottomRef.current) return
+    if (list.scrollHeight <= list.clientHeight + 4) return
+    list.scrollTop = list.scrollHeight
+  }, [busy, displayMessages.length, thinking, liveAnswer, streamNote])
 
   const send = useCallback(async () => {
     const text = draft.trim()
@@ -198,11 +336,14 @@ export function EvidenceAssistantChat({ signalId, onCitation }: EvidenceAssistan
       return
     }
     setDraft('')
+    setInFlightUser(text)
     setBusy(true)
+    pinnedToBottomRef.current = true
     setStreamNote(null)
     setActiveRunId(null)
     setCitations([])
     setLiveAnswer('')
+    setThinking('')
     let streamedText = false
     try {
       const sid = await ensureSession()
@@ -218,14 +359,27 @@ export function EvidenceAssistantChat({ signalId, onCitation }: EvidenceAssistan
                 streamedText = true
                 setLiveAnswer((prev) => prev + event.delta)
               }
+              if (event.type === 'text.replace' && typeof event.text === 'string') {
+                streamedText = true
+                setLiveAnswer(event.text)
+              }
+              if (event.type === 'thinking.delta' && typeof event.delta === 'string') {
+                setThinking((prev) => prev + event.delta)
+              }
               if (event.type === 'tool.call' && typeof event.tool === 'string') {
-                setStreamNote('正在调用工具：' + event.tool)
+                setThinking((prev) => (prev && !prev.endsWith('\n\n') ? prev + '\n\n' : prev))
+                setStreamNote('正在调用工具：' + toolLabel(event.tool))
+              }
+              if (event.type === 'turn.progress') {
+                const note = noteFromEvent(event)
+                if (note) setStreamNote(note)
               }
               if (event.type === 'citation') {
                 recordCitation(event as never)
               }
               if (event.type === 'turn.started' && typeof event.run_id === 'string') {
                 setActiveRunId(event.run_id)
+                void refreshConversation(sid)
               }
             },
           })
@@ -238,6 +392,7 @@ export function EvidenceAssistantChat({ signalId, onCitation }: EvidenceAssistan
         } finally {
           streamAbortRef.current = null
           setLiveAnswer('')
+          setThinking('')
         }
       } catch (streamErr) {
         if (streamedText) {
@@ -258,7 +413,7 @@ export function EvidenceAssistantChat({ signalId, onCitation }: EvidenceAssistan
         },
       })
       eventSourceRef.current = es
-      const result = await postAgentSessionMessage(sid, text)
+      const result = await postAgentSessionMessage(sid, text, { signal: AbortSignal.timeout(120_000) })
       setActiveRunId(result.run_id)
       closeEventSource()
       const replay = await fetchAgentSessionEvents(sid, String(lastEventSeqRef.current))
@@ -287,6 +442,7 @@ export function EvidenceAssistantChat({ signalId, onCitation }: EvidenceAssistan
     } finally {
       setActiveRunId(null)
       setBusy(false)
+      setInFlightUser(null)
     }
   }, [
     apiSignalId,
@@ -330,17 +486,6 @@ export function EvidenceAssistantChat({ signalId, onCitation }: EvidenceAssistan
 
   const skills = skillsQuery.data
   const sessions = sessionsQuery.data ?? []
-  const displayMessages =
-    messages.length > 0
-      ? messages
-      : legacyTurns.map((turn, index) => ({
-          id: `legacy-${index}`,
-          session_id: '',
-          run_id: null,
-          role: turn.role,
-          content: turn.content,
-          created_at: '',
-        }))
 
   return (
     <>
@@ -372,7 +517,15 @@ export function EvidenceAssistantChat({ signalId, onCitation }: EvidenceAssistan
           新建会话
         </Button>
       </Space>
-      <div className="chat-messages">
+      {historyError ? (
+        <Space size={8} style={{ marginBottom: 8 }} wrap>
+          <Text type="secondary">{historyError}</Text>
+          <Button size="small" type="link" onClick={() => setHistoryReloadKey((key) => key + 1)}>
+            重新加载
+          </Button>
+        </Space>
+      ) : null}
+      <div className="chat-messages" ref={chatListRef} onScroll={rememberScrollPosition}>
         {displayMessages.length === 0 && !busy ? (
           <div className="chat-message assistant">
             {!apiSignalId ? (
@@ -386,18 +539,37 @@ export function EvidenceAssistantChat({ signalId, onCitation }: EvidenceAssistan
         ) : null}
         {displayMessages.map((turn) => (
           <div key={turn.id} className={`chat-message ${turn.role}`}>
-            {turn.role === 'assistant' ? <ChatMarkdown content={turn.content} /> : turn.content}
+            {turn.role === 'assistant' ? (
+              <>
+                <ChatMarkdown content={turn.content} />
+                <ReplyMeta model={turn.served_model} finishedAt={turn.finished_at} />
+              </>
+            ) : (
+              turn.content
+            )}
           </div>
         ))}
+        {thinking && busy && !liveAnswer ? (
+          <Collapse
+            size="small"
+            className="chat-thinking-collapse"
+            items={[
+              {
+                key: 'thinking',
+                label: '模型推理（可选查看，非最终答复）',
+                children: <pre className="chat-thinking-body">{thinking}</pre>,
+              },
+            ]}
+          />
+        ) : null}
         {liveAnswer ? (
-          <div className="chat-message assistant">
+          <div className="chat-message assistant is-streaming">
             <ChatMarkdown content={liveAnswer} />
           </div>
         ) : null}
         {busy && !liveAnswer ? (
           <div className="chat-message assistant">
-            <Spin size="small" />{' '}
-            <Text type="secondary"> {streamNote ?? '思考中…'}</Text>
+            <Spin size="small" /> <Text type="secondary">{streamNote ?? '正在回复…'}</Text>
           </div>
         ) : null}
         {streamNote && liveAnswer ? (

@@ -97,6 +97,29 @@ async def test_capture_url_list_creates_awaiting_jobs(client):
 
 
 @pytest.mark.anyio
+async def test_capture_url_list_jobs_belong_to_the_importing_operator(client):
+    """OPS-03: a researcher only sees their own queued captures."""
+    from sqlalchemy import select
+
+    from app.db.base import SessionLocal
+    from app.models.models import CaptureJob
+
+    resp = await client.post(
+        "/api/v1/imports/capture-urls",
+        json={"text": "https://example.com/owned-a\nhttps://example.com/owned-b\n"},
+    )
+    assert resp.status_code == 201, resp.text
+    batch_id = resp.json()["id"]
+    async with SessionLocal() as db:
+        owners = (
+            await db.execute(
+                select(CaptureJob.owner_subject).where(CaptureJob.import_batch_id == batch_id)
+            )
+        ).scalars().all()
+    assert owners and all(owner == "eea-test-actor" for owner in owners)
+
+
+@pytest.mark.anyio
 async def test_client_submit_queues_worker_without_server_fetch(client):
     unique = __import__("uuid").uuid4().hex
     source_url = f"https://example.com/panorama-client-submit-{unique}"

@@ -36,6 +36,18 @@ The dashboard shell uses the **native CSS color scheme** model so light/dark beh
 
 5. When changing palette values, update **`shell-surfaces.ts` and `shell-color-scheme.css` together**.
 
+## Scrollbars
+
+Scrollbars are styled once in `globals.css`: no arrow buttons, a transparent track, and a
+rounded pill thumb that sits 2-4px inside the gutter. The thumb colors live on `:root` in
+`shell-color-scheme.css` (`--eea-scrollbar-thumb*`) because the document scroller is outside
+`.app-shell`. They are intentionally theme-neutral; the ProLayout sider re-tints the same
+three variables for its permanent navy rail and brightens them on rail hover.
+
+Use the variables rather than new `::-webkit-scrollbar` colors, and keep the Firefox
+`scrollbar-color` fallback in sync when changing them. Components that ship their own
+scrollbar styling (for example Ant Design tables) keep their component tokens.
+
 ## Ant Design
 
 Component colors come from `ConfigProvider` inside the main column (not the ProLayout sider). Do not add a second root `ConfigProvider` above `ProLayout` with the same `cssVar` key — the dark sider theme would overwrite main-surface variables.

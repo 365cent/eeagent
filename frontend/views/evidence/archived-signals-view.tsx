@@ -1,35 +1,103 @@
 'use client'
 
-import { useMemo, useState } from 'react'
-import { DeleteOutlined, FileSearchOutlined, ReloadOutlined, RollbackOutlined } from '@ant-design/icons'
-import { App as AntApp, Alert, Breadcrumb, Button, Card, Input, Space, Spin, Table, Typography } from 'antd'
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import { ReloadOutlined } from '@ant-design/icons'
+import { App as AntApp, Alert, Breadcrumb, Button, Card, Input, Spin, Table, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useQueryClient } from '@tanstack/react-query'
 import { PageHeader } from '@/components/shared/page-header'
-import { eeaQueryKeys, useRefCodeMaps, useSignalsList } from '@/hooks/use-eea-queries'
+import { useRefCodeMaps, useSignalsList } from '@/hooks/use-eea-queries'
 import { deleteSignal, patchSignal } from '@/lib/api/eea-api'
+import { invalidateSignalCaches } from '@/lib/query/invalidate-signal-caches'
+import { eeaQueryKeys } from '@/lib/query/eea-query-keys'
 import { EeaApiError } from '@/lib/api/client'
+import type { SignalDetail } from '@/lib/api/types'
 import { useSignalTablePagination } from '@/lib/signal-table-pagination'
 import type { Signal } from '@/types/platform'
+import { ArchivedSignalRowActions } from '@/features/evidence/archived-signal-row-actions'
 import { SignalStatusTag } from '@/features/evidence/signal-columns'
 
 const { Text } = Typography
 
 type ArchivedSignalsViewProps = {
   onNavigate: (key: string) => void
+  onSignalRemoved?: (signalId: string) => void
 }
 
-export function ArchivedSignalsView({ onNavigate }: ArchivedSignalsViewProps) {
-  const signalPagination = useSignalTablePagination()
+export function ArchivedSignalsView({ onNavigate, onSignalRemoved }: ArchivedSignalsViewProps) {
+  const pager = useSignalTablePagination()
   const { message: messageApi, modal: modalApi } = AntApp.useApp()
   const queryClient = useQueryClient()
   const [keyword, setKeyword] = useState('')
-  const { rows, isLoading, isError, refetch } = useSignalsList({
+  const { rows, total, isLoading, isError, refetch } = useSignalsList({
     evidence_status: 'archived',
     keyword: keyword.trim() || undefined,
-    limit: 200,
+    offset: (pager.current - 1) * pager.pageSize,
+    limit: pager.pageSize,
   })
   const refCodesQuery = useRefCodeMaps()
+
+  useEffect(() => {
+    pager.resetPage()
+  }, [keyword, pager.resetPage])
+
+  const openSignal = useCallback((signalId: string) => onNavigate(`singal/${signalId}`), [onNavigate])
+
+  const confirmRestore = useCallback(
+    (record: Signal) => {
+      modalApi.confirm({
+        title: '恢复为已留存？',
+        content: '信号将重新出现在主证据库列表中。',
+        okText: '恢复',
+        cancelText: '取消',
+        onOk: async () => {
+          try {
+            await patchSignal(record.key, { evidence_status_code: 'retained' })
+            messageApi.success('已恢复为已留存')
+            const cachedDetail = queryClient.getQueryData<SignalDetail>(eeaQueryKeys.signal(record.key))
+            await invalidateSignalCaches(queryClient, {
+              signalId: record.key,
+              documentId: cachedDetail?.document_id,
+            })
+            onSignalRemoved?.(record.key)
+          } catch (err) {
+            const detail = err instanceof EeaApiError ? err.message : String(err)
+            messageApi.error(detail || '恢复失败')
+          }
+        },
+      })
+    },
+    [messageApi, modalApi, onSignalRemoved, queryClient],
+  )
+
+  const confirmDelete = useCallback(
+    (record: Signal) => {
+      modalApi.confirm({
+        title: '永久删除该归档信号？',
+        content: '数据库记录将被删除，此操作不可撤销。',
+        okText: '删除',
+        okType: 'danger',
+        cancelText: '取消',
+        onOk: async () => {
+          try {
+            await deleteSignal(record.key)
+            messageApi.success('已永久删除')
+            const cachedDetail = queryClient.getQueryData<SignalDetail>(eeaQueryKeys.signal(record.key))
+            await invalidateSignalCaches(queryClient, {
+              signalId: record.key,
+              documentId: cachedDetail?.document_id,
+              removeSignalDetail: true,
+            })
+            onSignalRemoved?.(record.key)
+          } catch (err) {
+            const detail = err instanceof EeaApiError ? err.message : String(err)
+            messageApi.error(detail || '删除失败')
+          }
+        },
+      })
+    },
+    [messageApi, modalApi, onSignalRemoved, queryClient],
+  )
 
   const columns: ColumnsType<Signal> = useMemo(
     () => [
@@ -38,93 +106,43 @@ export function ArchivedSignalsView({ onNavigate }: ArchivedSignalsViewProps) {
         dataIndex: 'title',
         ellipsis: true,
         render: (title: string, record) => (
-          <Button type="link" style={{ padding: 0 }} onClick={() => onNavigate(`singal/${record.key}`)}>
-            {title}
-          </Button>
+          <button type="button" className="signal-title-button archived-signal-title-button" onClick={() => openSignal(record.key)}>
+            <span className="signal-dot" />
+            <span>
+              <Text strong ellipsis>
+                {title}
+              </Text>
+              <span className="signal-meta">{record.publisher} · {record.channel}</span>
+            </span>
+          </button>
         ),
       },
-      { title: '来源', dataIndex: 'source', ellipsis: true },
-      { title: '渠道', dataIndex: 'channel' },
+      { title: '来源', dataIndex: 'publisher', ellipsis: true, width: 180 },
+      { title: '渠道', dataIndex: 'channel', width: 108 },
       {
         title: '状态',
         dataIndex: 'status',
+        width: 128,
         render: (value: string) => <SignalStatusTag status={value} />,
       },
-      { title: '归档前更新', dataIndex: 'date' },
+      { title: '归档前更新', dataIndex: 'date', width: 120 },
       {
         title: '操作',
         key: 'actions',
-        width: 220,
+        fixed: 'right',
+        width: 196,
+        className: 'archived-signals-actions-col',
         render: (_value: unknown, record: Signal) => (
-          <Space wrap size={4}>
-            <Button
-              size="small"
-              icon={<FileSearchOutlined />}
-              onClick={() => onNavigate(`singal/${record.key}`)}
-            >
-              查看
-            </Button>
-            <Button
-              size="small"
-              icon={<RollbackOutlined />}
-              onClick={() => {
-                modalApi.confirm({
-                  title: '恢复为已留存？',
-                  content: '信号将重新出现在主证据库列表中。',
-                  okText: '恢复',
-                  cancelText: '取消',
-                  onOk: async () => {
-                    try {
-                      await patchSignal(record.key, { evidence_status_code: 'retained' })
-                      messageApi.success('已恢复为已留存')
-                      await Promise.all([
-                        queryClient.invalidateQueries({ queryKey: ['eea', 'signals'] }),
-                        queryClient.invalidateQueries({ queryKey: eeaQueryKeys.overview }),
-                      ])
-                    } catch (err) {
-                      const detail = err instanceof EeaApiError ? err.message : String(err)
-                      messageApi.error(detail || '恢复失败')
-                    }
-                  },
-                })
-              }}
-            >
-              恢复
-            </Button>
-            <Button
-              size="small"
-              danger
-              icon={<DeleteOutlined />}
-              onClick={() => {
-                modalApi.confirm({
-                  title: '永久删除该归档信号？',
-                  content: '数据库记录将被删除，此操作不可撤销。',
-                  okText: '删除',
-                  okType: 'danger',
-                  cancelText: '取消',
-                  onOk: async () => {
-                    try {
-                      await deleteSignal(record.key)
-                      messageApi.success('已永久删除')
-                      await Promise.all([
-                        queryClient.invalidateQueries({ queryKey: ['eea', 'signals'] }),
-                        queryClient.invalidateQueries({ queryKey: eeaQueryKeys.overview }),
-                      ])
-                    } catch (err) {
-                      const detail = err instanceof EeaApiError ? err.message : String(err)
-                      messageApi.error(detail || '删除失败')
-                    }
-                  },
-                })
-              }}
-            >
-              删除
-            </Button>
-          </Space>
+          <ArchivedSignalRowActions
+            record={record}
+            onView={openSignal}
+            onRestore={confirmRestore}
+            onDelete={confirmDelete}
+          />
         ),
       },
     ],
-    [messageApi, modalApi, onNavigate, queryClient],
+    [confirmDelete, confirmRestore, openSignal],
   )
 
   return (
@@ -153,7 +171,7 @@ export function ArchivedSignalsView({ onNavigate }: ArchivedSignalsViewProps) {
         }
       />
       <Card
-        className="panel-card view-card"
+        className="panel-card view-card archived-signals-panel"
         title="已归档信号"
         extra={
           <Input.Search
@@ -180,7 +198,14 @@ export function ArchivedSignalsView({ onNavigate }: ArchivedSignalsViewProps) {
         ) : rows.length === 0 ? (
           <Text type="secondary">当前没有已归档停用的信号。</Text>
         ) : (
-          <Table rowKey="key" columns={columns} dataSource={rows} pagination={signalPagination} scroll={{ x: 960 }} />
+          <Table
+            rowKey="key"
+            columns={columns}
+            dataSource={rows}
+            pagination={{ ...pager, total }}
+            scroll={{ x: 'max-content' }}
+            tableLayout="auto"
+          />
         )}
       </Card>
     </>

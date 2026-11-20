@@ -2,6 +2,7 @@
 
 import io
 import zipfile
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -17,6 +18,18 @@ def _png(color=(30, 120, 200)) -> bytes:
     image = Image.new("RGB", (120, 80), color)
     buffer = io.BytesIO()
     image.save(buffer, format="PNG")
+    return buffer.getvalue()
+
+
+def _pdf_with_one_image() -> bytes:
+    from reportlab.lib.utils import ImageReader
+    from reportlab.pdfgen import canvas
+
+    buffer = io.BytesIO()
+    pdf = canvas.Canvas(buffer, pagesize=(200, 200))
+    pdf.drawImage(ImageReader(io.BytesIO(_png())), 20, 20, 160, 160)
+    pdf.showPage()
+    pdf.save()
     return buffer.getvalue()
 
 
@@ -346,7 +359,7 @@ async def test_caption_figure_retries_empty_response(monkeypatch):
 
     async def fake_caption_once(figure, *, model, settings, base, attempt=1):
         calls["n"] += 1
-        return "" if calls["n"] == 1 else "重试成功的描述"
+        return ("", "") if calls["n"] == 1 else ("重试成功的描述", "qwen")
 
     monkeypatch.setattr(doc_ingest, "_caption_once", fake_caption_once)
     figure = doc_ingest.Figure(index=1, source="x.png", mime="image/png", data=b"x")
@@ -359,11 +372,74 @@ async def test_caption_figure_gives_up_after_retries(monkeypatch):
     settings = doc_ingest.get_settings().model_copy(update={"chat_base_url": "https://example.test"})
     monkeypatch.setattr(doc_ingest, "get_settings", lambda: settings)
     async def always_empty(figure, *, model, settings, base, attempt=1):
-        return ""
+        return "", ""
 
     monkeypatch.setattr(doc_ingest, "_caption_once", always_empty)
     figure = doc_ingest.Figure(index=1, source="x.png", mime="image/png", data=b"x")
     assert await doc_ingest.caption_figure(figure, model="qwen", retries=1) == ""
+
+
+async def test_caption_figure_falls_back_through_the_vision_model_chain(monkeypatch):
+    """VISION_MODEL=A,B: a model the gateway rejects must not end the figure."""
+    settings = doc_ingest.get_settings().model_copy(update={"chat_base_url": "https://example.test"})
+    monkeypatch.setattr(doc_ingest, "get_settings", lambda: settings)
+    tried: list[str] = []
+
+    async def fake_caption_once(figure, *, model, settings, base, attempt=1):
+        tried.append(model)
+        return ("第二个模型识别成功", model) if model == "qwen-b" else ("", "")
+
+    monkeypatch.setattr(doc_ingest, "_caption_once", fake_caption_once)
+    figure = doc_ingest.Figure(index=1, source="x.png", mime="image/png", data=b"x")
+    caption = await doc_ingest.caption_figure(figure, model="qwen-a,qwen-b", retries=0)
+    assert caption == "第二个模型识别成功"
+    assert tried == ["qwen-a", "qwen-b"]
+
+
+async def test_ingest_records_primary_vision_model_and_passes_the_chain(monkeypatch):
+    seen: list[str] = []
+
+    async def fake_vision():
+        return "Qwen3.8-27B,Qwen3.6-35B"
+
+    async def fake_caption(figure, *, model, retries=0):
+        seen.append(model)
+        return "蓝色示意图"
+
+    monkeypatch.setattr(doc_ingest, "resolve_vision_model", fake_vision)
+    monkeypatch.setattr(doc_ingest, "caption_figure", fake_caption)
+
+    result = await doc_ingest.ingest_document(
+        _pptx_with_picture(),
+        "deck.pptx",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    )
+
+    assert seen == ["Qwen3.8-27B,Qwen3.6-35B"]
+    assert result.vision_model == "Qwen3.8-27B"
+
+
+async def test_ingest_records_the_vision_model_that_answered(monkeypatch):
+    """Metadata names the served model, not the head of VISION_MODEL."""
+
+    async def fake_vision():
+        return "Qwen3.8-27B,Qwen3.6-35B"
+
+    async def fake_caption(figure, *, model, retries=0):
+        figure.caption = "蓝色示意图"
+        figure.caption_model = "Qwen3.6-35B"
+        return figure.caption
+
+    monkeypatch.setattr(doc_ingest, "resolve_vision_model", fake_vision)
+    monkeypatch.setattr(doc_ingest, "caption_figure", fake_caption)
+
+    result = await doc_ingest.ingest_document(
+        _pptx_with_picture(),
+        "deck.pptx",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    )
+
+    assert result.vision_model == "Qwen3.6-35B"
 
 
 def _docx_with_seven_images_eight_references() -> bytes:
@@ -542,9 +618,56 @@ async def test_failed_reingest_keeps_previous_figure_and_chunk_index(client, mon
     retry = await client.post(f"/api/v1/documents/{document_id}/ingest")
     assert retry.status_code == 200
     assert retry.json()["ingest_status"] == "failed"
-
     figures = (await client.get(f"/api/v1/documents/{document_id}/figures")).json()
     assert len(figures) == 1
     assert figures[0]["caption"] == "旧图"
     chunks = (await client.get(f"/api/v1/documents/{document_id}/chunks")).json()
     assert chunks[0]["section_path"] == ["总览"]
+
+
+
+async def test_scanned_pdf_without_text_layer_fails_explicitly():
+    with pytest.raises(ValueError, match="OCR"):
+        await doc_ingest.ingest_document(
+            _pdf_with_one_image(), "scan.pdf", "application/pdf", vision_captions=False
+        )
+
+
+async def test_caption_only_pdf_is_not_readable_text(monkeypatch):
+    """A PDF whose only text is the figure section still needs OCR."""
+
+    def stub_convert(data, suffix):
+        return "d1-05", None
+
+    monkeypatch.setattr("app.services.doc_ingest._convert_sync", stub_convert)
+    with pytest.raises(ValueError, match="OCR"):
+        await doc_ingest.ingest_document(
+            _pdf_with_one_image(), "d1-05.pdf", "application/pdf", vision_captions=False
+        )
+
+async def test_scanned_pdf_upload_keeps_raw_and_reports_ocr_failure(client):
+    response = await client.post(
+        "/api/v1/documents/raw",
+        files={"file": ("scan.pdf", _pdf_with_one_image(), "application/pdf")},
+    )
+    assert response.status_code == 201, response.text
+    document_id = response.json()["id"]
+    detail = await client.get(f"/api/v1/documents/{document_id}")
+    assert detail.status_code == 200
+    assert detail.json()["ingest_status"] == "failed"
+    assert "OCR" in (detail.json()["ingest_error"] or "")
+
+def test_real_efuse_word_has_seven_images_and_eight_insertions():
+    """BE-12: the supplied Word references seven distinct images eight times."""
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "docs"
+        / "reference"
+        / "德赛西威EEA关键技术落脚点推导链路逐环节图文对照说明-以「智能保险丝（eFuse）」为案例-1009.docx"
+    )
+    if not path.is_file():
+        pytest.skip("source Word is not present")
+    figures = doc_ingest.extract_figures(path.read_bytes(), ".docx")
+    assert len(figures) == 7
+    assert sum(figure.occurrence_count for figure in figures) == 8
+    assert max(figure.occurrence_count for figure in figures) == 2

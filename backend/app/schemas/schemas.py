@@ -450,6 +450,7 @@ class SignalStudioIn(BaseModel):
     """
 
     kind: SignalStudioKind
+    regenerate: bool = False
 
 
 class StudioAudioSegment(BaseModel):
@@ -487,9 +488,33 @@ class StudioInfographicPayload(BaseModel):
     points: list[StudioInfographicPoint] = Field(default_factory=list)
 
 
+class SignalStudioBundleOut(BaseModel):
+    """Saved studio outputs for a signal (subset of kinds may be present)."""
+
+    audio: StudioAudioPayload | None = None
+    mindmap: StudioMindmapPayload | None = None
+    report: str | None = None
+    infographic: StudioInfographicPayload | None = None
+
+
+class LlmSpeedOut(BaseModel):
+    """One measured chat model, no prompts and no secrets."""
+
+    model: str
+    tps: float = 0.0
+    samples: int = 0
+    failures: int = 0
+    age_s: float | None = None
+    unavailable: bool = False
+
+
 class LlmStatusOut(BaseModel):
     configured: bool
     model: str | None = None
+    attempt_budget: int | None = None
+    hedge_delay_seconds: float | None = None
+    hedge_max_models: int | None = None
+    speeds: list[LlmSpeedOut] = []
 
 
 class TagAssignment(BaseModel):
@@ -973,6 +998,10 @@ class TraceDocumentOut(BaseModel):
     sha256: str
     ingest_status: str
     figure_count: int
+    figure_indices: list[int] = Field(
+        default_factory=list,
+        description="Stored figure indices for this document, in display order",
+    )
     created_at: datetime
     raw_object_reference_present: bool = Field(
         description="True when the document row has an object key; use the document API to verify/read the blob"

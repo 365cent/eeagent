@@ -39,6 +39,36 @@ function positiveInt(value: string | null | undefined): number | undefined {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
 }
 
+function firstLine(text: string): string {
+  const index = text.indexOf('\n')
+  return (index === -1 ? text : text.slice(0, index)).trim()
+}
+
+function lastLine(text: string): string {
+  const index = text.lastIndexOf('\n')
+  return (index === -1 ? text : text.slice(index + 1)).trim()
+}
+
+/**
+ * Join section chunks back into one markdown document.
+ *
+ * Ingest splits long GFM tables across chunks; a blank line between those
+ * chunks would end the table, so consecutive table rows stay on adjacent lines.
+ */
+export function joinChunkMarkdown(chunkTexts: string[]): string {
+  const parts = chunkTexts.map((text) => text.trim()).filter(Boolean)
+  let joined = ''
+  for (const part of parts) {
+    if (!joined) {
+      joined = part
+      continue
+    }
+    const continuesTable = lastLine(joined).startsWith('|') && firstLine(part).startsWith('|')
+    joined += (continuesTable ? '\n' : '\n\n') + part
+  }
+  return joined
+}
+
 export function buildDocumentSectionTree(chunks: DocumentChunkOut[]): DocumentSectionTree {
   const byKey = new Map<string, DocumentSectionNode>()
   const order = new Map<string, number>()

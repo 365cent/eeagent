@@ -217,6 +217,76 @@ func TestCaptureRejectsChallengePage(t *testing.T) {
 	}
 }
 
+func TestCaptureRejectsChallengeTitleWithArticleShell(t *testing.T) {
+	if testing.Short() {
+		t.Skip("launches a real browser")
+	}
+	if _, err := ResolveBrowser("edge", ""); err != nil {
+		t.Skipf("edge not available: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Write([]byte(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>安全验证</title></head>
+<body><article><p>请完成验证后继续访问。</p></article></body></html>`))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	browser, err := Launch(ctx, Options{
+		Engine: "edge", UserDataDir: t.TempDir(), Headless: true,
+		ReadyWait: 800 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	defer browser.Close()
+
+	if _, err := browser.Capture(ctx, srv.URL+"/article"); err == nil {
+		t.Fatal("a challenge page with an article shell must not be archived as evidence")
+	}
+}
+
+func TestCaptureRejectsURLTitledShell(t *testing.T) {
+	if testing.Short() {
+		t.Skip("launches a real browser")
+	}
+	if _, err := ResolveBrowser("edge", ""); err != nil {
+		t.Skipf("edge not available: %v", err)
+	}
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		if r.URL.Path == "/wall" {
+			// Login walls often leave the URL as the document title.
+			w.Write([]byte(`<!DOCTYPE html><html><head><meta charset="utf-8"><title></title></head>
+<body><div id="app"><p>请登录后查看</p></div><script>document.title = location.href;</script></body></html>`))
+			return
+		}
+		w.Write([]byte(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>正常文章标题</title></head>
+<body><article><p>这是一篇有真实标题与正文的文章。</p></article></body></html>`))
+	}))
+	defer srv.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	browser, err := Launch(ctx, Options{
+		Engine: "edge", UserDataDir: t.TempDir(), Headless: true,
+		ReadyWait: 800 * time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("launch: %v", err)
+	}
+	defer browser.Close()
+
+	if _, err := browser.Capture(ctx, srv.URL+"/wall"); err == nil {
+		t.Fatal("a URL-titled shell must not be archived as evidence")
+	}
+	if _, err := browser.Capture(ctx, srv.URL+"/article"); err != nil {
+		t.Fatalf("a titled article must still capture: %v", err)
+	}
+}
 func TestCaptureArticleBodyLazyImages(t *testing.T) {
 	if testing.Short() {
 		t.Skip("launches a real browser")

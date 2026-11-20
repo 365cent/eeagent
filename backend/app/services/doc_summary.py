@@ -24,6 +24,14 @@ _HEADING = re.compile(r"^(#{1,3})\s+(.+?)\s*$", re.MULTILINE)
 _NOTES = re.compile(r"^###\s*Notes:\s*\n(.*?)(?=^#{1,3}\s|^<!--|\Z)", re.MULTILINE | re.DOTALL)
 
 
+def _plain_lead(canonical_md: str, limit: int = 600) -> str:
+    """Readable prose from canonical Markdown: no comments, images or markers."""
+    text = re.sub(r"<!--.*?-->", " ", canonical_md or "", flags=re.DOTALL)
+    text = re.sub(r"!\[[^\]]*\]\([^)]*\)", " ", text)
+    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
+    text = re.sub(r"^###\s*Notes:\s*", "", text, flags=re.MULTILINE)
+    return re.sub(r"\s+", " ", text).strip()[:limit]
+
 def build_document_body_summary(filename: str, canonical_md: str) -> str:
     """Filename + section/slide titles + notes excerpts, capped.
 
@@ -39,6 +47,7 @@ def build_document_body_summary(filename: str, canonical_md: str) -> str:
         text.strip()
         for _, text in _HEADING.findall(canonical_md or "")
         if text.strip() and not text.strip().startswith("Notes")
+        and text.strip() != "图块语义"
     ]
     if headings:
         lines.append("")
@@ -56,13 +65,20 @@ def build_document_body_summary(filename: str, canonical_md: str) -> str:
     if len(lines) <= 1:
         # no headings and no notes (or an empty canonical): fall back to the
         # leading text so the signal still carries a non-empty body
-        lead = re.sub(r"\s+", " ", (canonical_md or "").strip())[:600]
+        lead = _plain_lead(canonical_md)
         if lead:
             lines.append("")
             lines.append(f"正文摘录：{lead}")
         else:
             lines.append("（文档未解析出可摘要内容，完整内容见 GET /documents/{id}/canonical.md）")
-    return "\n".join(lines)[:_TOTAL_CHARS]
+    summary = "\n".join(lines)
+    if len(summary) < 800:
+        # Heading-only summaries (common in PDFs) leave the signal body empty,
+        # so always keep a prose lead when the canonical text has one.
+        lead = _plain_lead(canonical_md)
+        if lead and lead not in summary:
+            summary = f"{summary}\n\n正文摘录：{lead}"
+    return summary[:_TOTAL_CHARS]
 
 
 def excerpt_from_canonical(title: str | None, canonical_md: str) -> str:
@@ -71,6 +87,7 @@ def excerpt_from_canonical(title: str | None, canonical_md: str) -> str:
         text.strip()
         for _, text in _HEADING.findall(canonical_md or "")
         if text.strip() and not text.strip().startswith("Notes")
+        and text.strip() != "图块语义"
     ]
     if headings:
         lead = headings[0]

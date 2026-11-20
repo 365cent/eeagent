@@ -53,6 +53,8 @@ corepack enable && corepack pnpm install --frozen-lockfile && corepack pnpm dev
 
 Start PostgreSQL before `pytest` (uses DB **`eea_test`** only). Slices: `backend/scripts/pytest_slices.sh` (bash). External DB: pytest does not start Postgres for you.
 
+Browser smoke (Playwright, host Edge/Chrome; no bundled browser download): `backend` seed with `uv run python scripts/seed_smoke_chain.py > .seed-chain.json` (needs `DEV_OPERATOR_ROLE=taxonomy_admin` for demand confirmation), then `frontend` → `pnpm pw:smoke`, `pnpm pw:chain` (requires `EEA_PW_SEED_FILE`), `pnpm pw:roles`. Details: [frontend/tests/e2e/README.md](frontend/tests/e2e/README.md).
+
 ### Capture client (Windows)
 
 Edge/Chrome required. `client/config.example.json` → `config.json`, `api_base`: `http://127.0.0.1:8000`.

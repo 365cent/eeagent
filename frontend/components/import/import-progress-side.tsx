@@ -10,8 +10,8 @@ const { Text } = Typography
 function ImportSideNotes() {
   return (
     <div className="import-side-notes">
-      <Text type="secondary">文档拖入 → 可恢复采集任务</Text>
-      <Text type="secondary">多行 http(s) 链接 → 批量排队（需 Capture 客户端）</Text>
+      <Text type="secondary">拖入 HTML 快照 / 文档 → 平台解析入库</Text>
+      <Text type="secondary">多行 http(s) 链接 → EEA Capture 客户端采集（需在线）</Text>
       <Text type="secondary">单链接或正文 → 直接保存信号</Text>
     </div>
   )

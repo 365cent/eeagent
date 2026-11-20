@@ -99,6 +99,8 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        # Browser clients on :3000 read list totals from GET /signals (X-Total-Count).
+        expose_headers=["X-Total-Count"],
     )
 
     # v1 routers are included directly (not via a mounted sub-app) so that the

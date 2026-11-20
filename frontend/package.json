@@ -11,7 +11,9 @@
     "antd": "antd",
     "antd:lint": "antd lint components --format json && antd lint views --format json && antd lint config --format json && antd lint features --format json",
     "typecheck": "tsc --noEmit",
-    "pw:smoke": "playwright test tests/e2e/trace-smoke.spec.ts"
+    "pw:smoke": "playwright test tests/e2e/trace-smoke.spec.ts",
+    "pw:chain": "playwright test tests/e2e/chain-smoke.spec.ts",
+    "pw:roles": "playwright test tests/e2e/role-restrictions.spec.ts"
   },
   "dependencies": {
     "@ant-design/cssinjs": "^1.24.0",

@@ -29,6 +29,32 @@ def test_chat_usage_keeps_omitted_cache_fields_absent():
     assert "secret prompt" not in str(record.as_dict())
 
 
+def test_tps_is_derived_from_output_tokens_and_latency():
+    record = usage_from_chat_payload(
+        {"prompt_tokens": 10, "completion_tokens": 50},
+        task="chat",
+        requested_model="m",
+        served_model="m",
+        model_attempt=1,
+        latency_ms=2000,
+    )
+    assert record.tps() == 25.0
+    assert record.as_dict()["tps"] == 25.0
+    assert "tps=25.0" in record.log_line()
+
+    unmeasured = usage_from_chat_payload(
+        None,
+        task="chat",
+        requested_model="m",
+        served_model="m",
+        model_attempt=1,
+        latency_ms=2000,
+    )
+    assert unmeasured.tps() is None
+    assert unmeasured.as_dict()["tps"] is None
+    assert "tps=-" in unmeasured.log_line()
+
+
 def test_explicit_zero_cache_read_is_kept():
     record = usage_from_chat_payload(
         {

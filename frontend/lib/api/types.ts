@@ -329,6 +329,13 @@ export type StudioInfographicPayload = {
   points: { title: string; body: string }[]
 }
 
+export type SignalStudioBundle = {
+  audio?: StudioAudioPayload | null
+  mindmap?: StudioMindmapPayload | null
+  report?: string | null
+  infographic?: StudioInfographicPayload | null
+}
+
 export type LlmStatus = {
   configured: boolean
   model: string | null
@@ -712,6 +719,7 @@ export type TraceDocumentOut = {
   sha256: string
   ingest_status: string
   figure_count: number
+  figure_indices?: number[]
   created_at: string
   raw_object_reference_present: boolean
   canonical_object_reference_present: boolean
@@ -804,6 +812,8 @@ export type AgentMessageRecord = {
   role: string
   content: string
   created_at: string
+  served_model?: string | null
+  finished_at?: string | null
 }
 
 export type AgentPatchOut = {
@@ -825,6 +835,7 @@ export type AgentMessageResponse = {
   status: 'completed' | 'approval_required' | 'failed' | 'cancelled'
   output: Record<string, unknown> | null
   error: string | null
+  served_model?: string | null
 }
 
 export type AgentSkillsStatusOut = {

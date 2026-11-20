@@ -70,6 +70,10 @@ async def create_signal_from_document(
             await ingest_stored_document(db, doc, data, vision_captions=vision_captions)
     else:
         doc = document
+    if doc.ingest_status == "failed":
+        # A failed parse (e.g. a scanned PDF without a text layer) must not
+        # become retained evidence. The raw blob is already stored.
+        raise HTTPException(422, doc.ingest_error or "文档解析失败，未生成信号")
     canonical = canonical_markdown(doc)
     body_text = body_text or build_document_body_summary(doc.filename or "", canonical)
     url = source_url or f"eea://document/{doc.id}"

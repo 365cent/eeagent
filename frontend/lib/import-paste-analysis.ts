@@ -46,7 +46,7 @@ export function importModeHint(analysis: PasteAnalysis): string {
     return '粘贴链接或正文；多行 URL 将批量采集。'
   }
   if (analysis.mode === 'batch-capture') {
-    return `已识别 ${analysis.urls.length} 条链接 → 批量采集。`
+    return `已识别 ${analysis.urls.length} 条链接 → 复制到 EEA Capture 客户端采集。`
   }
   if (analysis.urls.length === 1 && analysis.body) {
     return '已识别 1 条链接与正文 → 保存为信号。'
@@ -59,7 +59,7 @@ export function importModeHint(analysis: PasteAnalysis): string {
 
 export function primarySubmitLabel(analysis: PasteAnalysis, busy: boolean): string {
   if (!busy) {
-    if (analysis.mode === 'batch-capture') return '批量排队采集'
+    if (analysis.mode === 'batch-capture') return '排队等待客户端采集'
     if (analysis.mode === 'paste-signal' && (analysis.urls.length || analysis.body)) return '保存信号'
     return '智能导入'
   }

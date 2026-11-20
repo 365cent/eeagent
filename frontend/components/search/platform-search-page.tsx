@@ -48,6 +48,9 @@ export function PlatformSearchPage({ onNavigate }: { onNavigate: NavigateFn }) {
                 </Text>
               ),
             }}
+            classNames={{
+              item: 'platform-search-listy-item',
+            }}
             itemRender={(hit) => (
               <Flex
                 align="center"
@@ -70,7 +73,9 @@ export function PlatformSearchPage({ onNavigate }: { onNavigate: NavigateFn }) {
                     </Text>
                   ) : null}
                 </Flex>
-                <Tag style={{ margin: 0 }}>{platformSearchKindLabel(hit.kind)}</Tag>
+                <Tag variant="filled" className="platform-search-kind-tag" style={{ margin: 0 }}>
+                  {platformSearchKindLabel(hit.kind)}
+                </Tag>
               </Flex>
             )}
           />

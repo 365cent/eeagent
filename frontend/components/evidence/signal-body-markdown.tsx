@@ -6,6 +6,13 @@ import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { FIGURE_CAPTION_LINE } from '@/lib/evidence/archive-figures'
 import { textFromMarkdownChildren } from '@/lib/evidence/markdown-children-text'
+import { sanitizeSnapshotMarkdown } from '@/lib/evidence/sanitize-snapshot-markdown'
+import {
+  sanitizeMarkdownUrl,
+  sanitizeMarkdownUrlsInText,
+  shortenLinkLabel,
+} from '@/lib/evidence/sanitize-markdown-url'
+import { textFromMarkdownChildren as childrenToText } from '@/lib/evidence/markdown-children-text'
 
 type SignalBodyMarkdownProps = {
   markdown: string
@@ -36,6 +43,11 @@ export const SignalBodyMarkdown = forwardRef<HTMLElement, SignalBodyMarkdownProp
   { markdown, className, figureByIndex },
   ref,
 ) {
+  const renderedMarkdown = useMemo(
+    () => sanitizeMarkdownUrlsInText(sanitizeSnapshotMarkdown(markdown)),
+    [markdown],
+  )
+
   const components = useMemo<Components>(() => {
     const figures = figureByIndex ?? {}
     return {
@@ -53,13 +65,32 @@ export const SignalBodyMarkdown = forwardRef<HTMLElement, SignalBodyMarkdownProp
         }
         return <blockquote {...props}>{children}</blockquote>
       },
+      table({ children, node: _node, ...props }) {
+        return (
+          <div className="markdown-table-scroll">
+            <table {...props}>{children}</table>
+          </div>
+        )
+      },
+      a({ href, children, ...props }) {
+        const safe = href ? sanitizeMarkdownUrl(href) : undefined
+        if (!safe) {
+          return <span>{children}</span>
+        }
+        const label = shortenLinkLabel(safe, childrenToText(children).trim() || safe)
+        return (
+          <a href={safe} target="_blank" rel="noopener noreferrer" {...props}>
+            {label || safe}
+          </a>
+        )
+      },
     }
   }, [figureByIndex])
 
   return (
     <article ref={ref} className={className ?? 'evidence-markdown-article'}>
       <ReactMarkdown remarkPlugins={[remarkGfm]} components={components}>
-        {markdown}
+        {renderedMarkdown}
       </ReactMarkdown>
     </article>
   )

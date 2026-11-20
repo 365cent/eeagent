@@ -212,7 +212,17 @@ export function DeductionChainWorkspace({ onNavigate, initialLandingPointId }: {
                             打开文档正文
                           </Button>
                         ) : <Text type="secondary">尚无可用的规范正文对象</Text>}
-                        {signal.document.figure_count > 0 ? (
+                        {(signal.document.figure_indices ?? []).length > 0 ? (
+                          (signal.document.figure_indices ?? []).map((figureIndex) => (
+                            <Button
+                              key={figureIndex}
+                              type="link"
+                              onClick={() => onNavigate({ view: 'singal', id: signal.id, query: { doc_figure: String(figureIndex) } })}
+                            >
+                              图块 {figureIndex}
+                            </Button>
+                          ))
+                        ) : signal.document.figure_count > 0 ? (
                           <Button
                             type="link"
                             onClick={() => onNavigate({ view: 'singal', id: signal.id, query: { doc_figure: '1' } })}

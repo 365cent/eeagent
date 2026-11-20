@@ -312,7 +312,9 @@ function useNewSignalImport(onNavigate: (key: string) => void) {
         const html = await file.text()
         sourceUrl = sourceUrlFromSavedHtml(html) ?? sourceUrl
         if (!sourceUrl) {
-          throw new Error('HTML 中找不到 http(s) 来源链接，请先在文本框粘贴 URL 或确保文件内含来源')
+          throw new Error(
+            'HTML 中找不到来源链接（已查 SingleFile 文件头、canonical、og:url）；请在文本框粘贴该页 URL 后重试',
+          )
         }
         fileBlob = new Blob([html], { type: 'text/html; charset=utf-8' })
       }

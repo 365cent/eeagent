@@ -8,6 +8,17 @@
  * Hex pairs: keep aligned with `config/shell-surfaces.ts`.
  */
 
+/*
+ * Scrollbar chrome sits on the root because it must also paint the document scroller
+ * (outside `.app-shell`). The slate thumb is theme-neutral, so one set of values works
+ * on light and dark surfaces; the sider re-tints these three inside its navy rail.
+ */
+:root {
+  --eea-scrollbar-thumb: rgba(100, 116, 139, 0.38);
+  --eea-scrollbar-thumb-hover: rgba(71, 85, 105, 0.62);
+  --eea-scrollbar-thumb-inactive: rgba(100, 116, 139, 0.16);
+}
+
 .app-shell {
   color-scheme: light;
 
@@ -68,12 +79,15 @@
   }
 }
 
+/* The document canvas shows through scrollbar gutters and overscroll bounce. */
 html[data-color-scheme='light'] {
   color-scheme: light;
+  background-color: #ffffff;
 }
 
 html[data-color-scheme='dark'] {
   color-scheme: dark;
+  background-color: #0a0a0a;
 }
 
 /* Main column surfaces — layout chrome picks these up in globals `@layer components`. */

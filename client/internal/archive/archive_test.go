@@ -43,6 +43,45 @@ func TestInfer(t *testing.T) {
 			want: "",
 		},
 		{
+			name: "unquoted attributes (SingleFile rewrite)",
+			html: `<html lang=en style><link rel=canonical href=https://www.eet-china.com/mp/a491751.html><meta http-equiv=content-security-policy content="default-src 'none'">`,
+			want: "https://www.eet-china.com/mp/a491751.html",
+		},
+		{
+			name: "unquoted og url",
+			html: `<meta property=og:url content=https://example.com/u/1>`,
+			want: "https://example.com/u/1",
+		},
+		{
+			name: "singlefile provenance comment",
+			html: `<html lang=en style><!--
+ Page saved with SingleFile 
+ url: https://www.eet-china.com/mp/a491751.html 
+ saved date: Thu Nov 19 2026 16:55:30 GMT+0800 (中国标准时间)
+--><meta charset=utf-8><title>北京车展</title>`,
+			want: "https://www.eet-china.com/mp/a491751.html",
+		},
+		{
+			name: "singlefile comment wins over canonical",
+			html: `<!-- saved with SingleFile url: https://example.com/saved --><link rel=canonical href=https://example.com/canonical>`,
+			want: "https://example.com/saved",
+		},
+		{
+			name: "singlefile comment with unusable url falls back to canonical",
+			html: `<!-- saved with SingleFile url: about:blank --><link rel=canonical href="https://example.com/page">`,
+			want: "https://example.com/page",
+		},
+		{
+			name: "legacy saved from url comment",
+			html: `<!-- saved from url=(0045)https://example.com/legacy --><html><body>x</body></html>`,
+			want: "https://example.com/legacy",
+		},
+		{
+			name: "ampersand escaped canonical",
+			html: `<link rel=canonical href="https://example.com/a?x=1&amp;y=2">`,
+			want: "https://example.com/a?x=1&y=2",
+		},
+		{
 			name: "no url",
 			html: `<html><body><p>saved page</p></body></html>`,
 			want: "",

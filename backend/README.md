@@ -3,7 +3,7 @@
 FastAPI + PostgreSQL 后端，实现《平台实施计划》第 3–8 节的推导链路：
 原始信号 → 技术主题 → 需求点 → 车辆功能 → 技术落脚点 → 部署标准 → 战略研判。
 
-- Schema：`docs/platform-implementation-plan.md` §4.1 基线 + 演进迁移（迁移由 Alembic 管理；0003 文档表、0005 访问留痕、0006 信号↔文档关联、0008 持久采集任务、0009 审计前后值、0010 功能卡与五个技术域词项、0011 需求五步证据链、0012 战略漏斗草稿、0013 Agent 工作流、0014 全景导入、0015 Agent 用量、0016 发布基础、0017 主题来源计数、0018 采集凭据；当前 head 为 0018_capture_tokens）
+- Schema：`docs/platform-implementation-plan.md` §4.1 基线 + 演进迁移（迁移由 Alembic 管理；0003 文档表、0005 访问留痕、0006 信号↔文档关联、0008 持久采集任务、0009 审计前后值、0010 功能卡与五个技术域词项、0011 需求五步证据链、0012 战略漏斗草稿、0013 Agent 工作流、0014 全景导入、0015 Agent 用量、0016 发布基础、0017 主题来源计数、0018 采集凭据、0019 文档结构、0020 分类依据、0021 证据工作室产物、0022 需求复核基线；当前 head 为 0022_demand_review_baseline）
 - API 文档（服务启动后）：http://127.0.0.1:8000/ 或 /docs（Swagger UI，deep link）、http://127.0.0.1:8000/openapi.json（OpenAPI schema）
 - 本地库：**Windows** 便携 PostgreSQL（`bootstrap.py` → `backend/.pg/`）；**macOS/Linux** 系统 PostgreSQL — 见根目录 [README.md](../README.md)
 
@@ -35,7 +35,10 @@ uv run python scripts/dev.py         # 前台 API + worker；Ctrl+C 结束
 旧 `LLM_*` / `MAAS_*` 变量不再读取，升级时需迁移到上述九项配置。
 
 文档摄取相关：
-- `CHAT_MODEL` 可留空（自动探测网关模型）；`VISION_MODEL` 可留空（自动 Qwen 3.8 → 3.6）
+- `CHAT_MODEL` 可留空：按网关 `/models` 的对话候选竞速，尝试次数为 `max(CHAT_ATTEMPT_BUDGET_FLOOR, 候选数)`（默认 30）；每个模型的首 token 与 TPS 在进程内实测并排序（`GET /api/v1/llm/status` 可见），不写回 `.env`，重启后重新采样。显式填写时按你给的顺序重试，不改顺序、不额外发现模型
+- `CHAT_HEDGE_DELAY_SECONDS`（默认 2）/ `CHAT_HEDGE_MAX_MODELS`（默认 4）/ `CHAT_FIRST_TOKEN_TIMEOUT_SECONDS`（默认 15）：首 token 竞速窗口与并发上限；`CHAT_MODEL_RETRIES` 仍按单模型瞬时失败重试
+- `VISION_MODEL` 可留空（自动 Qwen 3.8 → 3.6）；填写后严格按该顺序重试，`VISION_RETRY_BASE_DELAY_SECONDS` 只调节重试间隔（默认 0.8s）
+- 视觉识别记录实际应答的模型 id；`scripts/probe_model_speed.py` 可只读测量各对话模型的 TTFT/TPS
 - `DOC_RAW_UPLOAD_MAX_BYTES` / `DOC_INGEST_MAX_BYTES`：原始上传与 MarkItDown 解析上限，默认各 **120 MiB**（`125829120`）；超过解析上限只保留 blob（`ingest_status=skipped`）库端口等见 `app/core/config.py` 默认值（`DB_PORT`、`API_PORT`、`OBJECT_DIR`…）。
 
 ## 主要端点（`/api/v1`）

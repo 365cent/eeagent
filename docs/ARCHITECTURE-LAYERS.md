@@ -1,6 +1,6 @@
 # 分层架构与契约校验 / Layered architecture & contracts
 
-更新：2026-11-11。与 [DOC-03](TODO.md#doc-03-架构数据和接口同步) 同步；实现任务见 [BE-17](../backend/TODO.md#be-17-领域分层与依赖边界)、[FE-13](../frontend/TODO.md#fe-13-领域特性与-workspace-拆分)、[CC-07](../client/TODO.md#cc-07-客户端分层与-http-复用)。运行时契约以 OpenAPI 与数据库 migration 为准，本文描述代码组织与回归门禁，不含凭据或环境秘密。
+更新：2026-11-20。与 [DOC-03](TODO.md#doc-03-架构数据和接口同步) 同步；实现任务见 [BE-17](../backend/TODO.md#be-17-领域分层与依赖边界)、[FE-13](../frontend/TODO.md#fe-13-领域特性与-workspace-拆分)、[CC-07](../client/TODO.md#cc-07-客户端分层与-http-复用)。运行时契约以 OpenAPI 与数据库 migration 为准，本文描述代码组织与回归门禁，不含凭据或环境秘密。
 
 ## 总览 / Overview
 
@@ -44,12 +44,38 @@ HTTP 面统一为 `/api/v1`（见 `GET /openapi.json`）。采集默认 `POST /a
 cd backend && uv run lint-imports
 ```
 
-当前契约（节选）：
+当前契约（3 条，全部为硬门禁）：
 
-1. **platform-isolation**：`app.platform` 禁止导入 `app.domains`、`app.api`。
-2. **services-isolation**：`app.services` 禁止导入 `app.api`。
+1. **Platform must not import domains or API**：`app.platform` 禁止导入 `app.domains`、`app.api`。
+2. **Services must not import API**：`app.services` 禁止导入 `app.api`。
+3. **Domains must not import API**：`app.domains` 禁止导入 `app.api`。
 
 违反即 CI/本地回归失败；新增契约前须先清现存违规导入（见 BE-17）。
+
+## 迁移与数据模型（2026-11-20）
+
+运行时 schema 以 Alembic 迁移为准，文档不手抄列类型。
+
+| 项 | 当前值 | 校验方式 |
+| --- | --- | --- |
+| 迁移头 | `0022_demand_review_baseline` | `uv run alembic heads` |
+| 修订链 | `0001_init` … `0022`，全部为加法修订，不改已发布迁移 | 发布前 `alembic downgrade -1` + `upgrade head` |
+| 业务表 | 31 张 `eea_*` 表（含 `eea_signal_studio_artifact`、`eea_signal_source`、`eea_stored_object_orphan`） | [test_db_schema.py](../backend/tests/test_db_schema.py) 精确集合断言 |
+| 视图 | `eea_v_tech_theme_metrics`、`eea_v_tech_theme_display_tags` | 同上 |
+| 测试库 | 专用 `eea_test`，与开发库 `eea` 分离 | `backend/tests/conftest.py` 会话互斥锁 |
+
+新增迁移只追加 revision；改表必须同时更新 `EXPECTED_TABLES`，否则 schema 清单用例失败。开发引导（Windows 便携 PostgreSQL）与生产初始化（OPS-01）分开，不复用 bootstrap 脚本。
+
+## 近期接口契约变化
+
+| 日期 | 变化 | 影响方 |
+| --- | --- | --- |
+| 2026-11-20 | `POST /api/v1/imports/capture-urls` 的任务写入调用者 `owner_subject`；研究者只能列出/领取自己的任务，`platform_admin` 可跨用户 | FE-02、CC-02、OPS-03 |
+| 2026-11-20 | 文档解析失败（如扫描 PDF）不再生成信号：`POST /signals` 返回 422，原始 blob 保留 | BE-01/BE-12、FE-02 |
+| 2026-11-20 | PDF 需 ≥120 字符可读文本，否则 `ingest_status=failed` 并给出 OCR 指引 | BE-12、FE-11 |
+| 2026-11-20 | 文档摘要过短时追加净化正文摘录（去 HTML 注释/base64/图块语义噪声） | BE-12、FE-11 |
+| 2026-11-20 | 追溯响应新增 `document.figure_indices`，按图块逐张回链 | FE-10 |
+| 2026-11-19 | 采集 token 签发/撤销、`capture/whoami`、模型网关拆分为 `CHAT_*`/`EMBEDDING_*`/`RERANK_*` | OPS-03、CC-03、BE-04 |
 
 ## OpenAPI 路径快照
 
@@ -70,6 +96,7 @@ OPENAPI_UPDATE_SNAPSHOT=1 uv run pytest tests/test_openapi_snapshot.py
 | --- | --- | --- |
 | 后端分层导入 | `uv run lint-imports` | BE-17 |
 | OpenAPI 路径面 | `uv run pytest tests/test_openapi_snapshot.py` | BE-17 / BE-16 |
+| 迁移头与 schema 清单 | `uv run alembic heads`、`uv run pytest tests/test_db_schema.py` | BE-16 / DOC-03 |
 | 前端构建与 lint | `pnpm build`、`pnpm antd:lint` | FE-13 / FE-12 |
 | 客户端短测 | `go test -short ./...`（`client/`） | CC-07 |
 

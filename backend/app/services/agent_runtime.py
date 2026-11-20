@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 import uuid
 from datetime import datetime, timezone
 
@@ -10,6 +12,7 @@ from pydantic_ai import DeferredToolRequests
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import get_settings
 from app.core.identity import OperatorIdentity
 from app.models.agent_models import AgentMessage, AgentRun, AgentSession
 from app.services.agent_events import append_event
@@ -23,6 +26,12 @@ from app.services.agent_workflow import (
     EventSink,
 )
 from app.services.llm_gateway import LLMNotConfiguredError, LLMNoModelError, LLMUpstreamError
+
+
+# Replay on reconnect only needs durable events; see `execute_user_message`.
+PERSISTED_STREAM_EVENTS = frozenset(
+    {"tool.call", "tool.result", "citation", "approval.required"}
+)
 
 
 async def get_owned_session(
@@ -43,7 +52,7 @@ async def execute_user_message(
     actor: OperatorIdentity,
     message: str,
     event_sink: EventSink | None = None,
-) -> tuple[AgentRun, dict | None, str | None]:
+) -> tuple[AgentRun, dict | None, str | None, str | None]:
     run = AgentRun(session_id=session.id, status="running")
     db.add(run)
     db.add(
@@ -70,11 +79,21 @@ async def execute_user_message(
     )
     deps.instruction_addon = await build_instruction_addon(db, deps)
 
+    async def heartbeat() -> None:
+        started = time.monotonic()
+        while True:
+            await asyncio.sleep(5)
+            if event_sink is not None:
+                await event_sink("turn.progress", {"elapsed_s": int(time.monotonic() - started)})
+
     stream_buffer: list[tuple[str, dict]] = []
     stream_events_persisted = False
 
     async def sink(event_type: str, payload: dict) -> None:
-        stream_buffer.append((event_type, payload))
+        # Token deltas and progress heartbeats are ephemeral: the final message is
+        # stored separately, so replaying them only bloats the event table.
+        if event_type in PERSISTED_STREAM_EVENTS:
+            stream_buffer.append((event_type, payload))
         if event_sink is not None:
             await event_sink(event_type, payload)
 
@@ -96,15 +115,27 @@ async def execute_user_message(
     status = "completed"
     output_payload: dict | None = None
     error: str | None = None
+    served_model: str | None = None
     try:
         agent = await build_eea_agent()
-        output, messages, usage = await run_agent_turn(
-            agent,
-            user_message=message,
-            deps=deps,
-            message_history=history,
-            event_sink=sink,
-        )
+        heartbeat_task = asyncio.create_task(heartbeat())
+        try:
+            async with asyncio.timeout(get_settings().agent_turn_timeout_seconds):
+                output, messages, usage = await run_agent_turn(
+                    agent,
+                    user_message=message,
+                    deps=deps,
+                    message_history=history,
+                    event_sink=sink,
+                )
+        except TimeoutError as exc:
+            raise LLMUpstreamError(
+                504,
+                f"模型在限定时间内未返回完整结果",
+            ) from exc
+        finally:
+            heartbeat_task.cancel()
+            await asyncio.gather(heartbeat_task, return_exceptions=True)
         session.model_messages_json = dumps_message_history(messages)
         if isinstance(output, DeferredToolRequests):
             status = "approval_required"
@@ -127,6 +158,7 @@ async def execute_user_message(
         )
         run.output_json = output_payload
         run.usage_json = usage
+        served_model = str((usage or {}).get("served_model") or "") or None
         run.status = status
         run.finished_at = datetime.now(timezone.utc)
         await persist_buffered_stream_events()
@@ -134,7 +166,7 @@ async def execute_user_message(
             db,
             session=session,
             event_type="turn.completed" if status == "completed" else "approval.required",
-            payload={"run_id": str(run.id), "status": status},
+            payload={"run_id": str(run.id), "status": status, "served_model": served_model},
             run_id=run.id,
         )
     except (LLMNotConfiguredError, LLMNoModelError) as exc:
@@ -151,7 +183,7 @@ async def execute_user_message(
         )
     except LLMUpstreamError as exc:
         status = "failed"
-        error = f"LLM 上游错误 ({exc.status})"
+        error = f"LLM 上游错误 ({exc.status})：{exc.detail}"[:240]
         run.status = "failed"
         run.error_message = error
         await append_event(
@@ -176,7 +208,7 @@ async def execute_user_message(
         )
     run.finished_at = run.finished_at or datetime.now(timezone.utc)
     await db.commit()
-    return run, output_payload, error if status == "failed" else None
+    return run, output_payload, error if status == "failed" else None, served_model
 
 
 async def cancel_run(

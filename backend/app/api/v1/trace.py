@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.db.base import get_db
+from app.models.agent_models import DocumentFigure
 from app.models.models import (
     CorrectionAudit,
     DemandPoint,
@@ -129,6 +130,19 @@ async def trace_from_landing_point(lp_id: uuid.UUID, db: AsyncSession = Depends(
         unresolved_evidence_ids.extend(
             str(evidence_id) for evidence_id in evidence_ids if evidence_id not in found_ids
         )
+        document_ids = {signal.document_id for signal in rows if signal.document_id}
+        figures_by_document: dict[uuid.UUID, list[int]] = {}
+        if document_ids:
+            figure_rows = (
+                await db.execute(
+                    select(DocumentFigure.document_id, DocumentFigure.figure_index)
+                    .where(DocumentFigure.document_id.in_(document_ids))
+                    .order_by(DocumentFigure.document_id, DocumentFigure.figure_index)
+                )
+            ).all()
+            for document_id, index in figure_rows:
+                figures_by_document.setdefault(document_id, []).append(index)
+
         for signal in rows:
             output = SignalOut(**SignalBase.model_validate(signal).model_dump())
             output.tags = [tag.vocab.name for tag in signal.tags]
@@ -148,6 +162,7 @@ async def trace_from_landing_point(lp_id: uuid.UUID, db: AsyncSession = Depends(
                     sha256=signal.document.sha256,
                     ingest_status=signal.document.ingest_status,
                     figure_count=signal.document.figure_count,
+                    figure_indices=figures_by_document.get(signal.document.id, []),
                     created_at=signal.document.created_at,
                     raw_object_reference_present=bool(signal.document.object_key),
                     canonical_object_reference_present=bool(

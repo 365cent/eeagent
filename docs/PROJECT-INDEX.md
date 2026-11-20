@@ -6,11 +6,12 @@
 
 1. [根 TODO](../TODO.md)：从当前状态到 Linux 内网生产的剩余阶段、依赖和发布门槛。
 2. [需求追溯表](REQUIREMENTS-TRACEABILITY.md)：75 条 REQ 与来源、WBS、任务 ID 和待执行 AT 验收项的映射。AT 编号是验收计划，不表示测试已通过。
-3. [eFuse 原始案例 Word](reference/德赛西威EEA关键技术落脚点推导链路逐环节图文对照说明-以「智能保险丝（eFuse）」为案例-1009.docx)：业务推导原文、案例表和截图。作为业务来源保持不变。
-4. [平台实施计划](platform-implementation-plan.md)：需求解释、数据模型、流程与技术提案；第 7 节及后续工程方案不应误认为原始 Word 的要求。
-5. [WBS 正文](wbs/EEA-WBS-001-WBS文档.md)及[工作簿](wbs/EEA-WBS-工作清单.xlsx)：范围、工作包、职责、估时和历史里程碑。Markdown 是当前追溯主线；工作簿的单元格核对仍列为 DOC-01 工作。
-6. [Docs TODO](TODO.md)：业务输入、文档维护、验收证据、安装手册、发布包和交接。
-7. [业务与环境输入登记表](INPUT-REGISTER.md)：已收到与仍待提供的材料、责任方、版本/许可和受影响验收项。
+3. [剩余工作实施计划](REMAINING-WORK-PLAN.md)：53 个父任务的波次、每项缺口、关闭证据和每波检查命令。
+4. [eFuse 原始案例 Word](reference/德赛西威EEA关键技术落脚点推导链路逐环节图文对照说明-以「智能保险丝（eFuse）」为案例-1009.docx)：业务推导原文、案例表和截图。作为业务来源保持不变。
+5. [平台实施计划](platform-implementation-plan.md)：需求解释、数据模型、流程与技术提案；第 7 节及后续工程方案不应误认为原始 Word 的要求。
+6. [WBS 正文](wbs/EEA-WBS-001-WBS文档.md)及[工作簿](wbs/EEA-WBS-工作清单.xlsx)：范围、工作包、职责、估时和历史里程碑。Markdown 是当前追溯主线；工作簿的单元格核对仍列为 DOC-01 工作。
+7. [Docs TODO](TODO.md)：业务输入、文档维护、验收证据、安装手册、发布包和交接。
+8. [业务与环境输入登记表](INPUT-REGISTER.md)：已收到与仍待提供的材料、责任方、版本/许可和受影响验收项。
 9. 本地开发：仓库根 [README.md](../README.md)；Linux 生产见 [deploy/README.md](../deploy/README.md)。
 
 ## 来源与参考材料

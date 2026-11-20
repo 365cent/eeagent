@@ -87,7 +87,9 @@ def _is_pdf_url(raw: str) -> bool:
     return path.endswith(".pdf")
 
 
-async def create_url_list_capture_batch(db: AsyncSession, text: str) -> PanoramaImportBatch:
+async def create_url_list_capture_batch(
+    db: AsyncSession, text: str, *, owner_subject: str | None = None
+) -> PanoramaImportBatch:
     urls = parse_url_lines(text)
     if not urls:
         raise HTTPException(422, "未找到有效的 http(s) 链接；请每行一条或换行粘贴链接列表")
@@ -141,6 +143,7 @@ async def create_url_list_capture_batch(db: AsyncSession, text: str) -> Panorama
             import_batch_id=batch.id,
             filename="capture.pdf" if is_pdf else None,
             mime="application/pdf" if is_pdf else None,
+            owner_subject=owner_subject,
         )
         db.add(job)
         await db.flush()

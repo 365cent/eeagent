@@ -35,6 +35,10 @@ class AgentMessageOut(BaseModel):
     status: Literal["completed", "approval_required", "failed", "cancelled"]
     output: dict[str, Any] | None = None
     error: str | None = None
+    served_model: str | None = Field(
+        default=None,
+        description="Gateway model that actually answered; None when the turn failed before any token",
+    )
 
 
 class AgentPatchActionOut(BaseModel):
@@ -66,6 +70,14 @@ class AgentMessageRecord(BaseModel):
     role: str
     content: str
     created_at: datetime
+    served_model: str | None = Field(
+        default=None,
+        description="Gateway model that produced this reply; None for user turns or unsaved runs",
+    )
+    finished_at: datetime | None = Field(
+        default=None,
+        description="UTC finish time of the run behind this reply; None when the run has not finished",
+    )
 
     model_config = ConfigDict(from_attributes=True)
 

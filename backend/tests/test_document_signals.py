@@ -138,6 +138,27 @@ async def test_document_signal_explicit_fields_win_over_defaults(client, monkeyp
     assert sig["document_id"] == doc["id"]
 
 
+async def test_failed_document_parse_never_becomes_retained_evidence(client, monkeypatch):
+    """A scanned PDF without a text layer keeps its blob but creates no signal."""
+
+    async def scanned_pdf(data, filename, mime, **kwargs):
+        raise ValueError("PDF 没有可提取的文本层（可能需要 OCR）")
+
+    monkeypatch.setattr("app.domains.evidence.document_pipeline.ingest_document", scanned_pdf)
+    uploaded = await client.post(
+        "/api/v1/documents/raw",
+        files={"file": ("scan.pdf", b"%PDF-1.4 scanned", "application/pdf")},
+    )
+    assert uploaded.status_code == 201, uploaded.text
+    assert uploaded.json()["ingest_status"] == "failed"
+
+    sig = await client.post(
+        "/api/v1/signals",
+        json={"document_id": uploaded.json()["id"], "channel_code": "web"},
+    )
+    assert sig.status_code == 422, sig.text
+    assert "OCR" in sig.text or "解析失败" in sig.text
+
 async def test_document_signal_unknown_document_404(client):
     r = await client.post(
         "/api/v1/signals",

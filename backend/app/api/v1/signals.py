@@ -23,6 +23,7 @@ from app.schemas.schemas import (
     SignalDetail,
     SignalFigureOut,
     SignalOut,
+    SignalStudioBundleOut,
     SignalStudioIn,
     SignalUpdate,
     TagAssignment,
@@ -62,6 +63,11 @@ from app.services.llm_gateway import (
 from app.services.objectstore import load_body, load_bytes, save_body, save_bytes
 from app.services.refcodes import codes, normalize as normalize_ref_code
 from app.services.llm_prompts import evidence_assistant_system
+from app.services.signal_studio_store import (
+    get_studio_artifact,
+    list_studio_artifacts,
+    upsert_studio_artifact,
+)
 from app.services.studio import (
     StudioParseError,
     build_messages as build_studio_messages,
@@ -352,7 +358,18 @@ async def get_signal_figures(signal_id: uuid.UUID, db: AsyncSession = Depends(ge
         }
     },
 )
-async def get_signal_archive(signal_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+async def get_signal_archive(
+    signal_id: uuid.UUID,
+    embed_origin: str | None = Query(
+        default=None,
+        max_length=200,
+        description=(
+            "Web origin of the embedding workspace, e.g. http://10.215.8.74:3000. "
+            "Honoured only when it matches CORS_ORIGINS / CORS_ORIGIN_REGEX."
+        ),
+    ),
+    db: AsyncSession = Depends(get_db),
+):
     """Replay the captured SingleFile HTML (TODO.md B4): inject ``<base href>`` from
     the signal URL so relative assets resolve on the original site, not under
     ``/api/v1/signals/{id}/…``."""
@@ -363,6 +380,7 @@ async def get_signal_archive(signal_id: uuid.UUID, db: AsyncSession = Depends(ge
     if data is None:
         raise HTTPException(404, f"html object {s.snapshot_html_object_key!r} missing from the object store")
     data = prepare_archive_replay_html(data, page_url=s.url)
+    settings = get_settings()
     return Response(
         content=data,
         media_type="text/html; charset=utf-8",
@@ -374,9 +392,15 @@ async def get_signal_archive(signal_id: uuid.UUID, db: AsyncSession = Depends(ge
                 "font-src data:; "
                 "base-uri https: http:; "
                 "object-src 'none'; "
-                "script-src 'none'"
+                "script-src 'none'; "
+                # The workspace frames this replay in a sandboxed iframe and runs
+                # on another port/origin than the API, so SAMEORIGIN (and thus
+                # X-Frame-Options) would refuse the embed. Naming the web origin
+                # (validated against the CORS allow-list) keeps framing off for
+                # everyone else, including LAN access where CSP cannot name an IP
+                # range.
+                f"frame-ancestors {settings.archive_frame_ancestors_for(embed_origin)}"
             ),
-            "X-Frame-Options": "SAMEORIGIN",
         },
     )
 
@@ -386,8 +410,12 @@ async def get_signal_archive(signal_id: uuid.UUID, db: AsyncSession = Depends(ge
     response_class=Response,
     include_in_schema=False,
 )
-async def get_signal_archive_trailing_slash(signal_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    return await get_signal_archive(signal_id, db)
+async def get_signal_archive_trailing_slash(
+    signal_id: uuid.UUID,
+    embed_origin: str | None = None,
+    db: AsyncSession = Depends(get_db),
+):
+    return await get_signal_archive(signal_id, embed_origin, db)
 
 
 def _signal_context_block(s: Signal, body_excerpt: str) -> str:
@@ -457,6 +485,14 @@ async def signal_assistant_message(
     return SignalAssistantMessageOut(signal_id=s.id, reply=reply, model=model)
 
 
+@router.get("/{signal_id}/studio", response_model=SignalStudioBundleOut)
+async def signal_studio_bundle(signal_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
+    """Return persisted studio outputs for this signal (empty fields when none saved)."""
+    s = await _load_signal(db, signal_id)
+    raw = await list_studio_artifacts(db, signal_id, body_sha256=s.body_sha256)
+    return SignalStudioBundleOut.model_validate(raw)
+
+
 @router.post("/{signal_id}/studio")
 async def signal_studio(
     signal_id: uuid.UUID,
@@ -466,8 +502,8 @@ async def signal_studio(
     """证据工作室生成（TODO.md 八）：导图 / 报告 / 信息图 / 口播稿。
 
     report 返回 text/markdown，其余三种返回与前端 `fetchSignalStudio` 约定的
-    JSON 形状。不落库：前端按（信号, kind）缓存最近一次成功结果。解析失败
-    重试一次，仍不符合契约则 422（错误映射与助手一致：503 未配置 / 502 上游）。
+    JSON 形状。成功结果写入 ``eea_signal_studio_artifact``；默认返回已保存结果，
+    ``regenerate=true`` 时重新调用模型。解析失败重试一次，仍不符合契约则 422。
     """
     s = await _load_signal(db, signal_id)
     body = ""
@@ -476,6 +512,15 @@ async def signal_studio(
     body_excerpt = body[:6000]
     context = _signal_context_block(s, body_excerpt)
     quote_source = body_excerpt or (s.excerpt or s.title)
+
+    if not payload.regenerate:
+        cached = await get_studio_artifact(
+            db, signal_id, payload.kind, body_sha256=s.body_sha256
+        )
+        if cached is not None:
+            if payload.kind == "report":
+                return PlainTextResponse(cached.content_text or "", media_type="text/markdown")
+            return JSONResponse(cached.content_json)
 
     last_error = "模型未按约定返回内容"
     for attempt in range(2):
@@ -508,12 +553,20 @@ async def signal_studio(
 
         if payload.kind == "report":
             try:
-                return PlainTextResponse(
-                    strip_report_markdown(content), media_type="text/markdown"
-                )
+                report_md = strip_report_markdown(content)
             except StudioParseError as exc:
                 last_error = str(exc)
                 continue
+            await upsert_studio_artifact(
+                db,
+                signal_id=signal_id,
+                kind=payload.kind,
+                body_sha256=s.body_sha256,
+                llm_model=_model,
+                content_text=report_md,
+            )
+            await db.commit()
+            return PlainTextResponse(report_md, media_type="text/markdown")
         try:
             data = parse_studio_payload(
                 payload.kind,
@@ -524,6 +577,15 @@ async def signal_studio(
         except StudioParseError as exc:
             last_error = str(exc)
             continue
+        await upsert_studio_artifact(
+            db,
+            signal_id=signal_id,
+            kind=payload.kind,
+            body_sha256=s.body_sha256,
+            llm_model=_model,
+            content_json=data,
+        )
+        await db.commit()
         return JSONResponse(data)
 
     raise HTTPException(

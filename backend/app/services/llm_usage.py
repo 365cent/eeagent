@@ -97,6 +97,12 @@ class LlmCallUsage:
     http_status: int | None = None
     served_models: tuple[str, ...] = ()
 
+    def tps(self) -> float | None:
+        """Completion tokens per second, or None when the provider reported no tokens."""
+        if self.output_tokens is None or self.output_tokens <= 0 or self.latency_ms <= 0:
+            return None
+        return round(self.output_tokens / (self.latency_ms / 1000), 2)
+
     def as_dict(self) -> dict[str, Any]:
         payload: dict[str, Any] = {
             "task": self.task,
@@ -107,6 +113,7 @@ class LlmCallUsage:
             "caller_attempt": self.caller_attempt,
             "fallback": self.fallback,
             "latency_ms": self.latency_ms,
+            "tps": self.tps(),
             "input_tokens": self.input_tokens,
             "output_tokens": self.output_tokens,
             "total_tokens": self.total_tokens,
@@ -136,6 +143,7 @@ class LlmCallUsage:
             f"caller_attempt={self.caller_attempt}",
             f"fallback={int(self.fallback)}",
             f"latency_ms={self.latency_ms}",
+            f"tps={'-' if self.tps() is None else self.tps()}",
             f"input_tokens={num(self.input_tokens)}",
             f"output_tokens={num(self.output_tokens)}",
             f"total_tokens={num(self.total_tokens)}",

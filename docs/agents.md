@@ -8,6 +8,7 @@
 
 - 流量经 OpenAI 兼容 **`/chat/completions`** 出站（[`backend/app/services/llm_gateway.py`](../backend/app/services/llm_gateway.py)）。
 - 配置示例含 `auto`、`deepseek-v4-flash-hw`、Qwen 3.8/3.6 等；仓库**不绑定** OpenAI 官方模型 ID，具体费用与延迟取决于实际网关与返回模型。
+- `CHAT_MODEL` 与 `VISION_MODEL` 都接受逗号分隔的模型链（`A,B,C`），顺序即重试顺序。chat 侧每个模型遇 429/5xx/超时先在本模型上重试 `CHAT_MODEL_RETRIES` 次（受 `CHAT_REQUEST_TOTAL_TIMEOUT_SECONDS` 总预算约束），再让下一个候选接上；vision 侧每张图的重试按 `VISION_MODEL` 链轮换，列表内每个模型至少试一次。空值仍走网关探测。
 - 生产评估应避免长期使用 `auto`；应固定模型/版本并记录网关实际返回的 `model` 字段。用量日志里的 `requested_model` 与 `served_model` 就是这对值，模型 ID 仍只来自环境变量或网关，不写进代码。
 
 ## 用量记录
@@ -33,7 +34,7 @@
 | --- | --- | --- |
 | 通用 chat | `llm_gateway.py` ~272 | `temperature=0.3`, `max_tokens=1200` |
 | Studio | `signals.py` ~665 | `temperature=0.2`, `max_tokens=1600`, 最多 3 次模型尝试 |
-| Vision caption | `doc_ingest.py` ~311 | `temperature=0`, `max_tokens=160`, 两次重试 |
+| Vision caption | `doc_ingest.py` ~367 | `temperature=0`, `max_tokens=128`, 每模型一次 + `VISION_CAPTION_RETRY` 轮换 |
 | Tags / excerpt | `llm.py` ~120 | Pydantic AI 8s 超时 |
 | Durable agent | `agent_workflow.py` ~45 | 无单独 reasoning/输出预算 |
 
@@ -44,7 +45,7 @@
 | 任务 | 建议 | 权衡 |
 | --- | --- | --- |
 | 标签、重排、摘要 | 最快可用 chat；无/低推理；temperature 0–0.2；输出约 200–400 tokens | 更强模型难 justify 成本 |
-| Vision 图注 | 明示 vision 模型；无/低推理；输出约 96–128 tokens；一次重试 | 3.8 仅在有对照实验证明优于 3.6 时升级 |
+| Vision 图注 | 明示 vision 模型；无/低推理；输出约 96–128 tokens；链上留一个 Qwen 3.6 fallback | 3.8 明确不可用时仍能出图注 |
 | 证据对话（legacy assistant） | 快 chat；无/低推理；输出 600–900；截止 20–30s | 仅多源复杂问题用中等推理 |
 | Studio 音频/导图/信息图 | 快 + 结构化输出；按 kind 分 cap；一个 fallback 模型 | 现状最坏约 6 次 completion |
 | Studio 报告 | 合成质量不足时用中等推理，否则低 | 质量换延迟 |

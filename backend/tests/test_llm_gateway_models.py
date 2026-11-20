@@ -1,5 +1,7 @@
 """Dynamic model selection: chat probe + Qwen 3.8/3.6 vision preference."""
 
+import asyncio
+import logging
 import types
 
 import httpx
@@ -10,6 +12,16 @@ from app.core.config import get_settings
 from app.services import semantic_api
 
 pytestmark = [pytest.mark.anyio, pytest.mark.no_db]
+
+
+@pytest.fixture(autouse=True)
+def _reset_gateway_caches():
+    """`/models` and the winner cache are process state; start every test cold."""
+    gw.reset_model_list_cache()
+    gw._cache.clear()
+    yield
+    gw.reset_model_list_cache()
+    gw._cache.clear()
 
 MODELS = [
     "Qwen3-Embedding-8B",
@@ -29,6 +41,8 @@ def _settings(**overrides):
         chat_api_key_value="",
         chat_model_value="",
         vision_model="",
+        chat_attempt_budget_floor=30,
+        chat_model_speed_ttl_seconds=1200.0,
     )
     base.update(overrides)
     return types.SimpleNamespace(**base)
@@ -50,39 +64,31 @@ def test_vision_prefers_qwen38_then_qwen36():
     assert gw.pick_vision_model(MODELS, explicit="custom-vl") == "custom-vl"
 
 
-async def test_resolve_chat_model_probes_until_one_answers(monkeypatch):
+async def test_resolve_chat_model_returns_top_ranked_candidate(monkeypatch):
+    """No serial probe sweep: the fastest ranked id is returned at once."""
     monkeypatch.setattr(gw, "get_settings", lambda: _settings())
     monkeypatch.setattr(gw, "_cached", lambda _kind: None)
 
     async def fake_list():
         return MODELS
 
-    probed: list[str] = []
-
-    async def fake_probe(model, timeout=20.0):
-        probed.append(model)
-        return model == "Qwen3.8-27B"
+    async def no_probe(*args, **kwargs):
+        raise AssertionError("resolve_chat_model must not probe serially")
 
     monkeypatch.setattr(gw, "list_models", fake_list)
-    monkeypatch.setattr(gw, "_probe_chat", fake_probe)
+    monkeypatch.setattr(gw, "_probe_chat", no_probe)
 
-    model = await gw.resolve_chat_model(force=True)
-    assert model == "Qwen3.8-27B"
-    assert probed == ["deepseek-v4-flash-hw", "Qwen3.6-35B", "Qwen3.8-27B"]
+    assert await gw.resolve_chat_model(force=True) == "deepseek-v4-flash-hw"
 
 
-async def test_resolve_chat_model_fails_when_no_candidate_answers(monkeypatch):
+async def test_resolve_chat_model_fails_when_the_gateway_lists_no_chat_model(monkeypatch):
     monkeypatch.setattr(gw, "get_settings", lambda: _settings())
     monkeypatch.setattr(gw, "_cached", lambda _kind: None)
 
     async def fake_list():
-        return MODELS
-
-    async def fake_probe(model, timeout=20.0):
-        return False
+        return ["Qwen3-Embedding-8B", "Qwen3-Reranker-8B", "glm-ocr"]
 
     monkeypatch.setattr(gw, "list_models", fake_list)
-    monkeypatch.setattr(gw, "_probe_chat", fake_probe)
 
     with pytest.raises(gw.LLMNoModelError):
         await gw.resolve_chat_model(force=True)
@@ -93,6 +99,40 @@ def test_configured_chat_model_passes_through_env_id():
     assert gw.configured_chat_model(_settings(chat_model_value="fixed-model")) == "fixed-model"
 
 
+def test_model_chain_splits_comma_list_and_drops_duplicates():
+    assert gw.model_chain("Qwen3.8-27B, Qwen3.6-35B") == ["Qwen3.8-27B", "Qwen3.6-35B"]
+    assert gw.model_chain("a,,a , b") == ["a", "b"]
+    assert gw.model_chain("") == []
+    assert gw.model_chain(None) == []
+
+
+def test_configured_chat_models_keep_configured_order():
+    settings = _settings(chat_model_value="first,second")
+    assert gw.configured_chat_models(settings) == ["first", "second"]
+    assert gw.configured_chat_model(settings) == "first"
+
+
+async def test_build_chain_uses_configured_list_without_model_discovery(monkeypatch):
+    monkeypatch.setattr(gw, "get_settings", lambda: _settings(chat_model_value="a,b,c"))
+
+    async def explode():
+        raise AssertionError("list_models must not be called when CHAT_MODEL fills the budget")
+
+    monkeypatch.setattr(gw, "list_models", explode)
+    assert await gw.build_chat_model_chain(max_models=3) == ["a", "b", "c"]
+
+
+async def test_build_chain_keeps_configured_list_verbatim(monkeypatch):
+    monkeypatch.setattr(gw, "get_settings", lambda: _settings(chat_model_value="glm-5.3-o"))
+
+    async def explode():
+        raise AssertionError("CHAT_MODEL is the operator's order: no discovery")
+
+    monkeypatch.setattr(gw, "list_models", explode)
+    assert await gw.build_chat_model_chain() == ["glm-5.3-o"]
+    assert await gw.build_chat_model_chain(max_models=3) == ["glm-5.3-o"]
+
+
 async def test_configured_model_short_circuits_probe(monkeypatch):
     monkeypatch.setattr(gw, "get_settings", lambda: _settings(chat_model_value="fixed-model"))
 
@@ -101,6 +141,49 @@ async def test_configured_model_short_circuits_probe(monkeypatch):
 
     monkeypatch.setattr(gw, "list_models", explode)
     assert await gw.resolve_chat_model() == "fixed-model"
+
+
+def test_attempt_budget_is_the_larger_of_floor_and_candidates():
+    settings = _settings(chat_attempt_budget_floor=30)
+    assert gw.attempt_budget(3, settings) == 30
+    assert gw.attempt_budget(40, settings) == 40
+    assert gw.attempt_budget(0, settings) == 30
+    assert gw.attempt_budget_floor(settings) == 30
+
+
+def test_expand_attempt_sequence_round_robins_and_never_triples_a_model():
+    assert gw.expand_attempt_sequence(["a", "b", "c"], 7) == [
+        "a",
+        "b",
+        "c",
+        "a",
+        "b",
+        "c",
+        "a",
+    ]
+    assert gw.expand_attempt_sequence(["solo"], 4) == ["solo"] * 4
+    assert gw.expand_attempt_sequence([], 5) == []
+
+
+async def test_attempt_sequence_ranks_measured_tps_first(monkeypatch):
+    from app.services import model_speed
+
+    model_speed.reset_speed_book()
+    monkeypatch.setattr(
+        gw, "get_settings", lambda: _settings(chat_attempt_budget_floor=4)
+    )
+
+    async def fake_list():
+        return ["slow-model", "fast-model"]
+
+    monkeypatch.setattr(gw, "list_models", fake_list)
+    await model_speed.record_success("fast-model", output_tokens=40, seconds=1.0)
+    await model_speed.record_success("slow-model", output_tokens=4, seconds=1.0)
+
+    sequence = await gw.build_chat_model_chain()
+    assert sequence == ["fast-model", "slow-model"] * 2
+    assert gw.last_attempt_budget() == 4
+    model_speed.reset_speed_book()
 
 
 async def test_resolve_vision_model_uses_gateway_list(monkeypatch):
@@ -302,3 +385,66 @@ async def test_resolve_chat_model_returns_cached_model_without_probing(monkeypat
 
     monkeypatch.setattr(gw, "list_models", explode)
     assert await gw.resolve_chat_model() == "cached-model"
+
+
+async def test_ranking_change_is_logged(monkeypatch, caplog):
+    """Operators get one line explaining why the retry order changed."""
+    from app.services import model_speed
+
+    model_speed.reset_speed_book()
+    monkeypatch.setattr(gw, "get_settings", lambda: _settings(chat_attempt_budget_floor=2))
+
+    async def fake_list():
+        return ["alpha-model", "beta-model"]
+
+    monkeypatch.setattr(gw, "list_models", fake_list)
+    await gw.build_chat_model_chain()
+    await model_speed.record_success("beta-model", output_tokens=50, seconds=1.0)
+
+    with caplog.at_level(logging.INFO, logger="app.services.llm_gateway"):
+        sequence = await gw.build_chat_model_chain()
+
+    assert sequence[0] == "beta-model"
+    assert "chat model ranking changed" in caplog.text
+    assert "beta-model" in caplog.text
+    model_speed.reset_speed_book()
+
+
+async def test_chat_completion_race_records_tps_and_ranks_the_winner_first(monkeypatch):
+    """Slow first candidate, fast second: the fast one wins and leads the book."""
+    from app.services import model_speed
+
+    model_speed.reset_speed_book()
+    monkeypatch.setattr(
+        gw,
+        "get_settings",
+        lambda: _settings(
+            chat_hedge_delay_seconds=0.05,
+            chat_hedge_max_models=2,
+            chat_request_total_timeout_seconds=5.0,
+        ),
+    )
+    monkeypatch.setattr(gw, "log_llm_call", lambda *args, **kwargs: None)
+
+    async def fake_chain(max_models=None):
+        return ["slow-model", "fast-model"]
+
+    async def fake_post(**kwargs):
+        if kwargs["model"] == "slow-model":
+            await asyncio.sleep(0.5)
+            raise gw.LLMUpstreamError(503, "overloaded")
+        await asyncio.sleep(0.05)
+        return "OK", "fast-model", {"completion_tokens": 40}
+
+    monkeypatch.setattr(gw, "build_chat_model_chain", fake_chain)
+    monkeypatch.setattr(gw, "_post_chat_completion", fake_post)
+
+    text, served = await gw.chat_completion(
+        [{"role": "user", "content": "ping"}], max_model_attempts=2
+    )
+    assert text == "OK"
+    assert served == "fast-model"
+    ranked = await model_speed.rank_models(["slow-model", "fast-model"])
+    assert ranked[0] == "fast-model"
+    assert gw._cached("chat") == "fast-model"
+    model_speed.reset_speed_book()

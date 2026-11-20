@@ -1,4 +1,5 @@
 """BE-15 chain report persistence."""
+import io
 
 import pytest
 
@@ -44,3 +45,9 @@ async def test_chain_report_pdf_round_trip(client):
     assert pdf.status_code == 200
     assert pdf.headers.get("content-type", "").startswith("application/pdf")
     assert pdf.content[:4] == b"%PDF"
+
+    import pdfplumber
+
+    with pdfplumber.open(io.BytesIO(pdf.content)) as document:
+        text = "\n".join(page.extract_text() or "" for page in document.pages)
+    assert "链路报告" in text

@@ -8,6 +8,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.core.capture_identity import get_capture_identity
+from app.core.identity import OperatorIdentity
 from app.db.base import get_db
 from app.models.models import CaptureJob, PanoramaImportBatch
 from app.schemas.schemas import CaptureUrlBatchIn, PanoramaImportBatchOut
@@ -23,9 +25,10 @@ _XLSX_SUFFIX = {".xlsx", ".xlsm"}
 async def import_capture_url_list(
     body: CaptureUrlBatchIn,
     db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_capture_identity),
 ):
-    """Queue browser capture jobs from a pasted URL list (one link per line)."""
-    batch = await create_url_list_capture_batch(db, body.text)
+    """Queue browser capture jobs owned by the caller (one link per line)."""
+    batch = await create_url_list_capture_batch(db, body.text, owner_subject=actor.subject)
     return await _batch_out(db, batch)
 
 

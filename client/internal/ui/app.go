@@ -5,7 +5,9 @@
 package ui
 
 import (
+	"context"
 	"fmt"
+	"io"
 	"net/url"
 	"os/exec"
 	"path/filepath"
@@ -14,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/rodrigocfd/windigo/co"
 	"github.com/rodrigocfd/windigo/ui"
@@ -23,6 +27,7 @@ import (
 	"eea/capture/internal/archive"
 	"eea/capture/internal/capture"
 	"eea/capture/internal/config"
+	"eea/capture/internal/importdrain"
 	"eea/capture/internal/platform"
 	"eea/capture/internal/queue"
 )
@@ -42,7 +47,15 @@ func Run(cfg config.Config, dir string) int {
 	defer win.OleUninitialize()
 
 	app := newApp(cfg, dir)
+	drainCtx, stopDrain := context.WithCancel(context.Background())
+	app.drainWG.Add(1)
+	go func() {
+		defer app.drainWG.Done()
+		app.runServerImportDrain(drainCtx)
+	}()
 	code := app.wnd.RunAsMain()
+	stopDrain()
+	app.drainWG.Wait()
 	app.rt.Close()
 	return code
 }
@@ -81,6 +94,14 @@ type appState struct {
 	activeQueue   *queue.Queue
 	queueRunning  bool
 	closeWhenIdle bool
+
+	// The local queue and the platform (awaiting_client) drain share one
+	// browser session; captureOwner serializes them. drainRunning mirrors the
+	// server drain for UI checks.
+	drainRunning atomic.Bool
+	drainWG      sync.WaitGroup
+	captureMu    sync.Mutex
+	captureOwner string
 
 	engineChrome bool
 	headlessOn   bool
@@ -441,11 +462,12 @@ func (a *appState) hidePanel(hide bool) {
 }
 
 func (a *appState) savePanel() {
-	if a.queueRunning || a.busy > 0 {
+	if a.busy > 0 || a.captureQueued() || !a.beginLocalCapture() {
 		a.panelNote = "当前任务尚未结束，请等待后再保存设置"
 		a.invalidate()
 		return
 	}
+	defer a.endLocalCapture()
 	api := strings.TrimRight(strings.TrimSpace(a.edtAPI.Text()), "/")
 	if !strings.HasPrefix(api, "http://") && !strings.HasPrefix(api, "https://") {
 		a.panelNote = "接口地址需以 http:// 或 https:// 开头"
@@ -492,7 +514,7 @@ func (a *appState) submitText() {
 		a.submitManualFallback()
 		return
 	}
-	if a.busy > 0 || a.queueRunning {
+	if a.busy > 0 || a.captureQueued() {
 		a.notice = "当前任务尚未结束，请等待后再提交"
 		a.invalidate()
 		return
@@ -504,22 +526,23 @@ func (a *appState) submitText() {
 		return
 	}
 	a.notice = ""
-	a.edt.SetText("")
 	a.showJobs = true
 	a.showInputControls()
 	a.recountJobs()
-	a.startBatch(func(q *queue.Queue) {
+	if a.startBatch(func(q *queue.Queue) {
 		for _, u := range urls {
 			q.SubmitURL(u, "")
 		}
-	})
+	}) {
+		a.edt.SetText("")
+	}
 }
 
 // submitDropped routes saved SingleFile HTML to the archive endpoint and every
 // other file to the raw document endpoint. HTML without a source URL is skipped
 // rather than silently filed as an anonymous document.
 func (a *appState) submitDropped(files []string) {
-	if a.busy > 0 || a.queueRunning {
+	if a.busy > 0 || a.captureQueued() {
 		a.notice = "当前任务尚未结束，请等待后再提交"
 		a.invalidate()
 		return
@@ -567,7 +590,7 @@ func (a *appState) submitDropped(files []string) {
 }
 
 func (a *appState) submitManualFallback() {
-	if a.busy > 0 || a.queueRunning {
+	if a.busy > 0 || a.captureQueued() {
 		a.notice = "当前队列仍有任务，请完成或取消排队项目后再补录"
 		a.invalidate()
 		return
@@ -600,7 +623,7 @@ func (a *appState) submitManualFallback() {
 }
 
 func (a *appState) reopenManualFallback(job queue.Job) {
-	if a.busy > 0 || a.queueRunning {
+	if a.busy > 0 || a.captureQueued() {
 		a.notice = "当前队列仍有任务，请稍后补录"
 		a.invalidate()
 		return
@@ -616,12 +639,18 @@ func (a *appState) reopenManualFallback(job queue.Job) {
 	a.invalidate()
 }
 
-func (a *appState) startBatch(submit func(*queue.Queue)) {
+func (a *appState) startBatch(submit func(*queue.Queue)) bool {
+	if !a.beginLocalCapture() {
+		a.notice = "平台排队链接正在采集，请稍后再提交"
+		a.invalidate()
+		return false
+	}
 	q := a.newQueue()
 	if err := q.Restore(); err != nil {
+		a.endLocalCapture()
 		a.notice = "恢复本地任务失败；请检查本地队列目录"
 		a.invalidate()
-		return
+		return false
 	}
 	a.mergeJobs(q.Snapshot())
 	a.activeQueue = q
@@ -632,11 +661,16 @@ func (a *appState) startBatch(submit func(*queue.Queue)) {
 	a.mergeJobs(q.Snapshot())
 	a.invalidate()
 	a.waitQueue(q)
+	return true
 }
 
 func (a *appState) resumeQueue() {
+	if !a.beginLocalCapture() {
+		return
+	}
 	q := a.newQueue()
 	if err := q.Restore(); err != nil {
+		a.endLocalCapture()
 		a.notice = "恢复本地任务失败；请检查本地队列目录"
 		return
 	}
@@ -663,6 +697,7 @@ func (a *appState) waitQueue(q *queue.Queue) {
 			if a.activeQueue == q {
 				a.activeQueue = nil
 				a.queueRunning = false
+				a.endLocalCapture()
 			}
 			a.mergeJobs(snapshot)
 			a.invalidate()
@@ -671,6 +706,80 @@ func (a *appState) waitQueue(q *queue.Queue) {
 			}
 		})
 	}()
+}
+
+// runServerImportDrain claims URL-list jobs queued from the platform dashboard
+// (awaiting_client). It runs every 20s and skips while the local queue owns the
+// shared browser session.
+func (a *appState) runServerImportDrain(ctx context.Context) {
+	ticker := time.NewTicker(20 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			rt, ok := a.beginServerDrain()
+			if !ok {
+				continue
+			}
+			jobCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+			okN, failN := importdrain.DrainAwaitingJobs(jobCtx, io.Discard, rt.API, rt.Browser, rt.PublicHTTP, "")
+			cancel()
+			a.endServerDrain()
+			if okN+failN > 0 {
+				a.wnd.UiThread(func() {
+					a.notice = fmt.Sprintf("平台排队链接：完成 %d · 失败 %d", okN, failN)
+					a.invalidate()
+				})
+			}
+		}
+	}
+}
+
+// beginServerDrain reserves the browser session for queued server jobs.
+func (a *appState) beginServerDrain() (*application.Runtime, bool) {
+	a.captureMu.Lock()
+	defer a.captureMu.Unlock()
+	if a.captureOwner != "" {
+		return nil, false
+	}
+	a.captureOwner = "server"
+	a.drainRunning.Store(true)
+	return a.rt, true
+}
+
+func (a *appState) endServerDrain() {
+	a.captureMu.Lock()
+	if a.captureOwner == "server" {
+		a.captureOwner = ""
+	}
+	a.drainRunning.Store(false)
+	a.captureMu.Unlock()
+}
+
+// beginLocalCapture reserves the browser session for a local queue batch.
+func (a *appState) beginLocalCapture() bool {
+	a.captureMu.Lock()
+	defer a.captureMu.Unlock()
+	if a.captureOwner != "" {
+		return false
+	}
+	a.captureOwner = "local"
+	return true
+}
+
+func (a *appState) endLocalCapture() {
+	a.captureMu.Lock()
+	if a.captureOwner == "local" {
+		a.captureOwner = ""
+	}
+	a.captureMu.Unlock()
+}
+
+// captureQueued reports whether a batch is already driving the browser.
+func (a *appState) captureQueued() bool {
+	return a.queueRunning || a.drainRunning.Load()
 }
 
 func (a *appState) upsertJob(job queue.Job) {
@@ -750,19 +859,26 @@ func (a *appState) clickJobAction(pt win.POINT, f frame) bool {
 }
 
 func (a *appState) retryJob(id int) {
-	if a.queueRunning || a.busy > 0 {
+	if a.captureQueued() || a.busy > 0 {
 		a.notice = "当前队列仍有任务，稍后再重试"
+		a.invalidate()
+		return
+	}
+	if !a.beginLocalCapture() {
+		a.notice = "平台排队链接正在采集，请稍后再重试"
 		a.invalidate()
 		return
 	}
 	q := a.newQueue()
 	if err := q.Restore(); err != nil {
+		a.endLocalCapture()
 		a.notice = "恢复本地任务失败；请检查本地队列目录"
 		a.invalidate()
 		return
 	}
 	if err := q.RetryFailed(id); err != nil {
 		q.Close()
+		a.endLocalCapture()
 		a.notice = "此项目无法安全重试；可改用手工补录或检查服务端任务"
 		a.invalidate()
 		return
@@ -822,7 +938,7 @@ func (a *appState) pendingURLs() []string {
 func (a *appState) pendingLines() int { return len(a.pendingURLs()) }
 
 func (a *appState) canSend() bool {
-	if a.busy > 0 || a.queueRunning {
+	if a.busy > 0 || a.captureQueued() {
 		return false
 	}
 	if !a.manualMode {

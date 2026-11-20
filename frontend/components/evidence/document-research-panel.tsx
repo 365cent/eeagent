@@ -12,6 +12,7 @@ import {
   Space,
   Spin,
   Tag,
+  Tooltip,
   Tree,
   Typography,
 } from 'antd'
@@ -24,6 +25,7 @@ import {
 import { useQueryClient } from '@tanstack/react-query'
 import { PlatformEmptyState } from '@/components/shared/empty-state'
 import { QueryFailure } from '@/components/shared/query-failure'
+import { SignalBodyMarkdown } from '@/components/evidence/signal-body-markdown'
 import { useDocumentChunks, useDocumentFigures, useDocumentKeywords } from '@/hooks/use-eea-queries'
 import { eeaQueryKeys } from '@/lib/query/eea-query-keys'
 import { extractDocumentKeywords, reingestDocument, retryDocumentFigure } from '@/lib/api/eea-api'
@@ -31,10 +33,11 @@ import { eeaErrorMessage } from '@/lib/api/client'
 import {
   buildDocumentSectionTree,
   formatSectionPath,
+  joinChunkMarkdown,
   type DocumentResearchFocus,
   type DocumentSectionNode,
 } from '@/lib/document-research'
-import type { DocumentChunkOut, DocumentDetail, DocumentFigureOut } from '@/lib/api/types'
+import type { DocumentDetail, DocumentFigureOut } from '@/lib/api/types'
 
 const { Text, Paragraph } = Typography
 
@@ -100,6 +103,13 @@ export function DocumentResearchPanel({
   const keywords = keywordsQuery.data ?? []
   const tree = useMemo(() => buildDocumentSectionTree(chunks), [chunks])
   const treeData = useMemo(() => toTreeNodes(tree.roots), [tree])
+  const figureImageByIndex = useMemo(() => {
+    const images: Record<number, string> = {}
+    for (const figure of figures) {
+      if (figure.image_url) images[figure.figure_index] = figure.image_url
+    }
+    return images
+  }, [figures])
 
   useEffect(() => {
     if (!tree.roots.length) {
@@ -129,6 +139,12 @@ export function DocumentResearchPanel({
   const activeChunks = activeSection
     ? chunks.filter((chunk) => activeSection.chunkIds.includes(chunk.chunk_id))
     : []
+  const activeMarkdown = joinChunkMarkdown(activeChunks.map((chunk) => chunk.text))
+  const activeChunkLabel = activeChunks.length
+    ? activeChunks.length === 1
+      ? '段落 ' + activeChunks[0].chunk_id
+      : '段落 ' + activeChunks[0].chunk_id + '–' + activeChunks[activeChunks.length - 1].chunk_id
+    : null
   const selectSection = useCallback(
     (key: string) => {
       const node = tree.byKey.get(key)
@@ -221,6 +237,7 @@ export function DocumentResearchPanel({
   }
 
   const loading = chunksQuery.isLoading && !chunksQuery.data
+  const keywordsLoading = keywordsQuery.isLoading && !keywordsQuery.data
   const chunksError = chunksQuery.isError
   const figuresError = figuresQuery.isError
   const keywordsError = keywordsQuery.isError
@@ -235,7 +252,7 @@ export function DocumentResearchPanel({
           <Tag color={figures.some((figure) => figure.review_status === 'needs_review') ? 'warning' : 'default'}>
             {figures.length} 张图块
           </Tag>
-          <Tag>{keywords.length} 个关键词</Tag>
+          <Tag>{keywordsLoading ? '关键词加载中…' : keywords.length + ' 个关键词'}</Tag>
         </Space>
         <Space wrap>
           <Button size="small" icon={<SyncOutlined />} loading={keywordsBusy} onClick={() => void recomputeKeywords()}>
@@ -271,6 +288,14 @@ export function DocumentResearchPanel({
                 blockNode
                 defaultExpandAll
                 selectedKeys={activeSectionKey ? [activeSectionKey] : []}
+                titleRender={(node) => {
+                  const title = typeof node.title === 'string' ? node.title : ''
+                  return (
+                    <Tooltip title={title} placement="right" mouseEnterDelay={0.3}>
+                      <span className="document-research-tree-title">{title}</span>
+                    </Tooltip>
+                  )
+                }}
                 treeData={treeData}
                 onSelect={(keys) => {
                   const key = String(keys[0] ?? '')
@@ -283,16 +308,30 @@ export function DocumentResearchPanel({
             <Card
               size="small"
               className="document-research-content-card"
-              title={activeSection ? formatSectionPath(activeSection.path) : '章节内容'}
-              extra={<Text type="secondary">{[...new Set(activeChunks.flatMap((chunk) => chunk.figure_indices ?? []))].length} 张关联图块</Text>}
+              title={
+                <span className="document-research-section-title" title={formatSectionPath(activeSection?.path)}>
+                  {formatSectionPath(activeSection?.path)}
+                </span>
+              }
+              extra={
+                <Text type="secondary" className="document-research-section-extra">
+                  {[...new Set(activeChunks.flatMap((chunk) => chunk.figure_indices ?? []))].length} 张关联图块
+                </Text>
+              }
             >
               {activeChunks.length ? (
-                activeChunks.map((chunk: DocumentChunkOut) => (
-                  <div key={chunk.chunk_id} className="document-research-chunk">
-                    <Text type="secondary">段落 {chunk.chunk_id}</Text>
-                    <pre className="document-research-text">{chunk.text}</pre>
-                  </div>
-                ))
+                <div className="document-research-chunk">
+                  {activeChunkLabel ? (
+                    <Text type="secondary" className="document-research-chunk-meta">
+                      {activeChunkLabel}
+                    </Text>
+                  ) : null}
+                  <SignalBodyMarkdown
+                    className="document-research-text document-research-markdown"
+                    markdown={activeMarkdown}
+                    figureByIndex={figureImageByIndex}
+                  />
+                </div>
               ) : (
                 <Text type="secondary">该章节没有正文分块。</Text>
               )}
@@ -307,7 +346,12 @@ export function DocumentResearchPanel({
         title={<Space><TagsOutlined /><span>章节关键词</span></Space>}
         extra={keywordsError ? <Button size="small" onClick={() => void keywordsQuery.refetch()}>重试</Button> : null}
       >
-        {keywords.length ? (
+        {keywordsLoading ? (
+          <Space size={8}>
+            <Spin size="small" />
+            <Text type="secondary">正在抽取章节关键词…</Text>
+          </Space>
+        ) : keywords.length ? (
           <Space wrap size={[6, 6]}>
             {keywords.map((keyword) => (
               <Button

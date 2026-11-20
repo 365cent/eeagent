@@ -1,11 +1,26 @@
-import type { StudioInfographicPayload, StudioMindmapPayload } from '@/lib/api/types'
+import type {
+  SignalStudioBundle,
+  StudioAudioPayload,
+  StudioInfographicPayload,
+  StudioMindmapPayload,
+} from '@/lib/api/types'
 
 const STORAGE_KEY = 'eea-studio-cache-v1'
 
 export type StudioCacheEntry = {
+  audio?: StudioAudioPayload
   mindmap?: StudioMindmapPayload
   report?: string
   infographic?: StudioInfographicPayload
+}
+
+export function studioBundleToCacheEntry(bundle: SignalStudioBundle): StudioCacheEntry {
+  const entry: StudioCacheEntry = {}
+  if (bundle.mindmap) entry.mindmap = bundle.mindmap
+  if (bundle.report) entry.report = bundle.report
+  if (bundle.infographic) entry.infographic = bundle.infographic
+  if (bundle.audio) entry.audio = bundle.audio
+  return entry
 }
 
 type Store = Record<string, StudioCacheEntry>

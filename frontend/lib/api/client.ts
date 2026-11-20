@@ -19,7 +19,17 @@ export class EeaApiError extends Error {
 
 export function eeaErrorMessage(err: unknown, fallback = '操作失败'): string {
   if (err instanceof EeaApiError) return err.message
-  if (err instanceof Error && err.message.trim()) return err.message
+  if (err instanceof Error && err.message.trim()) {
+    const raw = err.message.trim()
+    if (/^failed to fetch$/i.test(raw) || /^networkerror/i.test(raw) || /^load failed$/i.test(raw)) {
+      const base = getEeaApiBase()
+      return (
+        `无法连接 API（${raw}）。请确认 backend 已启动且数据库已迁移（backend 目录执行 uv run alembic upgrade head）。` +
+        `当前请求地址：${base}`
+      )
+    }
+    return raw
+  }
   const text = String(err).trim()
   return text || fallback
 }
@@ -110,7 +120,12 @@ export async function eeaFetchText(path: string, init?: RequestInit): Promise<st
 }
 
 export function signalArchiveUrl(signalId: string): string {
-  return `${getEeaApiBase()}/signals/${encodeURIComponent(signalId)}/archive`
+  const base = `${getEeaApiBase()}/signals/${encodeURIComponent(signalId)}/archive`
+  // The replay answers from the API origin while the workspace runs on another
+  // one, so the archive names this page's origin for CSP frame-ancestors; the
+  // backend honours it only when it matches its CORS allow-list.
+  const embedOrigin = typeof window === 'undefined' ? null : window.location.origin
+  return embedOrigin ? `${base}?embed_origin=${encodeURIComponent(embedOrigin)}` : base
 }
 
 export function documentCanonicalUrl(documentId: string): string {

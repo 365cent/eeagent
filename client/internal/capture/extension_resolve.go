@@ -14,13 +14,13 @@ import (
 const chromeWebStoreSingleFileID = "mpiodijhokgodhhofbcjdecpffjipkle"
 
 type extensionManifest struct {
-	Name              string `json:"name"`
-	ManifestVersion   int    `json:"manifest_version"`
-	ShortName         string `json:"short_name"`
-	BrowserAction     any    `json:"browser_action"`
-	Action            any    `json:"action"`
-	Background        any    `json:"background"`
-	Version           string `json:"version"`
+	Name            string `json:"name"`
+	ManifestVersion int    `json:"manifest_version"`
+	ShortName       string `json:"short_name"`
+	BrowserAction   any    `json:"browser_action"`
+	Action          any    `json:"action"`
+	Background      any    `json:"background"`
+	Version         string `json:"version"`
 }
 
 func isSingleFileManifest(data []byte) bool {

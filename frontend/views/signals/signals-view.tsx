@@ -18,6 +18,7 @@ export function SignalsView({
   onClearTheme,
   onNavigate,
   onPreviewSignal,
+  onSignalRemoved,
 }: {
   query: string
   setQuery: (value: string) => void
@@ -25,6 +26,7 @@ export function SignalsView({
   onClearTheme?: () => void
   onNavigate: (key: string) => void
   onPreviewSignal: (signal: Signal | null) => void
+  onSignalRemoved?: (signalId: string) => void
 }) {
   const [stage, setStage] = useState('全部环节')
   const [tagFilter, setTagFilter] = useState('')
@@ -49,6 +51,7 @@ export function SignalsView({
     onNavigate,
     onTitleClick: onPreviewSignal,
     onQuickPreview: onPreviewSignal,
+    onSignalRemoved,
   })
   return (
     <>

@@ -7,12 +7,12 @@ import uuid
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import delete, select
+from sqlalchemy import case, delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.identity import OperatorIdentity, get_operator_identity
 from app.db.base import get_db
-from app.models.agent_models import AgentMemory, AgentMessage, AgentPatch, AgentSession
+from app.models.agent_models import AgentMemory, AgentMessage, AgentPatch, AgentRun, AgentSession
 from app.schemas.agent import (
     AgentMemoryIn,
     AgentMemoryOut,
@@ -115,23 +115,34 @@ async def list_session_messages(
     await get_owned_session(db, session_id, actor)
     rows = (
         await db.execute(
-            select(AgentMessage)
+            select(AgentMessage, AgentRun)
+            .outerjoin(AgentRun, AgentRun.id == AgentMessage.run_id)
             .where(AgentMessage.session_id == session_id)
-            .order_by(AgentMessage.created_at.asc())
+            .order_by(
+                AgentMessage.created_at.asc(),
+                case((AgentMessage.role == "user", 0), else_=1),
+                AgentMessage.id.asc(),
+            )
             .limit(limit)
         )
-    ).scalars()
-    return [
-        AgentMessageRecord(
-            id=row.id,
-            session_id=row.session_id,
-            run_id=row.run_id,
-            role=row.role,
-            content=row.content,
-            created_at=row.created_at,
+    ).all()
+    records: list[AgentMessageRecord] = []
+    for message, run in rows:
+        usage = run.usage_json if run is not None and isinstance(run.usage_json, dict) else {}
+        served = usage.get("served_model") if usage else None
+        records.append(
+            AgentMessageRecord(
+                id=message.id,
+                session_id=message.session_id,
+                run_id=message.run_id,
+                role=message.role,
+                content=message.content,
+                created_at=message.created_at,
+                served_model=served if isinstance(served, str) and served else None,
+                finished_at=run.finished_at if run is not None else None,
+            )
         )
-        for row in rows
-    ]
+    return records
 
 
 @router.get("/sessions/{session_id}/patches", response_model=list[AgentPatchOut])
@@ -191,13 +202,16 @@ async def post_message(
     actor: OperatorIdentity = Depends(get_operator_identity),
 ):
     session = await get_owned_session(db, session_id, actor)
-    run, output, error = await execute_user_message(db, session=session, actor=actor, message=payload.message)
+    run, output, error, served_model = await execute_user_message(
+        db, session=session, actor=actor, message=payload.message
+    )
     return AgentMessageOut(
         session_id=session.id,
         run_id=run.id,
         status=run.status,  # type: ignore[arg-type]
         output=output,
         error=error,
+        served_model=served_model,
     )
 
 
@@ -216,7 +230,7 @@ async def stream_message(
 
     async def runner() -> None:
         try:
-            run, output, error = await execute_user_message(
+            run, output, error, served_model = await execute_user_message(
                 db,
                 session=session,
                 actor=actor,
@@ -232,6 +246,7 @@ async def stream_message(
                         "status": run.status,
                         "output": output,
                         "error": error,
+                        "served_model": served_model,
                     },
                 )
             )

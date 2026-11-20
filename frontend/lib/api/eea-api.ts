@@ -31,6 +31,7 @@ import type {
   StudioAudioPayload,
   StudioInfographicPayload,
   StudioMindmapPayload,
+  SignalStudioBundle,
   SignalStudioKind,
   AuditOut,
   DemandAssistantReply,
@@ -95,8 +96,9 @@ export async function fetchSignalsPage(params: ListSignalsParams = {}): Promise<
   const { data, headers } = await eeaFetchWithMeta<SignalOut[]>(`/signals${toQueryString(params)}`)
   const items = Array.isArray(data) ? data : []
   const raw = headers.get('X-Total-Count')
-  const parsed = raw ? Number.parseInt(raw, 10) : items.length
-  return { items, total: Number.isFinite(parsed) ? parsed : items.length }
+  const parsed = raw ? Number.parseInt(raw, 10) : NaN
+  const total = Number.isFinite(parsed) ? parsed : items.length
+  return { items, total }
 }
 
 export function fetchSignals(params: ListSignalsParams = {}) {
@@ -595,22 +597,28 @@ export function postSignalAssistantMessage(
   )
 }
 
+export function fetchSignalStudioBundle(signalId: string) {
+  return eeaFetch<SignalStudioBundle>(`/signals/${encodeURIComponent(signalId)}/studio`)
+}
+
 export async function fetchSignalStudio(
   signalId: string,
   kind: SignalStudioKind,
+  options?: { regenerate?: boolean },
 ): Promise<StudioAudioPayload | StudioMindmapPayload | StudioInfographicPayload | string> {
   const path = `/signals/${encodeURIComponent(signalId)}/studio`
+  const body = JSON.stringify({ kind, regenerate: options?.regenerate === true })
   if (kind === 'report') {
     return eeaFetchText(path, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'text/markdown, text/plain, */*' },
-      body: JSON.stringify({ kind }),
+      body,
     })
   }
   return eeaFetch<StudioAudioPayload | StudioMindmapPayload | StudioInfographicPayload>(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ kind }),
+    body,
   })
 }
 
@@ -737,11 +745,16 @@ export function listAgentSessionPatches(sessionId: string) {
   return eeaFetch<AgentPatchOut[]>(`/agent/sessions/${encodeURIComponent(sessionId)}/patches`)
 }
 
-export function postAgentSessionMessage(sessionId: string, message: string) {
+export function postAgentSessionMessage(
+  sessionId: string,
+  message: string,
+  options: { signal?: AbortSignal } = {},
+) {
   return eeaFetch<AgentMessageResponse>(`/agent/sessions/${encodeURIComponent(sessionId)}/messages`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ message }),
+    signal: options.signal,
   })
 }
 

@@ -160,3 +160,18 @@ async def test_list_limit_and_offset_window(client):
     assert len(offset) == 1
     over = await client.get("/api/v1/signals", params={"limit": 500})
     assert over.status_code == 422  # le=200
+
+
+async def test_list_exposes_total_count_for_cross_origin_clients(client):
+    """Dashboard tables need X-Total-Count via CORS when the UI calls :8000 from :3000."""
+    await _seed_three(client)
+    response = await client.get(
+        "/api/v1/signals",
+        params={"limit": 2, "offset": 0},
+        headers={"Origin": "http://localhost:3000"},
+    )
+    assert response.status_code == 200
+    assert len(response.json()) == 2
+    assert response.headers.get("X-Total-Count") == "3"
+    exposed = response.headers.get("access-control-expose-headers", "")
+    assert "x-total-count" in exposed.lower()

@@ -180,7 +180,7 @@ export function PlatformSearchModal({ open, onClose, onNavigate }: PlatformSearc
                         </Text>
                       ) : null}
                     </Flex>
-                    <Tag variant="filled" style={{ margin: 0, flexShrink: 0 }}>
+                    <Tag variant="filled" className="platform-search-kind-tag" style={{ margin: 0, flexShrink: 0 }}>
                       {platformSearchKindLabel(hit.kind)}
                     </Tag>
                   </Flex>

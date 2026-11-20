@@ -133,6 +133,8 @@ capture.exe version
 
 图形界面只有一块「粘贴 / 拖放」面：把链接粘进去后点右下角 **上传**（或 `Ctrl+Enter`）；把 PDF、Word 等文件直接拖进窗口即上传文档，把已保存的 `.html`（SingleFile）拖进去则按网页归档上传。底部一行显示进度与结果（如 `完成 2 · sig-…`、失败原因）。
 
+窗口每 20 秒还会领取平台导入面排队的链接任务（`awaiting_client`，例如网页端粘贴的多行链接），在本机浏览器采集后回传信号；领取期间本地队列会暂缓提交，两者不会同时占用同一个浏览器。关闭窗口时正在领取的任务会交还服务端。
+
 右上 **设置** 打开高级面板，可改接口地址（含端口）、抓取引擎（Edge / Chrome）、并发、上传上限、超时、无窗口模式；保存后写回 `config.json`。profile 目录只读显示，不建议在界面里改。
 
 **公众号登录**：`headless=false` 时会打开一个独立的 Edge 窗口，用 `user_data_dir` 保存登录态；首次在该窗口里扫码登录，后续抓取自动复用。客户端不接触账号密码。
@@ -168,7 +170,7 @@ Edge/Chrome (--remote-debugging-port=0, 独立 profile)
 - profile 下的 `DevToolsActivePort` 若指向死端口，会先探测再清理；若同 profile 已有存活浏览器则直接复用。
 - `channel_code` 只对明确域名做推断（`mp.weixin.qq.com` → `wechat_mp`），其余交给服务端按 URL 归一，避免客户端猜词表。
 - 文档仍走 `POST /api/v1/documents/raw`，multipart `file`，只传原文件；迁移至异步统一文档任务仍在 CC-02。
-- 已保存的网页走同一条 capture 契约，不需要开浏览器：原链接从 `<link rel="canonical">` / `og:url` / `twitter:url` 读取，可用 `--html-url` 覆盖；都没有则拒绝上传，不会伪造来源。
+- 已保存的网页走同一条 capture 契约，不需要开浏览器：原链接先取 SingleFile 头注释里的 `url:`，再取 `<link rel="canonical">` / `og:url` / `twitter:url`（属性带引号或 SingleFile 的无引号写法均可），可用 `--html-url` 覆盖；都没有则拒绝上传，不会伪造来源。
 
 ---
 
@@ -179,8 +181,9 @@ go test ./...
 ```
 
 - `internal/capture`：真 Edge + 本地页面，断言标题、正文、图片/CSS 背景被内联、外链被消除。
+- `internal/importdrain`：领取→采集→回传顺序、无 URL 跳过、采集失败标记、取消时释放任务。
 - `internal/queue`：抓取→上传全链路（httptest 桩服务端校验 multipart 字段）、已保存 HTML、文档上传；只有服务端公开 `submission_id` 幂等键时，模糊结果的 5xx/网络失败才使用同一 ID 重试。
-- `internal/archive`：canonical / og:url 推断（属性顺序、引号、BOM、相对链接）。
+- `internal/archive`：SingleFile 头注释与 canonical / og:url 推断（属性顺序、引号/无引号、BOM、相对链接、`&amp;`）。
 - `internal/platform`：multipart 形状、超限拒绝、错误可重试判定、渠道推断。
 
 `go test -short ./...` 会跳过启动真实浏览器的用例。
@@ -194,5 +197,5 @@ go test ./...
 - SingleFile core 为 **AGPL-3.0-or-later**，内部分发前需法务确认；版本与构建命令固定在 [`scripts/vendor-singlefile.sh`](scripts/vendor-singlefile.sh)。
 - 动态登录墙、验证码仍需人工在那个可见浏览器窗口里处理。
 - 界面只保留「粘贴 / 拖放」一个操作面，没有选择文件按钮；文档走拖入或 `capture upload --file`。
-- `.html` 没有 canonical/og:url 时，GUI 会跳过并提示，CLI 需要用 `--html-url`；`.mhtml` 仍按文档上传。
+- `.html` 没有 SingleFile 头注释、canonical/og:url 时，GUI 会跳过并提示，CLI 需要用 `--html-url`；`.mhtml` 仍按文档上传。
 - 仅 Windows；windigo 为 Win32 纯 syscall，无 CGO。

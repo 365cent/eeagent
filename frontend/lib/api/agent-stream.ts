@@ -10,7 +10,11 @@ export type AgentStreamEvent = {
 type StreamOptions = {
   signal?: AbortSignal
   onEvent?: (event: AgentStreamEvent) => void
+  /** Client-side ceiling; the server also ends the turn on its own timeout. */
+  timeoutMs?: number
 }
+
+const DEFAULT_STREAM_TIMEOUT_MS = 120_000
 
 function parseBlock(block: string): { eventType: string; payload: AgentStreamEvent } | null {
   let eventType = ''
@@ -31,8 +35,13 @@ function parseBlock(block: string): { eventType: string; payload: AgentStreamEve
 export async function streamAgentSessionMessage(
   sessionId: string,
   message: string,
-  { signal, onEvent }: StreamOptions = {},
+  { signal: userSignal, onEvent, timeoutMs = DEFAULT_STREAM_TIMEOUT_MS }: StreamOptions = {},
 ): Promise<AgentMessageResponse> {
+  // AbortSignal.timeout ends a stalled read; AbortSignal.any keeps the user's
+  // cancel button working alongside that deadline.
+  const deadline = AbortSignal.timeout(timeoutMs)
+  const signal = userSignal ? AbortSignal.any([userSignal, deadline]) : deadline
+
   const response = await fetch(
     getEeaApiBase() +
       '/agent/sessions/' +
@@ -75,6 +84,7 @@ export async function streamAgentSessionMessage(
         status: parsed.payload.status as AgentMessageResponse['status'],
         output: (parsed.payload.output ?? null) as Record<string, unknown> | null,
         error: (parsed.payload.error ?? null) as string | null,
+        served_model: (parsed.payload.served_model ?? null) as string | null,
       }
     }
   }
@@ -94,6 +104,13 @@ export async function streamAgentSessionMessage(
     }
     buffer += decoder.decode()
     if (buffer.trim()) consume(buffer)
+  } catch (err) {
+    if (err instanceof DOMException && err.name === 'TimeoutError') {
+      throw new Error('模型响应超过 ' + Math.round(timeoutMs / 1000) + ' 秒，已停止等待', {
+        cause: err,
+      })
+    }
+    throw err
   } finally {
     reader.releaseLock()
   }

@@ -36,6 +36,7 @@ const {
   buildDocumentSectionTree,
   citationLabel,
   formatSectionPath,
+  joinChunkMarkdown,
   parseDocumentCitationRef,
   parseDocumentResearchFocus,
 } = loadModule()
@@ -93,6 +94,23 @@ test('preserves unrelated query parameters when writing focus', () => {
   assert.equal(params.get('doc_figure'), '3')
   assert.equal(formatSectionPath(null), '正文')
   assert.equal(formatSectionPath(['总览', '结构']), '总览 / 结构')
+})
+
+test('joins split-table chunks without breaking GFM rows', () => {
+  const joined = joinChunkMarkdown([
+    '### 2026-04\n\n| 日期 | 工时 |\n|---|---|\n| 04-01 | 3 |',
+    '| 04-02 | 4 |',
+    '| 04-03 | 5 |',
+  ])
+  assert.equal(
+    joined,
+    '### 2026-04\n\n| 日期 | 工时 |\n|---|---|\n| 04-01 | 3 |\n| 04-02 | 4 |\n| 04-03 | 5 |',
+  )
+})
+
+test('keeps paragraph spacing between prose chunks and drops empties', () => {
+  assert.equal(joinChunkMarkdown(['段落一', '段落二', '   ']), '段落一\n\n段落二')
+  assert.equal(joinChunkMarkdown([]), '')
 })
 
 test('buildAppPath keeps doc_figure in the evidence deep link', () => {
