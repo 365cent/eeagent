@@ -805,6 +805,46 @@ export type AgentSessionOut = {
   updated_at: string
 }
 
+export type DuplicateMember = {
+  id: string
+  title: string
+  url: string
+  evidence_status_code: string
+  publisher: string | null
+  created_at: string
+  tags: string[]
+  tech_theme_id: string | null
+  has_archive: boolean
+  has_body: boolean
+  keep: boolean
+  identical_to_keep: boolean
+}
+
+export type DuplicateGroup = {
+  key: string
+  /** url = same source link; body = same content behind a different URL. */
+  kind: 'url' | 'body'
+  identical: boolean
+  different_fields: string[]
+  field_labels: Record<string, string>
+  values: Record<string, Record<string, unknown>>
+  members: DuplicateMember[]
+}
+
+export type DuplicateScan = {
+  groups: DuplicateGroup[]
+  total_signals: number
+  redundant_signals: number
+  identical_groups: number
+  different_groups: number
+}
+
+export type DuplicateCleanupResult = {
+  deleted: string[]
+  skipped: { id: string; reason: string }[]
+  remaining_groups: number
+}
+
 export type AgentMessageRecord = {
   id: string
   session_id: string

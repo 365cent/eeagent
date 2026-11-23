@@ -1,5 +1,6 @@
 import asyncio
 import uuid
+from collections import defaultdict
 from datetime import datetime
 from functools import partial
 from pathlib import Path
@@ -16,12 +17,20 @@ from app.core.identity import OperatorIdentity, get_operator_identity
 from app.db.base import get_db
 from app.platform.launchdarkly import SIGNAL_TAGGING, require_feature, track_workflow_success
 from app.models.models import Document, Signal, SignalTag, TechTheme, Vocab
+from app.models.agent_models import AgentPatch
 from app.schemas.schemas import (
+    DuplicateCleanupIn,
+    DuplicateCleanupOut,
+    DuplicateCleanupSkipOut,
+    DuplicateGroupOut,
+    DuplicateMemberOut,
+    DuplicateScanOut,
     SignalAssistantMessageIn,
     SignalAssistantMessageOut,
     SignalCreate,
     SignalDetail,
     SignalFigureOut,
+    SignalRecaptionOut,
     SignalOut,
     SignalStudioBundleOut,
     SignalStudioIn,
@@ -41,6 +50,11 @@ from app.domains.evidence.signal_queries import find_signal, get_signal_detail, 
 from app.domains.evidence.signal_record import create_signal_record as _create_signal_record
 from app.domains.evidence.theme_match import match_theme as _match_theme, theme_display_tags
 from app.services.audit import record_correction
+from app.services.signal_dedup import (
+    FIELD_LABELS,
+    DuplicateGroup,
+    scan_duplicates,
+)
 from app.services.body_excerpt import resolve_signal_excerpt
 from app.services.html_snapshot import (
     enrich_snapshot_figures,
@@ -103,6 +117,61 @@ async def _load_signal(db: AsyncSession, sid: uuid.UUID) -> Signal:
     if obj is None:
         raise HTTPException(404, "signal not found")
     return obj
+
+
+async def _signal_total(db: AsyncSession) -> int:
+    return int((await db.execute(select(func.count()).select_from(Signal))).scalar_one() or 0)
+
+
+async def _signal_has_agent_patches(db: AsyncSession, signal_id: uuid.UUID) -> bool:
+    """``eea_agent_patch.signal_id`` has no ON DELETE rule, so a referenced
+    signal cannot be removed; report it instead of failing the whole cleanup."""
+    count = (
+        await db.execute(
+            select(func.count()).select_from(AgentPatch).where(AgentPatch.signal_id == signal_id)
+        )
+    ).scalar_one()
+    return bool(count)
+
+
+def _duplicate_scan_out(groups: list[DuplicateGroup], total: int) -> DuplicateScanOut:
+    out_groups: list[DuplicateGroupOut] = []
+    for group in groups:
+        members = [
+            DuplicateMemberOut(
+                id=member.signal.id,
+                title=member.signal.title,
+                url=member.signal.url,
+                evidence_status_code=member.signal.evidence_status_code,
+                publisher=member.signal.publisher,
+                created_at=member.signal.created_at,
+                tags=sorted(st.vocab.name for st in member.signal.tags if st.vocab),
+                tech_theme_id=member.signal.tech_theme_id,
+                has_archive=bool(member.signal.snapshot_html_object_key),
+                has_body=bool(member.signal.body_sha256),
+                keep=member.keep,
+                identical_to_keep=member.identical_to_keep,
+            )
+            for member in group.members
+        ]
+        out_groups.append(
+            DuplicateGroupOut(
+                key=group.key,
+                kind=group.kind,
+                identical=group.identical,
+                different_fields=group.different_fields,
+                field_labels={name: FIELD_LABELS.get(name, name) for name in group.different_fields},
+                values=group.values,
+                members=members,
+            )
+        )
+    return DuplicateScanOut(
+        groups=out_groups,
+        total_signals=total,
+        redundant_signals=sum(len(group.members) - 1 for group in groups),
+        identical_groups=sum(1 for group in groups if group.identical),
+        different_groups=sum(1 for group in groups if not group.identical),
+    )
 
 
 def _apply_signal_list_filters(
@@ -279,6 +348,96 @@ async def capture_signal(
     sig = await _signal_from_html(db, url=url, data=data, channel_code=channel_code)
     # 4. 返回 SignalDetail（含 snapshot_html_object_key）
     return await get_signal(sig.id, db)
+
+
+@router.get("/duplicates", response_model=DuplicateScanOut)
+async def scan_duplicate_signals(db: AsyncSession = Depends(get_db)):
+    """Redundant signals grouped by source URL (and by identical body content).
+
+    Read-only: identical groups can be emptied by the cleanup endpoint, while a
+    group that differs carries a field-by-field comparison for a human decision.
+    """
+    groups = await scan_duplicates(db)
+    return _duplicate_scan_out(groups, await _signal_total(db))
+
+
+@router.post("/duplicates/cleanup", response_model=DuplicateCleanupOut)
+async def cleanup_duplicate_signals(
+    payload: DuplicateCleanupIn,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_operator_identity),
+):
+    """Delete redundant copies, never the last member of a group.
+
+    Duplicate removal is its own path (2026-11-19 decision): the kept copy still
+    holds the evidence, so a redundant copy does not have to be archived first.
+    Every deletion is audited and groups are recomputed here rather than trusted
+    from the client.
+    """
+    groups = await scan_duplicates(db)
+    by_signal: dict[uuid.UUID, DuplicateGroup] = {
+        member.signal.id: group for group in groups for member in group.members
+    }
+    requested = list(dict.fromkeys(payload.delete_ids))
+    requested_per_group: dict[str, int] = defaultdict(int)
+    for signal_id in requested:
+        group = by_signal.get(signal_id)
+        if group is not None:
+            requested_per_group[group.key] += 1
+
+    skipped: list[DuplicateCleanupSkipOut] = []
+    deletable: list[tuple[Signal, DuplicateGroup]] = []
+    for signal_id in requested:
+        group = by_signal.get(signal_id)
+        if group is None:
+            skipped.append(
+                DuplicateCleanupSkipOut(id=signal_id, reason="不在任何重复组内，未删除")
+            )
+            continue
+        if requested_per_group[group.key] >= len(group.members):
+            skipped.append(
+                DuplicateCleanupSkipOut(
+                    id=signal_id, reason="同一重复组必须至少保留一份，本次全部跳过"
+                )
+            )
+            continue
+        signal = next(m.signal for m in group.members if m.signal.id == signal_id)
+        if await _signal_has_agent_patches(db, signal_id):
+            skipped.append(
+                DuplicateCleanupSkipOut(
+                    id=signal_id, reason="该信号存在研究助手的待确认变更，请先在助手中处理"
+                )
+            )
+            continue
+        deletable.append((signal, group))
+
+    deleted: list[uuid.UUID] = []
+    for signal, group in deletable:
+        await record_correction(
+            db,
+            "signal",
+            signal.id,
+            "signal_record",
+            {
+                "id": str(signal.id),
+                "title": signal.title,
+                "url": signal.url,
+                "duplicate_group": group.key,
+                "kept": str(group.survivor.id),
+            },
+            None,
+            actor,
+            reason=payload.reason or "清理重复信号",
+        )
+        await db.delete(signal)
+        deleted.append(signal.id)
+    await db.commit()
+
+    return DuplicateCleanupOut(
+        deleted=deleted,
+        skipped=skipped,
+        remaining_groups=len(await scan_duplicates(db)),
+    )
 
 
 @router.get("/{signal_id}", response_model=SignalDetail)

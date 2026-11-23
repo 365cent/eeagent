@@ -1,6 +1,6 @@
 import uuid
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, computed_field, field_serializer, field_validator
 
@@ -298,6 +298,59 @@ class SignalDetail(SignalOut):
     theme: ThemeOut | None = None
     # demand points sourced from this signal's theme; [] when unlinked (S1-3)
     linked_demand_points: list[LinkedDemandPointOut] = []
+
+
+class DuplicateMemberOut(BaseModel):
+    """One copy inside a redundant group."""
+
+    id: uuid.UUID
+    title: str
+    url: str
+    evidence_status_code: str
+    publisher: str | None = None
+    created_at: datetime
+    tags: list[str] = []
+    tech_theme_id: uuid.UUID | None = None
+    has_archive: bool = False
+    has_body: bool = False
+    keep: bool = False
+    identical_to_keep: bool = False
+
+
+class DuplicateGroupOut(BaseModel):
+    key: str
+    kind: Literal["url", "body"]
+    identical: bool
+    different_fields: list[str] = []
+    field_labels: dict[str, str] = {}
+    values: dict[str, dict[str, Any]] = {}
+    members: list[DuplicateMemberOut]
+
+
+class DuplicateScanOut(BaseModel):
+    """Redundant-signal scan; nothing here mutates data."""
+
+    groups: list[DuplicateGroupOut]
+    total_signals: int
+    redundant_signals: int
+    identical_groups: int
+    different_groups: int
+
+
+class DuplicateCleanupIn(BaseModel):
+    delete_ids: list[uuid.UUID] = Field(min_length=1, max_length=500)
+    reason: str | None = Field(default=None, max_length=500)
+
+
+class DuplicateCleanupSkipOut(BaseModel):
+    id: uuid.UUID
+    reason: str
+
+
+class DuplicateCleanupOut(BaseModel):
+    deleted: list[uuid.UUID]
+    skipped: list[DuplicateCleanupSkipOut]
+    remaining_groups: int
 
 
 class SignalFigureOut(BaseModel):

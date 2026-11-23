@@ -16,6 +16,8 @@ import type {
   DemandOut,
   DocumentDetail,
   DocumentRawOut,
+  DuplicateCleanupResult,
+  DuplicateScan,
   LandingPointOut,
   LandingPointCreatePayload,
   LandingPointUpdatePayload,
@@ -170,6 +172,19 @@ export function patchSignal(signalId: string, payload: SignalUpdatePayload) {
 export function deleteSignal(signalId: string) {
   return eeaFetch<void>(`/signals/${encodeURIComponent(signalId)}`, {
     method: 'DELETE',
+  })
+}
+
+export function fetchSignalDuplicates() {
+  return eeaFetch<DuplicateScan>('/signals/duplicates')
+}
+
+/** Delete redundant copies; the server refuses to empty a whole duplicate group. */
+export function postSignalDuplicateCleanup(deleteIds: string[], reason?: string) {
+  return eeaFetch<DuplicateCleanupResult>('/signals/duplicates/cleanup', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ delete_ids: deleteIds, reason: reason ?? null }),
   })
 }
 
