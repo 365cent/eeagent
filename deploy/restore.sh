@@ -26,11 +26,9 @@ docker compose exec -T postgres psql -U "${DB_USER:-eea}" -d postgres \
 docker compose exec -T postgres pg_restore -U "${DB_USER:-eea}" -d "${DB_NAME:-eea}" --no-owner < "$dump"
 
 echo "==> restoring objects"
-docker run --rm \
-  -v eea_objectstore:/data \
+docker compose run --rm --no-deps -T \
   -v "$DIR":/backup:ro \
-  alpine:3.20 \
-  sh -c "rm -rf /data/* && tar -xzf /backup/eea-objects-$STAMP.tar.gz -C /data"
+  api sh -c "rm -rf /var/lib/eea/objects/* && tar -xzf /backup/eea-objects-$STAMP.tar.gz -C /var/lib/eea/objects"
 
 echo "==> starting"
 docker compose up -d --wait

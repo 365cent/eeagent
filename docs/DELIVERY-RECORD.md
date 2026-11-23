@@ -2,6 +2,20 @@
 
 This record keeps evidence for implementation slices removed from the remaining-work TODOs. A slice does not close its parent task; acceptance stays open until the subsystem TODO criteria and required platform evidence pass.
 
+## 2026-11-23
+
+### Deploy hardening after the audit
+
+- Runtime commands no longer use `uv run` (image CMD and compose migrate/worker/maintenance): they call `/app/.venv/bin/python -m ...`, so starting a container needs neither the network nor an environment sync.
+- `backup.sh` / `restore.sh` run `tar` inside the already-present `api` image via `docker compose run --rm --no-deps`; an air-gapped host no longer has to pull `alpine:3.20` at backup time.
+- `build.sh` fills an empty `DB_PASSWORD` (previously it only generated one when `.env` was missing), so copying `.env.example` by hand still starts.
+- `deploy/README.md`: maintenance/status commands run from `deploy/` (Compose < 2.24 does not read `deploy/.env` from the repo root), and the API docs URL is `/docs` (Nginx has no `/api/docs` location).
+- `docs/samples/` is git-ignored (customer workbook); `backend/TODO.md` and `backend/DEPLOY.md` no longer point at the removed systemd unit/timer.
+
+Checks: `bash -n` on build/migrate/backup/restore; `build.sh` exercised against a `docker` shim for missing and empty `.env` plus full-URL proxy; compose parses (7 services) and resolves `.venv/bin/python -m ...` commands; no `alpine:3.20` or `"uv", "run"` remains under `deploy/`.
+
+Still open: real `docker compose up` on a Linux/Docker host, empty-DB migration, nginx same-origin routing, and a backup/restore drill.
+
 ## 2026-11-20
 
 ### W4 attempt 1 (superseded): offline bundle scripts, no Linux host

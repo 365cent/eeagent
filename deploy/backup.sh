@@ -12,11 +12,9 @@ mkdir -p "$out"
 docker compose exec -T postgres pg_dump -U "${DB_USER:-eea}" -Fc "${DB_NAME:-eea}" \
   > "$out/eea-$stamp.dump"
 
-docker run --rm \
-  -v eea_objectstore:/data:ro \
+docker compose run --rm --no-deps -T \
   -v "$(cd "$out" && pwd)":/backup \
-  alpine:3.20 \
-  tar -czf "/backup/eea-objects-$stamp.tar.gz" -C /data .
+  api tar -czf "/backup/eea-objects-$stamp.tar.gz" -C /var/lib/eea/objects .
 
 {
   echo "stamp=$stamp"

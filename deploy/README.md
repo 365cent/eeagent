@@ -26,7 +26,7 @@ bash deploy/build.sh
 
 脚本会：缺 `deploy/.env` 时从 `.env.example` 生成并写入随机 `DB_PASSWORD` → 构建镜像 → 迁移 → 启动 → 等待健康检查。
 
-打开 `http://<主机IP>:8080/` 即用；`http://<主机IP>:8080/api/docs` 是接口文档。
+打开 `http://<主机IP>:8080/` 即用；`http://<主机IP>:8080/docs` 是接口文档。
 
 ## 代理说明
 
@@ -34,17 +34,17 @@ bash deploy/build.sh
 - Docker 守护进程本身也要能访问 `docker.io`（主机级 systemd 代理），否则拉基础镜像会失败。
 - 默认代理端口 1000，可用 `DEFAULT_PROXY_PORT` 覆盖；pip 默认清华镜像，可用 `PIP_INDEX_URL` 覆盖。
 
-## 日常维护（照着敲）
+## 日常维护（照着敲，全部在 deploy/ 目录）
 
 | 要做的事 | 命令 |
 | --- | --- |
-| 看状态 | `docker compose -f deploy/docker-compose.yml ps` |
-| 看日志 | `docker compose -f deploy/docker-compose.yml logs -f api worker web` |
+| 看状态 | `cd deploy && docker compose ps` |
+| 看日志 | `cd deploy && docker compose logs -f api worker web` |
 | 改代码后更新 | `bash deploy/build.sh`（加 `--no-cache` 强制全量重建） |
 | 手动迁移 | `bash deploy/migrate.sh` |
 | 备份 | `bash deploy/backup.sh` → `deploy/backups/eea-<时间>.{dump,tar.gz,manifest.txt}` |
 | 恢复 | `bash deploy/restore.sh <备份时间戳>` |
-| 清理孤立对象 | `docker compose -f deploy/docker-compose.yml --profile ops run --rm maintenance` |
+| 清理孤立对象 | `cd deploy && docker compose --profile ops run --rm maintenance` |
 | 回退版本 | `EEA_VERSION=<旧版本> bash deploy/build.sh`（镜像按 `EEA_VERSION` 打标签） |
 
 ## 配置

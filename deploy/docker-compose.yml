@@ -48,7 +48,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-    command: ["uv", "run", "alembic", "upgrade", "head"]
+    command: [".venv/bin/python", "-m", "alembic", "upgrade", "head"]
 
   api:
     <<: *backend
@@ -82,7 +82,7 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-    command: ["uv", "run", "python", "-m", "app.worker"]
+    command: [".venv/bin/python", "-m", "app.worker"]
 
   maintenance:
     <<: *backend
@@ -95,7 +95,7 @@ services:
     depends_on:
       migrate:
         condition: service_completed_successfully
-    command: ["uv", "run", "python", "-m", "app.services.orphan_maintenance"]
+    command: [".venv/bin/python", "-m", "app.services.orphan_maintenance"]
 
   web:
     build:

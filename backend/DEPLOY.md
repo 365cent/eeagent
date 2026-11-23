@@ -51,20 +51,11 @@ pnpm start        # 默认 3000；跨机器访问时 API 基址自动指向 http
 程序: <pnpm 或 node>                            参数: start                 起始于: D:\...\frontend
 ```
 
-**Linux 服务器（systemd）**——`/etc/systemd/system/eea-api.service`：
+**Linux 服务器（生产）**——使用 `deploy/` 的 Docker Compose：
 
-```ini
-[Unit]
-After=network.target
-[Service]
-WorkingDirectory=/opt/eea/backend
-ExecStart=/opt/eea/backend/.venv/bin/python scripts/start_api.py
-Restart=always
-[Install]
-WantedBy=multi-user.target
+```bash
+bash deploy/build.sh [proxy-host]
 ```
-
-前端同理（`ExecStart=/usr/bin/pnpm start`，`WorkingDirectory=/opt/eea/frontend`），然后 `systemctl enable --now eea-api eea-web`。
 
 ## 4. 升级与重启（改代码后必须）
 

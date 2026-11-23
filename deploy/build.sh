@@ -55,9 +55,20 @@ done
 
 if [[ ! -f .env ]]; then
   cp .env.example .env
-  password="$(head -c 32 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c 24)"
-  sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=$password|" .env
-  echo "Created deploy/.env with a generated DB_PASSWORD. Review TRUSTED_PROXY_IPS before exposure."
+  echo "Created deploy/.env from .env.example. Review TRUSTED_PROXY_IPS before exposure."
+fi
+
+# A copied .env.example has an empty password; generate one so the stack can start.
+if ! grep -Eq "^DB_PASSWORD=.+" .env; then
+  password="$(head -c 32 /dev/urandom | base64 | tr -dc "A-Za-z0-9" | head -c 24)"
+  if grep -q "^DB_PASSWORD=" .env; then
+    sed -i "s|^DB_PASSWORD=.*|DB_PASSWORD=$password|" .env
+  else
+    printf "
+DB_PASSWORD=%s
+" "$password" >> .env
+  fi
+  echo "Generated DB_PASSWORD in deploy/.env."
 fi
 
 command -v docker >/dev/null || { echo "Error: docker is not installed on this host." >&2; exit 1; }

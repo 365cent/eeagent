@@ -73,3 +73,6 @@ ctx_*.txt
 
 # --- Legacy / backups ---
 v0-backup/
+
+# customer-provided source material; keep out of git
+docs/samples/
