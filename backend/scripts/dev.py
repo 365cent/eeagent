@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from scripts._dev_env import api_only, ensure_object_dir, load_dotenv_file
+
 load_dotenv_file()
 ensure_object_dir()
 BIN = ROOT / ".pg" / "pgsql" / "bin"
@@ -24,42 +25,20 @@ PG_PORT = int(os.environ.get("DB_PORT", "54329"))
 use_portable_pg = DATA.exists()
 use_external_pg = EXTERNAL_DB_MARKER.is_file()
 
-if not use_portable_pg and not use_external_pg:
-    raise SystemExit("database not initialized — run: uv run python scripts/bootstrap.py")
-
-if use_portable_pg:
-    r = subprocess.run([str(BIN / "pg_ctl"), "-D", str(DATA), "status"], capture_output=True)
-    if r.returncode != 0:
-        subprocess.run(
-            [str(BIN / "pg_ctl"), "-D", str(DATA), "-o", f"-p {PG_PORT} -h 127.0.0.1", "-w", "start"],
-            check=True,
-        )
-
-if sys.platform == "win32":
-    import asyncio
-
-    # psycopg async requires a selector loop; uvicorn default on Windows is Proactor
-    asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
-
-import uvicorn  # noqa: E402
-
-os.chdir(ROOT)
-
 worker_proc: subprocess.Popen | None = None
-if not api_only():
-    # FastAPI lifespan already runs an embedded capture worker (EEA_CAPTURE_EMBEDDED).
-    # A second subprocess on Windows lacks the selector event-loop policy → psycopg InterfaceError spam.
-    embed_default = os.environ.get("EEA_CAPTURE_EMBEDDED", "1").lower() not in ("0", "false", "no")
-    skip_subprocess = sys.platform == "win32" and embed_default
-    if skip_subprocess:
-        print("[dev] capture worker embedded in API (no subprocess on Windows)", flush=True)
-    else:
-        worker_proc = subprocess.Popen(
-            [sys.executable, "-m", "app.worker"],
-            cwd=ROOT,
-            env=os.environ.copy(),
-        )
-        print("[dev] capture worker subprocess started", flush=True)
+
+
+def _ensure_postgres() -> None:
+    if not use_portable_pg and not use_external_pg:
+        raise SystemExit("database not initialized — run: uv run python scripts/bootstrap.py")
+
+    if use_portable_pg:
+        r = subprocess.run([str(BIN / "pg_ctl"), "-D", str(DATA), "status"], capture_output=True)
+        if r.returncode != 0:
+            subprocess.run(
+                [str(BIN / "pg_ctl"), "-D", str(DATA), "-o", f"-p {PG_PORT} -h 127.0.0.1", "-w", "start"],
+                check=True,
+            )
 
 
 def _stop_worker() -> None:
@@ -73,12 +52,49 @@ def _stop_worker() -> None:
         worker_proc.wait(timeout=10)
 
 
-try:
-    uvicorn.run(
-        "app.main:app",
-        host=os.environ.get("API_HOST", "127.0.0.1" if use_external_pg else "0.0.0.0"),
-        port=int(os.environ.get("API_PORT", "8000")),
-        loop="none",  # keep the WindowsSelectorEventLoop policy set above (psycopg requirement)
-    )
-finally:
-    _stop_worker()
+def main() -> None:
+    global worker_proc
+
+    _ensure_postgres()
+
+    import uvicorn
+
+    os.chdir(ROOT)
+
+    if not api_only():
+        # FastAPI lifespan already runs an embedded capture worker (EEA_CAPTURE_EMBEDDED).
+        # A second subprocess on Windows lacks the selector event-loop policy → psycopg InterfaceError spam.
+        embed_default = os.environ.get("EEA_CAPTURE_EMBEDDED", "1").lower() not in ("0", "false", "no")
+        skip_subprocess = sys.platform == "win32" and embed_default
+        if skip_subprocess:
+            print("[dev] capture worker embedded in API (no subprocess on Windows)", flush=True)
+        else:
+            worker_proc = subprocess.Popen(
+                [sys.executable, "-m", "app.worker"],
+                cwd=ROOT,
+                env=os.environ.copy(),
+            )
+            print("[dev] capture worker subprocess started", flush=True)
+
+    reload = os.environ.get("EEA_DEV_RELOAD", "1").lower() not in ("0", "false", "no")
+    # Reload worker calls Server.run() before app.main import; on Windows use eea_event_loop()
+    # so asyncio.Runner gets a loop instance (not Proactor, not a loop class).
+    uvicorn_loop = "app.core.uvicorn_loop:eea_event_loop" if sys.platform == "win32" else "auto"
+
+    try:
+        uvicorn.run(
+            "app.main:app",
+            host=os.environ.get("API_HOST", "127.0.0.1" if use_external_pg else "0.0.0.0"),
+            port=int(os.environ.get("API_PORT", "8000")),
+            loop=uvicorn_loop,
+            reload=reload,
+            timeout_graceful_shutdown=15,
+        )
+    except KeyboardInterrupt:
+        print("\n[dev] API stopped", flush=True)
+    finally:
+        _stop_worker()
+
+
+if __name__ == "__main__":
+    main()

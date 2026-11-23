@@ -60,13 +60,19 @@ def start_launchdarkly(sdk_key: str | None) -> bool:
 
 
 def shutdown_launchdarkly() -> None:
-    client = ldclient.get()
+    try:
+        client = ldclient.get()
+    except Exception:
+        return
     if client.is_initialized():
         client.close()
 
 
 def launchdarkly_configured() -> bool:
-    client = ldclient.get()
+    try:
+        client = ldclient.get()
+    except Exception:
+        return False
     return client.is_initialized()
 
 

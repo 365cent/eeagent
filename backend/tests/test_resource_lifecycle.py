@@ -47,3 +47,25 @@ async def test_worker_disposes_engine_on_failure(monkeypatch):
     with pytest.raises(RuntimeError, match="worker failed"):
         await worker._run()
     dispose.assert_awaited_once()
+
+
+def test_shutdown_is_noop_when_launchdarkly_was_never_configured(monkeypatch):
+    from app.platform import launchdarkly
+
+    monkeypatch.setattr(
+        launchdarkly.ldclient,
+        "get",
+        Mock(side_effect=Exception("set_config was not called")),
+    )
+    launchdarkly.shutdown_launchdarkly()
+
+
+def test_configured_is_false_when_launchdarkly_was_never_configured(monkeypatch):
+    from app.platform import launchdarkly
+
+    monkeypatch.setattr(
+        launchdarkly.ldclient,
+        "get",
+        Mock(side_effect=Exception("set_config was not called")),
+    )
+    assert launchdarkly.launchdarkly_configured() is False

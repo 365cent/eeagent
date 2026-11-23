@@ -20,7 +20,6 @@ FastAPI + PostgreSQL 后端，实现《平台实施计划》第 3–8 节的推�
 三平台步骤见根目录 **[README.md](../README.md)**。常用命令（在 `backend/`）：
 
 ```bash
-uv sync --locked
 uv sync --locked                       # 拉代码后或见 uv/onnxruntime 告警时
 uv run python scripts/bootstrap.py   # 首次 / 重复安全（会清理损坏的 wheel 元数据）
 uv run python scripts/dev.py         # 前台 API + worker；Ctrl+C 结束
