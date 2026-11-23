@@ -101,6 +101,21 @@ if ! docker compose "${up_args[@]}"; then
   exit 1
 fi
 
+# Recreated api/web containers get new IPs. Nginx resolves upstream names only
+# at startup, so refresh it and prove the same-origin route before reporting up.
+echo "==> refresh nginx upstreams"
+docker compose restart nginx >/dev/null
+for attempt in 1 2 3 4 5; do
+  if docker compose exec -T nginx wget -q -O /dev/null http://127.0.0.1/healthz; then
+    break
+  fi
+  if [[ "$attempt" == "5" ]]; then
+    echo "Nginx cannot reach the api service. Logs:" >&2
+    docker compose logs --tail 40 nginx api >&2 || true
+    exit 1
+  fi
+  sleep 2
+done
 env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u NO_PROXY -u no_proxy \
   docker compose ps
 HTTP_PORT="$(sed -n 's/^EEA_HTTP_PORT=//p' .env | tail -1)"

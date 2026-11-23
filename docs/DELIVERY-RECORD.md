@@ -10,6 +10,7 @@ This record keeps evidence for implementation slices removed from the remaining-
 - `bash deploy/build.sh 10.215.8.87` built `eea-backend`/`eea-web` and started postgres, migrate, api, worker, web and nginx; all healthchecks green, `alembic_version = 0022_demand_review_baseline`.
 - HTTP from the intranet: `/` 200 (Next.js), `/docs` 200, `/openapi.json` 200, `/api/v1/overview` 200, `/healthz` `{"status":"ok"}`; `/readyz` reports `database`/`object_dir` true and `semantic_gateway: degraded` because no model gateway is configured.
 - Build fixes: `uv==0.13.1` pinned; `uv.lock` regenerated against the Tsinghua index declared in `backend/pyproject.toml`; dependency install split from `COPY backend` with a BuildKit uv cache mount; Debian apt sources switched to HTTPS; `postgres:16-alpine`; proxy build args wired through Compose; `.gitattributes` keeps deploy files LF.
+- `build.sh` restarts Nginx after `compose up` because recreated api/web containers get new IPs; it then checks `/healthz` through Nginx before reporting success (a stale upstream produced 502 after the first rebuild).
 - Fresh-database migrations 0019/0020/0021 made idempotent: `0001_init` runs `Base.metadata.create_all` with current models, so later `ADD COLUMN` / `CREATE TABLE` steps must tolerate existing objects.
 - Still open: TLS and trusted identity in front of Nginx, semantic gateway credentials, a backup/restore drill, and Windows capture-client sign-off.
 
