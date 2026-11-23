@@ -35,8 +35,11 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["signal_id"], ["eea_signal.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("signal_id", "kind", name="uq_signal_studio_kind"),
+        if_not_exists=True,
     )
-    op.create_index("eea_signal_studio_signal_idx", "eea_signal_studio_artifact", ["signal_id"])
+    op.create_index(
+        "eea_signal_studio_signal_idx", "eea_signal_studio_artifact", ["signal_id"], if_not_exists=True
+    )
 
 
 def downgrade() -> None:

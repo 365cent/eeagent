@@ -1,0 +1,10 @@
+# Deployment files must be LF on Linux; Windows checkouts otherwise ship CRLF
+# shell scripts and Dockerfiles that fail with "set: pipefail: invalid option".
+*.sh        text eol=lf
+Dockerfile* text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.conf      text eol=lf
+*.service   text eol=lf
+*.timer     text eol=lf
+*.example   text eol=lf

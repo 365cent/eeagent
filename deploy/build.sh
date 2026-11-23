@@ -45,7 +45,7 @@ normalize_proxy_url() {
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --no-cache) NO_CACHE=1; shift ;;
-    -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
+    -h|--help) sed -n '2,16p' "$ROOT/deploy/build.sh"; exit 0 ;;
     -*) echo "Error: unknown option: $1" >&2; usage ;;
     *)
       [[ -z "$PROXY_INPUT" ]] || { echo "Error: unexpected argument: $1" >&2; usage; }
@@ -103,11 +103,14 @@ fi
 
 env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy -u NO_PROXY -u no_proxy \
   docker compose ps
-cat <<'EOF'
+HTTP_PORT="$(sed -n 's/^EEA_HTTP_PORT=//p' .env | tail -1)"
+HTTP_PORT="${HTTP_PORT:-8080}"
+cat <<EOF
 
 EEA is up.
-  UI           http://<host>:8080/
-  API docs     http://<host>:8080/api/docs  (same Nginx origin)
+  UI           http://<host>:${HTTP_PORT}/
+  API docs     http://<host>:${HTTP_PORT}/docs  (same Nginx origin)
+  Health       http://<host>:${HTTP_PORT}/healthz  (readiness: /readyz)
   Logs         docker compose logs -f api worker web
   Migrations   docker compose run --rm migrate
   Maintenance  docker compose --profile ops run --rm maintenance

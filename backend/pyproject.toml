@@ -78,3 +78,7 @@ markers = [
     "no_db: no eea_test lock, migrate, or per-test TRUNCATE",
     "db: integration test using eea_test (default)",
 ]
+
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true

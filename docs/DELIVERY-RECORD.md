@@ -4,6 +4,15 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 ## 2026-11-23
 
+### Production Docker deploy on 10.215.35.10 (2026-11-23)
+
+- Host: Ubuntu 22.04.5, Docker 29.1.3, Compose 2.40.3; repo at `~/projects/eea`, external port `8090` (`EEA_HTTP_PORT`); build proxy `10.215.8.87:1000`.
+- `bash deploy/build.sh 10.215.8.87` built `eea-backend`/`eea-web` and started postgres, migrate, api, worker, web and nginx; all healthchecks green, `alembic_version = 0022_demand_review_baseline`.
+- HTTP from the intranet: `/` 200 (Next.js), `/docs` 200, `/openapi.json` 200, `/api/v1/overview` 200, `/healthz` `{"status":"ok"}`; `/readyz` reports `database`/`object_dir` true and `semantic_gateway: degraded` because no model gateway is configured.
+- Build fixes: `uv==0.13.1` pinned; `uv.lock` regenerated against the Tsinghua index declared in `backend/pyproject.toml`; dependency install split from `COPY backend` with a BuildKit uv cache mount; Debian apt sources switched to HTTPS; `postgres:16-alpine`; proxy build args wired through Compose; `.gitattributes` keeps deploy files LF.
+- Fresh-database migrations 0019/0020/0021 made idempotent: `0001_init` runs `Base.metadata.create_all` with current models, so later `ADD COLUMN` / `CREATE TABLE` steps must tolerate existing objects.
+- Still open: TLS and trusted identity in front of Nginx, semantic gateway credentials, a backup/restore drill, and Windows capture-client sign-off.
+
 ### Deploy hardening after the audit
 
 - Runtime commands no longer use `uv run` (image CMD and compose migrate/worker/maintenance): they call `/app/.venv/bin/python -m ...`, so starting a container needs neither the network nor an environment sync.

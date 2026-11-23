@@ -12,6 +12,12 @@ x-backend: &backend
     context: ..
     dockerfile: deploy/Dockerfile.backend
     args:
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-}
+      http_proxy: ${http_proxy:-}
+      https_proxy: ${https_proxy:-}
+      no_proxy: ${no_proxy:-}
       PIP_INDEX_URL: ${PIP_INDEX_URL:-}
   image: eea-backend:${EEA_VERSION:-latest}
   env_file: .env
@@ -24,7 +30,7 @@ x-backend: &backend
 
 services:
   postgres:
-    image: postgres:16-bookworm
+    image: postgres:16-alpine
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${DB_USER:-eea}
@@ -103,6 +109,12 @@ services:
       dockerfile: deploy/Dockerfile.frontend
       args:
         NEXT_PUBLIC_EEA_API_BASE: /api/v1
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+        http_proxy: ${http_proxy:-}
+        https_proxy: ${https_proxy:-}
+        no_proxy: ${no_proxy:-}
     image: eea-web:${EEA_VERSION:-latest}
     restart: unless-stopped
     expose:

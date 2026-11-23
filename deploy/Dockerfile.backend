@@ -8,18 +8,25 @@ ENV UV_COMPILE_BYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     OBJECT_DIR=/var/lib/eea/objects
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends libpq5 curl fonts-noto-cjk \
+# This host may only reach HTTPS through the build proxy; Debian defaults to http.
+RUN sed -i 's|http://deb.debian.org|https://deb.debian.org|g' /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources 2>/dev/null || true; \
+    apt-get update \
+    && apt-get install -y --no-install-recommends libpq5 curl \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir uv
+RUN pip install --no-cache-dir uv==0.13.1
 
 WORKDIR /app
-COPY backend /app
 
-# The intranet build often needs a mirror; leave the arg empty to use PyPI.
-RUN if [ -n "${PIP_INDEX_URL}" ]; then export UV_DEFAULT_INDEX="${PIP_INDEX_URL}"; fi \
-    && uv sync --locked --no-dev
+# Dependencies first: code edits then reuse this layer.
+COPY backend/pyproject.toml backend/uv.lock ./
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev --no-install-project
+
+COPY backend /app
+# backend/pyproject.toml pins the Tsinghua index, matching uv.lock sources.
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --locked --no-dev
 
 RUN mkdir -p /var/lib/eea/objects
 

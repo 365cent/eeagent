@@ -10,26 +10,33 @@ branch_labels = None
 depends_on = None
 
 
+def _add_column(table: str, column: sa.Column) -> None:
+    """0001 creates current ORM columns on a fresh DB; skip ones already there."""
+    existing = {c["name"] for c in sa.inspect(op.get_bind()).get_columns(table)}
+    if column.name not in existing:
+        op.add_column(table, column)
+
+
 def upgrade() -> None:
-    op.add_column("eea_document_figure", sa.Column("object_key", sa.Text(), nullable=True))
-    op.add_column("eea_document_figure", sa.Column("mime", sa.Text(), nullable=True))
-    op.add_column("eea_document_figure", sa.Column("source", sa.Text(), nullable=True))
-    op.add_column("eea_document_figure", sa.Column("page", sa.Integer(), nullable=True))
-    op.add_column("eea_document_figure", sa.Column("position", sa.Integer(), nullable=True))
-    op.add_column("eea_document_figure", sa.Column("section_path", JSONB(), nullable=True))
-    op.add_column(
+    _add_column("eea_document_figure", sa.Column("object_key", sa.Text(), nullable=True))
+    _add_column("eea_document_figure", sa.Column("mime", sa.Text(), nullable=True))
+    _add_column("eea_document_figure", sa.Column("source", sa.Text(), nullable=True))
+    _add_column("eea_document_figure", sa.Column("page", sa.Integer(), nullable=True))
+    _add_column("eea_document_figure", sa.Column("position", sa.Integer(), nullable=True))
+    _add_column("eea_document_figure", sa.Column("section_path", JSONB(), nullable=True))
+    _add_column(
         "eea_document_figure",
         sa.Column("occurrence_count", sa.Integer(), server_default="1", nullable=False),
     )
-    op.add_column("eea_document_figure", sa.Column("confidence", sa.Float(), nullable=True))
-    op.add_column("eea_document_figure", sa.Column("review_reason", sa.Text(), nullable=True))
+    _add_column("eea_document_figure", sa.Column("confidence", sa.Float(), nullable=True))
+    _add_column("eea_document_figure", sa.Column("review_reason", sa.Text(), nullable=True))
 
-    op.add_column("eea_document_chunk", sa.Column("section_path", JSONB(), nullable=True))
-    op.add_column("eea_document_chunk", sa.Column("heading_level", sa.Integer(), nullable=True))
-    op.add_column("eea_document_chunk", sa.Column("ordinal", sa.Integer(), nullable=True))
-    op.add_column("eea_document_chunk", sa.Column("char_start", sa.Integer(), nullable=True))
-    op.add_column("eea_document_chunk", sa.Column("char_end", sa.Integer(), nullable=True))
-    op.add_column("eea_document_chunk", sa.Column("figure_indices", JSONB(), nullable=True))
+    _add_column("eea_document_chunk", sa.Column("section_path", JSONB(), nullable=True))
+    _add_column("eea_document_chunk", sa.Column("heading_level", sa.Integer(), nullable=True))
+    _add_column("eea_document_chunk", sa.Column("ordinal", sa.Integer(), nullable=True))
+    _add_column("eea_document_chunk", sa.Column("char_start", sa.Integer(), nullable=True))
+    _add_column("eea_document_chunk", sa.Column("char_end", sa.Integer(), nullable=True))
+    _add_column("eea_document_chunk", sa.Column("figure_indices", JSONB(), nullable=True))
 
 
 def downgrade() -> None:

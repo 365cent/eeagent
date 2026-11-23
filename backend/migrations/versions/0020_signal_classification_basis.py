@@ -11,7 +11,9 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("eea_signal", sa.Column("classification_basis", JSONB(), nullable=True))
+    existing = {c["name"] for c in sa.inspect(op.get_bind()).get_columns("eea_signal")}
+    if "classification_basis" not in existing:
+        op.add_column("eea_signal", sa.Column("classification_basis", JSONB(), nullable=True))
 
 
 def downgrade() -> None:
