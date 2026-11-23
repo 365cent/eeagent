@@ -78,7 +78,9 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Prepare deploy env
-        run: cp deploy/.env.compose.example deploy/.env
+        run: |
+          cp deploy/.env.example deploy/.env
+          sed -i 's/^DB_PASSWORD=$/DB_PASSWORD=ci-only-not-a-secret/' deploy/.env
       - name: Validate Compose file
         working-directory: deploy
         run: docker compose -f docker-compose.yml config
