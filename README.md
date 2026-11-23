@@ -30,7 +30,7 @@ pnpm install
 pnpm dev
 ```
 
-Background API: `start_api.py` / `stop_api.py`. pytest: Git Bash, WSL, or `uv run pytest -q` in `backend/`.
+Background API: `start_api.py` / `stop_api.py`. pytest: Git Bash, WSL, or `uv run pytest -q` in `backend/`. `dev.py` hot-reload uses a selector event loop on Windows (psycopg async); Linux intranet deploy is unaffected.
 
 ### macOS / Linux (dev)
 

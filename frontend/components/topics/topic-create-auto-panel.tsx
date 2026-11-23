@@ -1,10 +1,11 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
-import { App as AntApp, Button, Card, Col, Flex, Input, Modal, Row, Space, Tag, Typography } from 'antd'
-import { CheckOutlined, MergeCellsOutlined, ReloadOutlined } from '@ant-design/icons'
+import { App as AntApp, Button, Card, Col, Flex, Input, Modal, Row, Typography } from 'antd'
+import { CheckOutlined, ReloadOutlined } from '@ant-design/icons'
 import { createTheme, putSignalTheme } from '@/lib/api/eea-api'
 import { EeaApiError, eeaErrorMessage } from '@/lib/api/client'
+import { TopicCandidateCard } from '@/components/topics/topic-candidate-card'
 import { TopicClusterStage, type ClusterStagePhase } from '@/components/topics/topic-cluster-stage'
 import { useTopicClusterCandidates } from '@/hooks/use-topic-cluster-candidates'
 import { useRefCodeMaps } from '@/hooks/use-eea-queries'
@@ -12,9 +13,11 @@ import { labelFor, shortStageLabel } from '@/lib/eea-mappers'
 import { proposalToCluster } from '@/lib/topic-cluster-report'
 import {
   clusterQualifiesForTopic,
+  topicCreationGate,
   induceTopicFromCluster,
   proposeNaturalTopicName,
   reliableClusterSignals,
+  topicClusterEvidenceStats,
   type TagCluster,
 } from '@/lib/topic-clustering'
 import type { ThemeClusterProposal } from '@/lib/api/types'
@@ -28,6 +31,21 @@ function wait(ms: number) {
 
 function reducedMotion() {
   return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+}
+
+function tagSourcesForProposal(proposal: ThemeClusterProposal): Record<string, string[]> {
+  const hosts = new Map<string, Set<string>>()
+  for (const member of proposal.members) {
+    const host = (member.source_host || '').trim() || '未知来源'
+    for (const tag of member.tags) {
+      const bucket = hosts.get(tag) ?? new Set<string>()
+      bucket.add(host)
+      hosts.set(tag, bucket)
+    }
+  }
+  return Object.fromEntries(
+    [...hosts.entries()].map(([tag, set]) => [tag, [...set].sort((a, b) => a.localeCompare(b, 'zh-CN'))]),
+  )
 }
 
 export function TopicCreateAutoPanel({ onNavigate }: { onNavigate: NavigateFn }) {
@@ -49,13 +67,6 @@ export function TopicCreateAutoPanel({ onNavigate }: { onNavigate: NavigateFn })
   const [formingKey, setFormingKey] = useState<string | null>(null)
   const [activeKey, setActiveKey] = useState<string | null>(null)
 
-  const stageTags = useMemo(() => {
-    if (clusterReport && clusterReport.tag_distribution.length > 0) {
-      return clusterReport.tag_distribution.map((item) => ({ tag: item.tag, support: item.support }))
-    }
-    return vocabRows.map((row) => ({ tag: row.name, support: row.frequency }))
-  }, [clusterReport, vocabRows])
-
   const prepared = useMemo(() => {
     return (clusterReport?.clusters ?? []).map((proposal) => {
       const cluster = proposalToCluster(proposal)
@@ -67,42 +78,47 @@ export function TopicCreateAutoPanel({ onNavigate }: { onNavigate: NavigateFn })
         : proposal.tag_distribution.map((item) => item.tag)
       const displayName = proposeNaturalTopicName(cluster.signals, attribution, stageLabel)
       const induction = induceTopicFromCluster(cluster, themeTagMap)
-      return { proposal, cluster, stageLabel, displayName, induction }
+      const evidence = topicClusterEvidenceStats(cluster)
+      return { proposal, cluster, stageLabel, displayName, induction, evidence }
     })
   }, [clusterReport, maps, themeTagMap])
 
+  const creatable = useMemo(
+    () => prepared.filter(({ cluster }) => clusterQualifiesForTopic(cluster).ok),
+    [prepared],
+  )
+
   const stageClusters = useMemo(
     () =>
-      prepared.slice(0, 4).map(({ proposal, displayName }) => ({
+      prepared.map(({ proposal, displayName }) => ({
         key: proposal.key,
         label: displayName,
         tags: proposal.tag_distribution.map((item) => item.tag),
+        tagSources: tagSourcesForProposal(proposal),
       })),
     [prepared],
   )
 
-  const stageSignature = `${replayToken}|${stageTags.map((item) => item.tag).join(',')}|${stageClusters
-    .map((item) => item.key)
-    .join(',')}`
+  const stageSignature = `${replayToken}|${stageClusters.map((item) => item.key).join(',')}`
 
   useEffect(() => {
-    if (stageTags.length === 0 || reducedMotion()) {
+    if (stageClusters.length === 0 || reducedMotion()) {
       setPhase('formed')
       return
     }
     setPhase('scatter')
-    const gatherAt = window.setTimeout(() => setPhase('gather'), 1200)
-    const formedAt = window.setTimeout(() => setPhase('formed'), 2300)
+    const gatherAt = window.setTimeout(() => setPhase('gather'), 420)
+    const formedAt = window.setTimeout(() => setPhase('formed'), 1400)
     return () => {
       window.clearTimeout(gatherAt)
       window.clearTimeout(formedAt)
     }
-  }, [stageSignature, stageTags.length])
+  }, [stageSignature, stageClusters.length])
 
   const assignToTheme = async (cluster: TagCluster, themeId: string) => {
-    const gate = clusterQualifiesForTopic(cluster)
-    if (!gate.ok) {
-      messageApi.warning(gate.reason)
+    const creation = topicCreationGate(cluster)
+    if (!creation.canCreate) {
+      messageApi.warning(creation.reason)
       return
     }
     setPending(true)
@@ -149,7 +165,7 @@ export function TopicCreateAutoPanel({ onNavigate }: { onNavigate: NavigateFn })
   }
 
   const writeReadyTopics = async () => {
-    const ready = prepared.filter(({ cluster }) => clusterQualifiesForTopic(cluster).ok)
+    const ready = creatable
     if (ready.length === 0) {
       messageApi.warning('还没有可写入的主题（每组至少两条证据、两个来源）')
       return
@@ -179,17 +195,35 @@ export function TopicCreateAutoPanel({ onNavigate }: { onNavigate: NavigateFn })
     }
   }
 
-  const openEstablishModal = async (proposal: ThemeClusterProposal, cluster: TagCluster, suggestedName: string) => {
-    const gate = clusterQualifiesForTopic(cluster)
-    if (!gate.ok) {
-      messageApi.warning(gate.reason)
-      return
-    }
+  const beginEstablishFlow = async (
+    proposal: ThemeClusterProposal,
+    cluster: TagCluster,
+    suggestedName: string,
+  ) => {
     setActiveKey(proposal.key)
     setFormingKey(proposal.key)
     if (!reducedMotion()) await wait(720)
     setFormingKey(null)
     setNamingCluster({ cluster, name: suggestedName })
+  }
+
+  const openEstablishModal = (proposal: ThemeClusterProposal, cluster: TagCluster, suggestedName: string) => {
+    const creation = topicCreationGate(cluster)
+    if (!creation.canCreate) {
+      messageApi.warning(creation.reason)
+      return
+    }
+    if (creation.tier === 'provisional') {
+      Modal.confirm({
+        title: '预建主题',
+        content: creation.reason,
+        okText: '创建主题',
+        cancelText: '取消',
+        onOk: () => beginEstablishFlow(proposal, cluster, suggestedName),
+      })
+      return
+    }
+    void beginEstablishFlow(proposal, cluster, suggestedName)
   }
 
   const errorText =
@@ -200,7 +234,7 @@ export function TopicCreateAutoPanel({ onNavigate }: { onNavigate: NavigateFn })
         : null
 
   return (
-    <Card className="panel-card" title="自动整理 · 标签收成主题">
+    <Card className="panel-card" title="自动整理 · 标签创建主题">
       <Paragraph type="secondary">
         当前留存信号按<strong>库内技术方向标签</strong>做成向量。标签先散开，再按余弦距离收成若干主题，确认后才写入。
       </Paragraph>
@@ -225,137 +259,89 @@ export function TopicCreateAutoPanel({ onNavigate }: { onNavigate: NavigateFn })
       </div>
 
       <TopicClusterStage
-        tags={stageTags}
         clusters={stageClusters}
-        phase={phase}
+        map={clusterReport?.tag_map}
         formingKey={formingKey}
         activeKey={activeKey}
+        onClusterFocus={setActiveKey}
+        replayToken={replayToken}
+        actions={
+          <>
+            <Button size="small" icon={<ReloadOutlined />} onClick={() => setReplayToken((value) => value + 1)}>
+              重放聚类
+            </Button>
+            <Button
+              size="small"
+              type="primary"
+              icon={<CheckOutlined />}
+              disabled={pending || phase !== 'formed' || creatable.length === 0}
+              onClick={() => void writeReadyTopics()}
+            >
+              写成可建主题
+            </Button>
+          </>
+        }
       />
 
       <Flex justify="space-between" align="center" gap={12} wrap className="topic-forge-legend">
         <Text type="secondary">
           {clusterReport
-            ? `方法 ${clusterReport.method}，${clusterReport.linkage} 连接，${clusterReport.metric} 距离阈值 ${clusterReport.distance_threshold}。`
+            ? `层次聚类（${clusterReport.method} · ${clusterReport.linkage} · ${clusterReport.metric}，阈值 ${clusterReport.distance_threshold}）。`
             : '正在读取库内标签。'}
-          凝聚度是组内平均余弦相似度，提升度是组内占比除以全样本占比。
-          {clusterReport ? ` 相似度对照 ${clusterReport.sample_size} 条已留存信号。` : ''}
-          {clusterReport?.truncated ? ' 样本已截取最近 800 条。' : ''}
+          坐标与分组均由后端计算：MDS 投影后按聚类网格排布，组间不重叠；同色点属同一候选聚类。下方卡片可「创建主题」；达到 2 条可计证据且 2 个来源的为「可建主题」，仅 1 条时可「预建主题」。点击圆点查看来源。
+          {clusterReport ? ` 样本 ${clusterReport.sample_size} 条已留存信号。` : ''}
+          {clusterReport?.truncated ? ' 已截取最近 800 条。' : ''}
         </Text>
-        <Space>
-          <Button size="small" icon={<ReloadOutlined />} onClick={() => setReplayToken((value) => value + 1)}>
-            重放聚类
-          </Button>
-          <Button
-            size="small"
-            type="primary"
-            icon={<CheckOutlined />}
-            disabled={pending || phase !== 'formed' || prepared.every(({ cluster }) => !clusterQualifiesForTopic(cluster).ok)}
-            onClick={() => void writeReadyTopics()}
-          >
-            写成可建主题
-          </Button>
-        </Space>
       </Flex>
 
       {errorText ? <Text type="danger">{errorText}</Text> : null}
 
       {phase !== 'formed' ? (
-        <Text type="secondary">标签正在收拢，收成之后再列出主题。</Text>
-      ) : !clusterReportLoading && clusterReport && prepared.length === 0 ? (
+        <Text type="secondary">标签正在收拢，收成之后再列出候选主题。</Text>
+      ) : prepared.length === 0 ? (
         <Text type="secondary">
-          这次没有收成可展示的主题（多条证据需要两个来源，且组内平均余弦不低于 0.5）。可以换手动整理，先点一条再纳入相近信号。
+          这次没有收成分组。可以换手动整理，先点一条再纳入相近信号。
         </Text>
-      ) : phase === 'formed' ? (
-        <Row gutter={[16, 16]} className="topic-candidate-grid is-formed">
-          {prepared.map(({ proposal, cluster, induction, displayName, stageLabel }, index) => {
-            const gate = clusterQualifiesForTopic(cluster)
-            const alreadyAssigned =
-              proposal.members.length > 0 && proposal.members.every((member) => member.assigned)
-            const mergeName =
-              induction.mergeTarget && !alreadyAssigned
-                ? themes?.find((theme) => theme.id === induction.mergeTarget?.themeId)?.working_name
-                : null
-            const holdReason =
-              proposal.signal_count < 2
-                ? '这一组目前只有 1 条证据，补上第二条后再写成主题。'
-                : proposal.source_count < 2
-                  ? '这一组只有一个来源站点，补上第二个来源后再写成主题。'
-                  : gate.reason
-            return (
-              <Col xs={24} xl={12} key={proposal.key}>
-                <Card
-                  size="small"
-                  className={activeKey === proposal.key ? 'topic-candidate-card is-active' : 'topic-candidate-card'}
-                  style={{ animationDelay: `${index * 90}ms` }}
-                  variant="borderless"
-                  onMouseEnter={() => setActiveKey(proposal.key)}
-                >
-                  <Flex justify="space-between" align="flex-start" gap="middle" wrap>
-                    <Flex vertical gap={6} style={{ flex: 1, minWidth: 0 }}>
-                      <Text strong className="topic-candidate-title">
-                        {displayName}
-                      </Text>
-                      <Text type="secondary" className="topic-candidate-meta">
-                        {proposal.signal_count} 条 · {proposal.source_count} 来源 · 凝聚度{' '}
-                        {Math.round(proposal.cohesion * 100)}%
-                        {stageLabel ? ` · ${stageLabel}` : ''}
-                      </Text>
-                    </Flex>
-                    <Space wrap className="topic-candidate-actions">
-                      <Button
-                        type="primary"
-                        size="small"
-                        icon={<CheckOutlined />}
-                        disabled={pending || !gate.ok}
-                        onClick={() => void openEstablishModal(proposal, cluster, displayName)}
-                      >
-                        收成主题
-                      </Button>
-                      {induction.mergeTarget && mergeName ? (
-                        <Button
-                          size="small"
-                          icon={<MergeCellsOutlined />}
-                          disabled={pending}
-                          onClick={() => void assignToTheme(cluster, induction.mergeTarget!.themeId)}
-                        >
-                          并入「{mergeName}」
-                        </Button>
-                      ) : null}
-                    </Space>
-                  </Flex>
-                  <div className="topic-lift-list">
-                    {proposal.tag_distribution.slice(0, 4).map((item) => (
-                      <div key={item.tag} className="topic-lift-row">
-                        <span className="topic-lift-name">{item.tag}</span>
-                        <span className="topic-lift-track" aria-hidden>
-                          <span style={{ width: `${Math.round(item.cluster_share * 100)}%` }} />
-                        </span>
-                        <span className="topic-lift-num">{item.lift.toFixed(2)}×</span>
-                      </div>
-                    ))}
-                  </div>
-                  {gate.ok ? null : (
-                    <Text type="secondary" className="topic-candidate-meta">
-                      {holdReason}
-                    </Text>
-                  )}
-                  {proposal.members.length ? (
-                    <ul className="topic-candidate-evidence">
-                      {proposal.members.slice(0, 3).map((member) => (
-                        <li key={member.signal_id}>
-                          <Text type="secondary" ellipsis>
-                            {member.title}
-                          </Text>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </Card>
-              </Col>
-            )
-          })}
-        </Row>
-      ) : null}
+      ) : (
+        <>
+          {creatable.length === 0 ? (
+            <Text type="secondary" className="topic-candidate-note">
+              当前没有「可建主题」分组（需 2 条可计证据、2 个来源）。仍可对「预建主题」卡片创建主题，或换手动整理纳入相近信号。
+            </Text>
+          ) : null}
+          <Row gutter={[16, 16]} className="topic-candidate-grid is-formed">
+            {prepared.map(({ proposal, cluster, induction, displayName, stageLabel, evidence }, index) => {
+              const mergeName =
+                induction.mergeTarget
+                  ? themes?.find((theme) => theme.id === induction.mergeTarget?.themeId)?.working_name
+                  : null
+              return (
+                <Col xs={24} xl={12} key={proposal.key}>
+                  <TopicCandidateCard
+                    proposal={proposal}
+                    cluster={cluster}
+                    induction={induction}
+                    displayName={displayName}
+                    stageLabel={stageLabel}
+                    index={index}
+                    active={activeKey === proposal.key}
+                    pending={pending}
+                    mergeName={mergeName}
+                    creationTier={evidence.creation.tier}
+                    canCreate={evidence.creation.canCreate}
+                    creationReason={evidence.creation.reason}
+                    reliableCount={evidence.reliableCount}
+                    reliableSources={evidence.reliableSources}
+                    onFocus={() => setActiveKey(proposal.key)}
+                    onEstablish={() => openEstablishModal(proposal, cluster, displayName)}
+                    onMerge={() => void assignToTheme(cluster, induction.mergeTarget!.themeId)}
+                  />
+                </Col>
+              )
+            })}
+          </Row>
+        </>
+      )}
 
       <Modal
         title="确认主题工作名"

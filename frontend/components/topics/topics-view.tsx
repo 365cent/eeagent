@@ -9,10 +9,11 @@ import { PlatformEmptyState } from '@/components/shared/empty-state'
 import { MetricHint } from '@/components/shared/metric-hint'
 import { ThemeEditModal } from '@/components/topics/theme-edit-modal'
 import { ThemeSignalsTable } from '@/components/topics/theme-signals-table'
+import { TagSummaryCard } from '@/components/topics/tag-summary-card'
 import { TopicClusteringPanel } from '@/components/topics/topic-clustering-panel'
 import { deleteTheme } from '@/lib/api/eea-api'
 import { EeaApiError, eeaErrorMessage } from '@/lib/api/client'
-import { eeaQueryKeys, useRefCodeMaps, useThemeRows, useVocabUsage } from '@/hooks/use-eea-queries'
+import { eeaQueryKeys, useRefCodeMaps, useThemeRows } from '@/hooks/use-eea-queries'
 import { labelFor, shortStageLabel } from '@/lib/eea-mappers'
 import { metricsFootnote, signalFrequencyHint, sourceCountHint } from '@/lib/metrics-copy'
 import type { ThemeDetail } from '@/lib/api/types'
@@ -25,7 +26,6 @@ export function TopicsView({ onNavigate }: { onNavigate: NavigateFn }) {
   const queryClient = useQueryClient()
   const { maps } = useRefCodeMaps()
   const { data: themes, rows: themeRows, isSuccess: themesReady, refetch: refetchThemes } = useThemeRows()
-  const vocab = useVocabUsage()
   const [openThemeId, setOpenThemeId] = useState<string | null>(null)
   const [editingTheme, setEditingTheme] = useState<ThemeDetail | null>(null)
 
@@ -112,27 +112,7 @@ export function TopicsView({ onNavigate }: { onNavigate: NavigateFn }) {
       <TopicClusteringPanel />
       <Row gutter={[18, 18]} className="summary-row" style={{ marginTop: 18 }}>
         <Col xs={24} lg={8}>
-          <Card
-            className="panel-card tag-summary-card"
-            title="标签汇总"
-            extra={<Text type="secondary">{(vocab.data ?? []).reduce((sum, row) => sum + row.frequency, 0)} 次标注</Text>}
-          >
-            {(vocab.data ?? []).length === 0 ? (
-              <PlatformEmptyState title="暂无技术方向" description="给信号打上技术方向后，这里按使用次数汇总。" />
-            ) : (
-              <Space wrap>
-                {(vocab.data ?? []).slice(0, 18).map((row) => (
-                  <Tag
-                    key={row.id}
-                    style={{ cursor: 'pointer' }}
-                    onClick={() => onNavigate({ view: 'signals', query: { keyword: row.name } })}
-                  >
-                    {row.name} <Text type="secondary">×{row.frequency}</Text>
-                  </Tag>
-                ))}
-              </Space>
-            )}
-          </Card>
+          <TagSummaryCard onNavigate={onNavigate} />
         </Col>
         <Col xs={24} lg={16}>
           <Card

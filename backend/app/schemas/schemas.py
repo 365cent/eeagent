@@ -167,6 +167,47 @@ class SignalNeighborOut(BaseModel):
     assigned: bool = False
 
 
+class ThemeClusterMapRegion(BaseModel):
+    """Bounding ellipse for one cluster on the map canvas (canvas units, not pixels)."""
+
+    cluster_key: str
+    index: int
+    label: str
+    cx: float
+    cy: float
+    rx: float
+    ry: float
+    count: int
+
+
+class ThemeClusterTagPoint(BaseModel):
+    """A tag placed on the map canvas by the backend (no client-side layout).
+
+    ``weight`` is 0..1 core-to-edge density: 1 at the cluster centre, lower toward
+    the rim. The renderer maps it to marker radius like a bubble plot.
+    ``assigned`` is false for noise: tags that did not join any proposed cluster.
+    """
+
+    tag: str
+    support: int
+    cluster_key: str | None = None
+    cluster_index: int | None = None
+    x: float
+    y: float
+    weight: float = 0.5
+    assigned: bool = False
+
+
+class ThemeClusterMap(BaseModel):
+    """Ready-to-render 2-D map: canvas size, cluster regions and placed tags."""
+
+    width: float
+    height: float
+    aspect: float
+    points: list[ThemeClusterTagPoint]
+    regions: list[ThemeClusterMapRegion]
+
+
 class ThemeClusterReport(BaseModel):
     """Live-tag clustering report. Groups are suggestions; the client confirms before writing."""
 
@@ -181,6 +222,7 @@ class ThemeClusterReport(BaseModel):
     tag_distribution: list[TagDistributionItem]
     clusters: list[ThemeClusterProposal]
     neighbors: dict[str, list[SignalNeighborOut]]
+    tag_map: ThemeClusterMap | None = None
 
 
 class SignalCreate(RefCodeValidated):

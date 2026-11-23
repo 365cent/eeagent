@@ -20,6 +20,7 @@ from urllib.parse import urlparse
 
 import numpy as np
 from sklearn.cluster import AgglomerativeClustering
+from sklearn.manifold import MDS
 from sklearn.metrics import silhouette_score
 from sklearn.metrics.pairwise import cosine_similarity
 from sqlalchemy import select
@@ -31,17 +32,35 @@ from app.schemas.schemas import (
     ClusterMemberOut,
     SignalNeighborOut,
     TagDistributionItem,
+    ThemeClusterMap,
+    ThemeClusterMapRegion,
     ThemeClusterProposal,
     ThemeClusterReport,
+    ThemeClusterTagPoint,
 )
 
 POOL_LIMIT = 800
-COSINE_DISTANCE_THRESHOLD = 0.45
-MIN_COHESION = 0.5
+# Average-linkage cosine distance at which two articles are joined. A captured
+# article carries only a handful of tags (2-6), so two articles that share two
+# tags sit around 0.5 distance even when they describe the same technology.
+# 0.45 (= similarity 0.55) therefore left every article a singleton and no
+# candidate topic could ever satisfy the two-source rule. 0.7 keeps a real
+# overlap bar while still forming families on this tag density.
+COSINE_DISTANCE_THRESHOLD = 0.7
+# Cohesion is the mean pairwise similarity of a family, i.e. 1 - distance.
+# Keep it derived so the two knobs cannot contradict each other.
+MIN_COHESION = round(1.0 - COSINE_DISTANCE_THRESHOLD, 4)
 NEIGHBOR_MIN_SIMILARITY = 0.4
 NEIGHBOR_LIMIT = 6
 CORPUS_TAG_LIMIT = 24
 CLUSTER_TAG_LIMIT = 8
+# 2-D map: MDS is O(k^2) in memory, so embed the most-used tags only.
+TAG_MAP_LIMIT = 240
+MAP_WIDTH = 220.0
+MAP_HEIGHT = 100.0
+MAP_PAD = 2.0
+REGION_PAD_X = 1.8
+REGION_PAD_Y = 1.6
 
 _UNRELIABLE_TITLE = re.compile(
     r"安全验证|security\s*verification|captcha|verify\s*you\s*are|访问验证|异常访问|chrome-error|人机验证|滑动验证",
@@ -129,6 +148,194 @@ def _majority_stage(stages: list[str | None]) -> str | None:
     best = max(counts.values())
     winners = sorted(code for code, count in counts.items() if count == best)
     return winners[0]
+
+
+def _fill_axis(values: np.ndarray) -> np.ndarray:
+    """Stretch a 1-D embedding across 0..1 so the map fills the canvas."""
+    if values.size == 0:
+        return values
+    lo = float(values.min())
+    hi = float(values.max())
+    span = hi - lo
+    if span < 1e-9:
+        # Degenerate axis: fan out evenly instead of collapsing to a line.
+        return np.linspace(0.0, 1.0, values.size)
+    return (values - lo) / span
+
+
+def _embed_tags(matrix: np.ndarray, columns: list[int]) -> np.ndarray:
+    """2-D MDS over tag-tag cosine distance. Returns an (n, 2) array in 0..1."""
+    tag_matrix = matrix[:, columns]
+    similarity = np.clip(cosine_similarity(tag_matrix.T), 0.0, 1.0)
+    np.fill_diagonal(similarity, 1.0)
+    distance = 1.0 - similarity
+    np.fill_diagonal(distance, 0.0)
+    try:
+        coords = MDS(
+            n_components=2,
+            metric="precomputed",
+            init="classical_mds",
+            random_state=17,
+            n_init=1,
+            max_iter=300,
+            normalized_stress="auto",
+        ).fit_transform(distance)
+    except Exception:  # noqa: BLE001 - a failed projection must not break clustering
+        coords = np.zeros((len(columns), 2), dtype=np.float64)
+    return np.column_stack([_fill_axis(coords[:, 0]), _fill_axis(coords[:, 1])])
+
+
+def _place_clusters(
+    coords: np.ndarray,
+    keys: list[str | None],
+    counts: dict[str, int],
+) -> tuple[np.ndarray, dict[str, tuple[float, float, float, float]], np.ndarray]:
+    """Map the MDS projection onto the canvas without re-spacing the clusters.
+
+    Cluster positions and gaps are whatever the similarity embedding produced:
+    similar keyword families sit close together, dissimilar ones far apart, and
+    nothing is nudged to fill the rectangle. One uniform scale fits the cloud,
+    which preserves every distance ratio. Overlapping glows are intentional — a
+    family that overlaps another is genuinely close to it.
+
+    Returns coordinates, per-cluster (cx, cy, rx, ry) and a 0..1 density weight
+    per point (1 at the core, lower toward the rim).
+    """
+    n = len(keys)
+    placed = np.zeros((n, 2), dtype=np.float64)
+    weights = np.full(n, 0.35, dtype=np.float64)
+    regions: dict[str, tuple[float, float, float, float]] = {}
+
+    island_keys = sorted({key for key in keys if key}, key=lambda key: (-counts[key], key))
+    noise_idx = [idx for idx, value in enumerate(keys) if not value]
+    band = MAP_HEIGHT * 0.13 if noise_idx else 0.0
+    canvas_w = MAP_WIDTH - 2 * MAP_PAD
+    canvas_h = MAP_HEIGHT - band - 2 * MAP_PAD
+
+    def _scatter_noise() -> None:
+        step = canvas_w / max(len(noise_idx), 1)
+        for order, idx in enumerate(noise_idx):
+            placed[idx] = [MAP_PAD + step * (order + 0.5), MAP_HEIGHT - band / 2]
+            weights[idx] = 0.3
+
+    if not island_keys:
+        _scatter_noise()
+        return placed, regions, weights
+
+    # Positions in canvas units, straight from the embedding.
+    raw = np.array(coords, dtype=np.float64, copy=True)
+    raw[:, 0] *= canvas_w
+    raw[:, 1] *= canvas_h
+
+    cluster_centres: dict[str, np.ndarray] = {}
+    cluster_offsets: dict[str, np.ndarray] = {}
+    for key in island_keys:
+        rows = [idx for idx, value in enumerate(keys) if value == key]
+        block = raw[rows]
+        centre = block.mean(axis=0)
+        cluster_centres[key] = centre
+        cluster_offsets[key] = block - centre
+
+    # Fit the whole cloud once, uniformly, so relative spacing is untouched.
+    # Bounds come from the actual projected points on each axis (a per-axis
+    # measure, not one scalar), otherwise a wide cloud leaves empty margins.
+    all_points = np.concatenate([cluster_centres[key] + cluster_offsets[key] for key in island_keys], axis=0)
+    min_xy = all_points.min(axis=0) - 1.0
+    max_xy = all_points.max(axis=0) + 1.0
+    span_x = max(float(max_xy[0] - min_xy[0]), 1e-6)
+    span_y = max(float(max_xy[1] - min_xy[1]), 1e-6)
+    fit = min(canvas_w / span_x, canvas_h / span_y)
+    shift_x = MAP_PAD + (canvas_w - span_x * fit) / 2 - float(min_xy[0]) * fit
+    shift_y = MAP_PAD + (canvas_h - span_y * fit) / 2 - float(min_xy[1]) * fit
+
+    for key in island_keys:
+        rows = [idx for idx, value in enumerate(keys) if value == key]
+        off = cluster_offsets[key] * fit
+        centre = cluster_centres[key] * fit + np.array([shift_x, shift_y])
+        placed[rows] = off + centre
+        radius = np.hypot(off[:, 0], off[:, 1])
+        peak = float(radius.max()) if radius.size else 0.0
+        weights[rows] = 1.0 - (radius / peak) * 0.72 if peak > 1e-6 else 1.0
+        regions[key] = (
+            float(centre[0]),
+            float(centre[1]),
+            float(np.abs(off[:, 0]).max()) + REGION_PAD_X,
+            float(np.abs(off[:, 1]).max()) + REGION_PAD_Y,
+        )
+
+    _scatter_noise()
+    return placed, regions, weights
+
+
+def _build_tag_map(
+    vocabulary: list[str],
+    matrix: np.ndarray,
+    corpus_counts: Counter[str],
+    tag_cluster: dict[str, str],
+    cluster_labels: dict[str, str],
+) -> ThemeClusterMap | None:
+    """Project tags and place clusters: the client does no layout work."""
+    if not vocabulary:
+        return None
+
+    ranked = sorted(vocabulary, key=lambda tag: (-corpus_counts[tag], tag))[:TAG_MAP_LIMIT]
+    if not ranked:
+        return None
+
+    full_index = {tag: pos for pos, tag in enumerate(vocabulary)}
+    columns = [full_index[tag] for tag in ranked]
+    coords = _embed_tags(matrix, columns)
+
+    keys = [tag_cluster.get(tag) for tag in ranked]
+    counts: Counter[str] = Counter(key for key in keys if key)
+    placed, regions, weights = _place_clusters(coords, keys, counts)
+
+    order = {key: index for index, key in enumerate(
+        sorted({key for key in keys if key}, key=lambda key: (-counts[key], key))
+    )}
+
+    points = [
+        ThemeClusterTagPoint(
+            tag=tag,
+            support=corpus_counts[tag],
+            cluster_key=keys[pos],
+            cluster_index=order.get(keys[pos]) if keys[pos] else None,
+            x=_round(float(placed[pos, 0])),
+            y=_round(float(placed[pos, 1])),
+            weight=_round(float(weights[pos])),
+            assigned=keys[pos] is not None,
+        )
+        for pos, tag in enumerate(ranked)
+    ]
+    region_rows = [
+        ThemeClusterMapRegion(
+            cluster_key=key,
+            index=order[key],
+            label=cluster_labels.get(key, ""),
+            cx=_round(geometry[0]),
+            cy=_round(geometry[1]),
+            rx=_round(geometry[2]),
+            ry=_round(geometry[3]),
+            count=counts[key],
+        )
+        for key, geometry in regions.items()
+    ]
+    region_rows.sort(key=lambda row: row.index)
+
+    return ThemeClusterMap(
+        width=MAP_WIDTH,
+        height=MAP_HEIGHT,
+        aspect=_round(MAP_WIDTH / MAP_HEIGHT),
+        points=points,
+        regions=region_rows,
+    )
+
+
+def _proposal_label(proposal: ThemeClusterProposal) -> str:
+    """Short human label for a cluster on the map (shared tags, else top tags)."""
+    if proposal.shared_tags:
+        return " · ".join(proposal.shared_tags[:3])
+    return " · ".join(item.tag for item in proposal.tag_distribution[:3])
 
 
 def _member(record: TagSignal) -> ClusterMemberOut:
@@ -264,6 +471,11 @@ def cluster_tag_signals(records: list[TagSignal], *, truncated: bool = False) ->
 
     proposals.sort(key=lambda item: (-item.signal_count, -item.cohesion, item.key))
 
+    tag_cluster: dict[str, str] = {}
+    for proposal in proposals:
+        for item in proposal.tag_distribution:
+            tag_cluster.setdefault(item.tag, proposal.key)
+
     silhouette: float | None = None
     distinct_kept = set(kept_labels)
     if len(distinct_kept) >= 2 and len(kept_rows) > len(distinct_kept):
@@ -291,6 +503,9 @@ def cluster_tag_signals(records: list[TagSignal], *, truncated: bool = False) ->
         if nearest:
             neighbors[str(record.id)] = nearest
 
+    cluster_labels = {proposal.key: _proposal_label(proposal) for proposal in proposals}
+    tag_map = _build_tag_map(vocabulary, matrix, corpus_counts, tag_cluster, cluster_labels)
+
     return ThemeClusterReport(
         method="sklearn.cluster.AgglomerativeClustering",
         metric="cosine",
@@ -303,6 +518,7 @@ def cluster_tag_signals(records: list[TagSignal], *, truncated: bool = False) ->
         tag_distribution=corpus_distribution,
         clusters=proposals,
         neighbors=neighbors,
+        tag_map=tag_map,
     )
 
 

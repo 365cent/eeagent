@@ -53,6 +53,88 @@ def test_cosine_clusters_separate_tag_families():
 
 
 @pytest.mark.no_db
+def test_tag_map_places_tags_in_two_dimensions():
+    power_a = _record(["智能配电", "eFuse", "区域控制"], "a.example")
+    power_b = _record(["智能配电", "eFuse", "低压网络"], "b.example")
+    talent_a = _record(["人才招聘", "组织架构"], "c.example", stage="delivery_oem")
+    talent_b = _record(["人才招聘", "组织架构", "团队"], "d.example", stage="delivery_oem")
+
+    report = cluster_tag_signals([power_a, power_b, talent_a, talent_b])
+
+    tag_map = report.tag_map
+    assert tag_map is not None, "the backend must return a laid-out map"
+    assert tag_map.points, "the map must place the plotted tags"
+    assert tag_map.width > 0 and tag_map.height > 0
+    assert all(0.0 <= point.x <= tag_map.width for point in tag_map.points)
+    assert all(0.0 <= point.y <= tag_map.height for point in tag_map.points)
+
+    tags = {point.tag for point in tag_map.points}
+    assert {"智能配电", "eFuse", "人才招聘"} <= tags
+    cluster_keys = {point.tag: point.cluster_key for point in tag_map.points}
+    assert cluster_keys["智能配电"] == cluster_keys["eFuse"]
+    assert cluster_keys["智能配电"] != cluster_keys["人才招聘"]
+
+
+@pytest.mark.no_db
+def test_tag_map_preserves_similarity_projection_spacing():
+    """Clusters must sit where the embedding put them, not on an even grid.
+
+    A laid-out grid would give cluster centres identical or regularly spaced
+    coordinates; an organic projection gives distinct, irregular ones.
+    """
+    families = [
+        _record(["智能配电", "eFuse", "区域控制"], "a.example"),
+        _record(["智能配电", "eFuse", "低压网络"], "b.example"),
+        _record(["人才招聘", "组织架构"], "c.example", stage="delivery_oem"),
+        _record(["人才招聘", "组织架构", "团队"], "d.example", stage="delivery_oem"),
+        _record(["UCIe", "PCIe", "互连"], "e.example"),
+        _record(["UCIe", "PCIe", "带宽"], "f.example"),
+    ]
+    report = cluster_tag_signals(families)
+
+    tag_map = report.tag_map
+    assert tag_map is not None
+    regions = tag_map.regions
+    assert len(regions) >= 3, "clusters must produce bounded regions"
+
+    xs = [region.cx for region in regions]
+    ys = [region.cy for region in regions]
+    assert len({round(x, 4) for x in xs}) == len(regions), "cluster centres must not align on a grid column"
+    assert len({round(y, 4) for y in ys}) == len(regions), "cluster centres must not align on a grid row"
+
+    # The projection is fitted to the canvas, so it must actually use the height.
+    points_y = [point.y for point in tag_map.points]
+    used = (max(points_y) - min(points_y)) / tag_map.height
+    assert used > 0.6, f"layout wastes vertical space: only {used:.0%} used"
+
+
+@pytest.mark.no_db
+def test_tag_map_weights_peak_at_cluster_core():
+    left = _record(["智能配电", "eFuse", "区域控制"], "a.example")
+    right = _record(["智能配电", "eFuse", "低压网络"], "b.example")
+
+    report = cluster_tag_signals([left, right])
+
+    points = report.tag_map.points if report.tag_map else []
+    assert points
+    for point in points:
+        assert 0.0 <= point.weight <= 1.0, "weight must be a normalised density"
+    assert any(point.weight > 0.5 for point in points), "cores must outweigh rims"
+
+
+@pytest.mark.no_db
+def test_tag_map_spreads_axes_when_every_tag_is_identical():
+    left = _record(["智能配电", "eFuse"], "a.example")
+    right = _record(["智能配电", "eFuse"], "b.example")
+
+    report = cluster_tag_signals([left, right])
+
+    points = report.tag_map.points if report.tag_map else []
+    xs = {round(point.x, 6) for point in points}
+    assert len(xs) > 1, "a degenerate projection must not collapse every tag onto one point"
+
+
+@pytest.mark.no_db
 def test_distinct_singleton_stays_its_own_proposal():
     power_a = _record(["智能配电", "eFuse", "区域控制"], "a.example")
     power_b = _record(["智能配电", "eFuse", "低压网络"], "b.example")
@@ -140,3 +222,26 @@ async def test_cluster_report_uses_live_unassigned_tags(client):
     assert power_b["id"] in neighbors
     assert neighbors[power_b["id"]]["assigned"] is False
     assert neighbors[assigned["id"]]["assigned"] is True
+
+
+@pytest.mark.no_db
+def test_sparse_tag_sets_sharing_two_tags_are_grouped():
+    """Real captures carry 2-6 tags; sharing two of them must still form a family.
+
+    Regression: the old 0.45 distance threshold demanded similarity 0.55, which a
+    four-tag article sharing two tags only reaches at 0.5, so every article stayed
+    a singleton and no candidate topic could satisfy the two-source rule.
+    """
+    left = _record(["TSN", "确定性网络", "车载以太网", "时间同步"], "a.example")
+    right = _record(["TSN", "确定性网络", "自动化", "测试"], "b.example")
+    unrelated = _record(["人才招聘", "组织架构", "团队", "培训"], "c.example")
+
+    report = cluster_tag_signals([left, right, unrelated])
+
+    groups = [set(member.signal_id for member in cluster.members) for cluster in report.clusters]
+    assert {left.id, right.id} in groups
+    family = next(c for c in report.clusters if left.id in {m.signal_id for m in c.members})
+    assert family.signal_count == 2
+    assert family.source_count == 2
+    assert family.cohesion >= 0.3
+    assert "TSN" in family.shared_tags

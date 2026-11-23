@@ -294,6 +294,38 @@ export type SignalNeighborOut = {
   assigned: boolean
 }
 
+export type ThemeClusterTagPoint = {
+  tag: string
+  support: number
+  cluster_key: string | null
+  cluster_index: number | null
+  /** Canvas coordinates; the canvas is `ThemeClusterMap.width` x `height`. */
+  x: number
+  y: number
+  /** 0..1 core-to-edge density, drives marker radius. */
+  weight: number
+  assigned: boolean
+}
+
+export type ThemeClusterMapRegion = {
+  cluster_key: string
+  index: number
+  label: string
+  cx: number
+  cy: number
+  rx: number
+  ry: number
+  count: number
+}
+
+export type ThemeClusterMap = {
+  width: number
+  height: number
+  aspect: number
+  points: ThemeClusterTagPoint[]
+  regions: ThemeClusterMapRegion[]
+}
+
 export type ThemeClusterReport = {
   method: string
   metric: string
@@ -306,6 +338,7 @@ export type ThemeClusterReport = {
   tag_distribution: TagDistributionItem[]
   clusters: ThemeClusterProposal[]
   neighbors: Record<string, SignalNeighborOut[]>
+  tag_map: ThemeClusterMap | null
 }
 
 export type AssistantChatTurn = {

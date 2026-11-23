@@ -143,12 +143,32 @@ function intersectTags(members: SignalOut[]): string[] {
   return dedupeTags([...acc]).slice(0, 8)
 }
 
+const MIN_TITLE_STEM = 10
+
 export function cleanSignalTitle(title: string): string {
-  return title
+  const normalized = title
     .replace(/^【[^】]+】\s*/, '')
-    .replace(/\s*[-|｜—].*$/, '')
     .replace(/\s+/g, ' ')
     .trim()
+  // A trailing "- site" / "| site" is noise, but "MIPI A-PHY" and
+  // "附下载| 汽车…" are titles. Only cut when the stem still
+  // identifies the article; otherwise keep the whole title.
+  const stem = normalized.replace(/\s*[-|｜—].*$/, '').trim()
+  return stem.length >= MIN_TITLE_STEM ? stem : normalized
+}
+
+/** Prefer the longest pipe segment so capture prefixes do not fail the evidence gate. */
+export function titleForEvidenceCheck(rawTitle: string): string {
+  const segments = rawTitle
+    .split(/[|｜—]/)
+    .map((part) => part.replace(/^【[^】]+】\s*/, '').trim())
+    .filter(Boolean)
+  const longest =
+    segments.length > 0
+      ? segments.reduce((best, part) => (part.length > best.length ? part : best), segments[0])
+      : ''
+  if (longest.length >= MIN_TITLE_STEM) return longest
+  return cleanSignalTitle(rawTitle)
 }
 
 function titleDedupKey(title: string): string {
@@ -176,7 +196,7 @@ export function isReliableTopicEvidence(signal: SignalOut): boolean {
   if (signal.document_id) return false
   const status = signal.evidence_status_code?.trim()
   if (status && status !== 'retained') return false
-  const title = cleanSignalTitle(signal.title)
+  const title = titleForEvidenceCheck(signal.title)
   if (title.length < 10) return false
   if (UNRELIABLE_TITLE_RE.test(title) || UNRELIABLE_TITLE_RE.test(signal.title)) return false
   if (/^https?:\/\//i.test(signal.title.trim()) || /^存在\s*https?:/i.test(title)) return false
@@ -189,19 +209,63 @@ export function countDistinctEvidenceSources(signals: SignalOut[]): number {
 }
 
 export function clusterQualifiesForTopic(cluster: TagCluster): { ok: boolean; reason: string } {
+  const creation = topicCreationGate(cluster)
+  return { ok: creation.tier === 'ready', reason: creation.tier === 'ready' ? '' : creation.reason }
+}
+
+export type TopicCreationTier = 'ready' | 'provisional' | 'blocked'
+
+export type TopicCreationGate = {
+  tier: TopicCreationTier
+  /** Shown under the card; empty when tier is ready. */
+  reason: string
+  canCreate: boolean
+}
+
+/** Formal topic gate (2×2) vs single-signal provisional create (环节三). */
+export function topicCreationGate(cluster: TagCluster): TopicCreationGate {
   const reliable = dedupeSignalsByUrl(cluster.signals.filter(isReliableTopicEvidence))
-  if (reliable.length < TOPIC_MIN_EVIDENCE_COUNT) {
-    return { ok: false, reason: '可靠证据不足（需至少 2 条已留存正文）' }
-  }
   const sources = countDistinctEvidenceSources(reliable)
-  if (sources < TOPIC_MIN_DISTINCT_SOURCES) {
-    return { ok: false, reason: '需至少 2 个不同来源站点' }
+  if (reliable.length === 0) {
+    return {
+      tier: 'blocked',
+      reason: '尚无已留存正文可计入；请先完成采集并留存快照。',
+      canCreate: false,
+    }
   }
-  return { ok: true, reason: '' }
+  if (reliable.length >= TOPIC_MIN_EVIDENCE_COUNT && sources >= TOPIC_MIN_DISTINCT_SOURCES) {
+    return { tier: 'ready', reason: '', canCreate: true }
+  }
+  const hints: string[] = []
+  if (reliable.length < TOPIC_MIN_EVIDENCE_COUNT) {
+    hints.push(`再补 ${TOPIC_MIN_EVIDENCE_COUNT - reliable.length} 条已留存正文`)
+  }
+  if (sources < TOPIC_MIN_DISTINCT_SOURCES) {
+    hints.push(`再增 ${TOPIC_MIN_DISTINCT_SOURCES - sources} 个不同来源站点`)
+  }
+  return {
+    tier: 'provisional',
+    reason:
+      hints.length > 0
+        ? `可先创建主题（当前 ${reliable.length} 条可计证据）；${hints.join('、')}后满足正式多源印证门槛。`
+        : '可先创建主题，后续再补证据。',
+    canCreate: true,
+  }
 }
 
 export function reliableClusterSignals(cluster: TagCluster): SignalOut[] {
   return dedupeSignalsByUrl(cluster.signals.filter(isReliableTopicEvidence))
+}
+
+export function topicClusterEvidenceStats(cluster: TagCluster) {
+  const reliable = reliableClusterSignals(cluster)
+  const creation = topicCreationGate(cluster)
+  return {
+    reliableCount: reliable.length,
+    reliableSources: countDistinctEvidenceSources(reliable),
+    creation,
+    gate: clusterQualifiesForTopic(cluster),
+  }
 }
 
 export function dedupeSignalsByUrl(signals: SignalOut[]): SignalOut[] {
