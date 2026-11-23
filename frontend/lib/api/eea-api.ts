@@ -45,6 +45,7 @@ import type {
   SessionOut,
   SignalDetail,
   SignalFigureOut,
+  SignalRecaptionOut,
   SignalOut,
   TagAssignmentPayload,
   TagSuggestion,
@@ -568,6 +569,12 @@ export function retryDocumentFigure(documentId: string, figureIndex: number) {
     '/documents/' + encodeURIComponent(documentId) + '/figures/' + figureIndex + '/recaption',
     { method: 'POST' },
   )
+}
+
+export function recaptionSignal(signalId: string) {
+  return eeaFetch<SignalRecaptionOut>(`/signals/${encodeURIComponent(signalId)}/recaption`, {
+    method: 'POST',
+  })
 }
 
 export function reingestDocument(documentId: string) {

@@ -554,6 +554,7 @@ async def enrich_snapshot_figures(
     snapshot: HtmlSnapshot,
     *,
     vision_captions: bool = True,
+    only_indices: set[int] | None = None,
 ) -> HtmlSnapshot:
     """Replace alt-text figure quotes with a one-line vision description.
 
@@ -567,8 +568,15 @@ async def enrich_snapshot_figures(
     from app.core.config import get_settings
 
     settings = get_settings()
-    figures = snapshot.figures[: settings.max_figures]
-    if vision_captions:
+    # ``only_indices`` lets a whole-article retry spend the caption budget on the
+    # figures that still lack a description instead of the first N images.
+    if only_indices is None:
+        figures = snapshot.figures[: settings.max_figures]
+    else:
+        figures = [
+            figure for figure in snapshot.figures if figure.index in only_indices
+        ][: settings.max_figures]
+    if vision_captions and figures:
         try:
             await asyncio.wait_for(
                 _caption_snapshot_figures(figures),

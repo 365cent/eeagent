@@ -141,3 +141,34 @@ test('lifts a linked blockquote figure out of its table cell', () => {
   assert.ok(!out.includes('adpf.asp'), out)
   assert.ok(!out.includes('[>'), out)
 })
+
+const { countFailedFigureCaptions } = loadTypescript('../lib/evidence/sanitize-snapshot-markdown.ts')
+
+test('counts only captions that still lack a description', () => {
+  const body = [
+    '# 标题',
+    '',
+    '> 图 1：（视觉模型未返回描述）',
+    '',
+    '> 图 2：一张架构图',
+    '',
+    '> 图 3：',
+  ].join('\n')
+  assert.deepEqual(countFailedFigureCaptions(body), { total: 3, failed: 2 })
+})
+
+test('ignores bodies without figure captions', () => {
+  assert.deepEqual(countFailedFigureCaptions('只有正文'), { total: 0, failed: 0 })
+})
+
+test('keeps a blank line after a figure caption so the quote cannot swallow the article', () => {
+  const body = ['> 图 1：芯片架构示意图。', '', '**计算核心的非对称布局**', '', '传统单体SoC共享同一制程。'].join('\n')
+  const lines = sanitizeSnapshotMarkdown(body).split('\n')
+  const captionAt = lines.findIndex((line) => line.startsWith('> 图 1'))
+  assert.ok(captionAt >= 0, 'caption line survives')
+  assert.equal(lines[captionAt + 1], '', 'blank line must separate the blockquote from following prose')
+  assert.ok(
+    lines.some((line) => line.includes('计算核心的非对称布局')),
+    'following heading must stay outside the blockquote',
+  )
+})

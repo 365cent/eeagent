@@ -361,6 +361,15 @@ class SignalFigureOut(BaseModel):
     src: str
 
 
+
+class SignalRecaptionOut(BaseModel):
+    """Figure captions regenerated for one whole signal article."""
+
+    figures: int
+    captioned: int
+    failed: int
+
+
 class DocumentRawOut(BaseModel):
     """Upload result: raw blob handle plus W4 ingest summary."""
 

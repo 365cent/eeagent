@@ -6,7 +6,10 @@ import type { Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { FIGURE_CAPTION_LINE } from '@/lib/evidence/archive-figures'
 import { textFromMarkdownChildren } from '@/lib/evidence/markdown-children-text'
-import { sanitizeSnapshotMarkdown } from '@/lib/evidence/sanitize-snapshot-markdown'
+import {
+  isFailedFigureCaption,
+  sanitizeSnapshotMarkdown,
+} from '@/lib/evidence/sanitize-snapshot-markdown'
 import {
   sanitizeMarkdownUrl,
   sanitizeMarkdownUrlsInText,
@@ -21,6 +24,35 @@ type SignalBodyMarkdownProps = {
   figureByIndex?: Record<number, string>
 }
 
+/** A figure note is a sentence or two; anything longer is stray body text. */
+const MAX_CAPTION_CHARS = 180
+
+function splitFigureCaption(caption: string): { label: string; text: string } {
+  const match = FIGURE_CAPTION_LINE.exec(caption.trim())
+  const label = match ? `图 ${match[1]}` : ''
+  const raw = (match ? (match[2] ?? '') : caption).trim()
+  if (raw.length <= MAX_CAPTION_CHARS) return { label, text: raw }
+  // Cut on a sentence end when one is available, never mid-word.
+  const window = raw.slice(0, MAX_CAPTION_CHARS + 40)
+  const stop = Math.max(window.lastIndexOf('。'), window.lastIndexOf('；'), window.lastIndexOf('. '))
+  const text = stop > 40 ? window.slice(0, stop + 1) : `${raw.slice(0, MAX_CAPTION_CHARS)}…`
+  return { label, text }
+}
+
+/** Figure caption attached to its image: small label plus a readable note. */
+function FigureCaption({ caption }: { caption: string }) {
+  const { label, text } = splitFigureCaption(caption)
+  const failed = isFailedFigureCaption(caption) || !text
+  return (
+    <figcaption className={`evidence-figure-caption${failed ? ' is-pending' : ''}`}>
+      {label ? <span className="evidence-figure-label">{label}</span> : null}
+      <span className="evidence-figure-text" title={failed ? undefined : caption}>
+        {failed ? '图像描述待生成' : text}
+      </span>
+    </figcaption>
+  )
+}
+
 function FigureBlock({ src, caption }: { src?: string; caption: string }) {
   const safeSrc = typeof src === 'string' && src.trim().length > 0 ? src.trim() : null
   if (!safeSrc) {
@@ -32,8 +64,10 @@ function FigureBlock({ src, caption }: { src?: string; caption: string }) {
   }
   return (
     <figure className="evidence-figure-block">
-      <img src={safeSrc} alt="" loading="lazy" decoding="async" />
-      <figcaption>{caption}</figcaption>
+      <div className="evidence-figure-frame">
+        <img src={safeSrc} alt="" loading="lazy" decoding="async" />
+      </div>
+      <FigureCaption caption={caption} />
     </figure>
   )
 }
@@ -42,8 +76,7 @@ function FigureBlock({ src, caption }: { src?: string; caption: string }) {
 export const SignalBodyMarkdown = forwardRef<HTMLElement, SignalBodyMarkdownProps>(function SignalBodyMarkdown(
   { markdown, className, figureByIndex },
   ref,
-) {
-  const renderedMarkdown = useMemo(
+) {  const renderedMarkdown = useMemo(
     () => sanitizeMarkdownUrlsInText(sanitizeSnapshotMarkdown(markdown)),
     [markdown],
   )

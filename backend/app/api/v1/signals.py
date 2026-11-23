@@ -64,6 +64,7 @@ from app.services.html_snapshot import (
 )
 from app.services.judgment import judge_signal_type, judge_stage, rank_theme_overlaps, select_best_theme
 from app.services.signal_sources import add_supplementary_url, list_sources
+from app.services.signal_recaption import recaption_signal_article
 from app.services.tagging_guard import assert_expected_signal_revision, human_corrected_fields
 from app.services.llm import suggest_tags_with_llm
 from app.services.llm_gateway import (
@@ -502,6 +503,40 @@ async def get_signal_figures(signal_id: uuid.UUID, db: AsyncSession = Depends(ge
     suffix = suffix_for(doc.filename, mime)
     figures = await to_thread.run_sync(extract_figures, raw, suffix)
     return [SignalFigureOut(**item) for item in figure_data_urls(figures[: settings.max_figures])]
+
+
+@router.post("/{signal_id}/recaption", response_model=SignalRecaptionOut)
+async def recaption_signal(
+    signal_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_operator_identity),
+):
+    """Regenerate figure captions for the whole article in one pass.
+
+    The article is the unit of work: capture captions every figure at once, so a
+    retry does too. Cached captions are reused, so only failed figures call the
+    gateway. The client re-reads GET /body afterwards.
+    """
+    if actor.role not in {"researcher", "taxonomy_admin", "platform_admin"}:
+        raise HTTPException(403, "当前角色不能重生成图注")
+    s = await _load_signal(db, signal_id)
+    result = await recaption_signal_article(db, s)
+    await record_correction(
+        db,
+        entity_type="signal",
+        entity_id=s.id,
+        field_name="figure_captions",
+        old_value=None,
+        new_value=f"{result.captioned}/{result.figures}",
+        actor=actor,
+        reason="整篇图注重生成",
+    )
+    await db.commit()
+    return SignalRecaptionOut(
+        figures=result.figures,
+        captioned=result.captioned,
+        failed=result.failed,
+    )
 
 
 @router.get(

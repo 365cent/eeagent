@@ -78,7 +78,7 @@ import { PanoramaImportBanner } from '@/components/import/panorama-import-banner
 import { NotificationsCenter } from '@/components/notifications/notifications-center'
 import { usePlatformNotifications } from '@/hooks/use-platform-notifications'
 import { isUuid } from '@/lib/api/api-errors'
-import { EeaApiError, signalArchiveUrl, documentCanonicalUrl } from '@/lib/api/client'
+import { EeaApiError, eeaErrorMessage, signalArchiveUrl, documentCanonicalUrl } from '@/lib/api/client'
 import {
   DocumentDeckPreviewLazy,
   DocumentPdfViewerLazy,
@@ -90,8 +90,15 @@ import {
   parseDocumentResearchFocus,
   type DocumentResearchFocus,
 } from '@/lib/document-research'
-import { fetchDocument, fetchSignalStudioBundle, patchSignal } from '@/lib/api/eea-api'
+import {
+  fetchDocument,
+  fetchSignalBody,
+  fetchSignalStudioBundle,
+  patchSignal,
+  recaptionSignal,
+} from '@/lib/api/eea-api'
 import { buildAppPath } from '@/lib/navigation'
+import { countFailedFigureCaptions } from '@/lib/evidence/sanitize-snapshot-markdown'
 import { excerptLooksLikeChrome, sourceExcerptSnippet } from '@/lib/evidence/audio-overview-segments'
 import type { AppRouteOptions, NavigateFn, Signal } from '@/types/platform'
 import type { DocumentDetail, StudioInfographicPayload, StudioMindmapPayload } from '@/lib/api/types'
@@ -190,6 +197,7 @@ type EvidenceStageView =
   | 'infographic'
 
 function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: string) => void; signalId: string }) {
+  const { message: messageApi } = AntApp.useApp()
   const [sourceOpen, setSourceOpen] = useState(true)
   const [previewOpen, setPreviewOpen] = useState(true)
   const [stageView, setStageView] = useState<EvidenceStageView>('markdown')
@@ -200,6 +208,7 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
   const [researchFocus, setResearchFocus] = useState<DocumentResearchFocus>({})
   const [documentRefreshKey, setDocumentRefreshKey] = useState(0)
   const [studioCacheBySignal, setStudioCacheBySignal] = useState<Record<string, StudioCacheEntry>>({})
+  const [recaptioning, setRecaptioning] = useState(false)
   const markdownArticleRef = useRef<HTMLElement>(null)
   const stageViewLockedRef = useRef(false)
   const { signal: liveSignal, detail, isLoading, isError } = useSignalDetail(signalId)
@@ -235,6 +244,36 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
   )
   const markdownSource =
     (isDocumentSource && canonicalMd) || bodyText || detail?.excerpt || signal?.title || ''
+  const failedCaptionCount = useMemo(() => {
+    if (isDocumentSource || !hasArchive) return 0
+    return countFailedFigureCaptions(bodyText ?? '').failed
+  }, [bodyText, hasArchive, isDocumentSource])
+
+  const handleRegenerateCaptions = useCallback(async () => {
+    if (!apiId) return
+    setRecaptioning(true)
+    try {
+      const result = await recaptionSignal(apiId)
+      const [body, figureMap] = await Promise.all([
+        fetchSignalBody(apiId),
+        import('@/lib/evidence/archive-figures').then(({ fetchSignalFigureByIndex }) =>
+          fetchSignalFigureByIndex(apiId),
+        ),
+      ])
+      setBodyText(body)
+      setFigureByIndex(figureMap)
+      if (result.failed > 0) {
+        messageApi.warning(`仍有 ${result.failed} 张图片未生成描述，可稍后重试`)
+      } else {
+        messageApi.success(`已为 ${result.figures} 张图片生成描述`)
+      }
+    } catch (err) {
+      messageApi.error(eeaErrorMessage(err, '图注重生成失败'))
+    } finally {
+      setRecaptioning(false)
+    }
+  }, [apiId, messageApi])
+
   const studioCacheKey = apiId ?? signal?.key ?? signalId
   const studioCache = studioCacheBySignal[studioCacheKey] ?? {}
 
@@ -717,6 +756,20 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
             )}
           </div>
           <div className={`evidence-stage-tab-pane${stageView === 'markdown' ? ' is-active' : ''}`}>
+            {failedCaptionCount > 0 ? (
+              <div className="evidence-figure-pending-bar">
+                <span className="evidence-figure-pending-text">
+                  本篇有 {failedCaptionCount} 张图片未生成描述
+                </span>
+                <Button
+                  size="small"
+                  loading={recaptioning}
+                  onClick={() => void handleRegenerateCaptions()}
+                >
+                  重新生成整篇图注
+                </Button>
+              </div>
+            ) : null}
             <SignalBodyMarkdown
               ref={markdownArticleRef}
               markdown={markdownSource || signal.title}

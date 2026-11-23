@@ -472,8 +472,24 @@ async def _caption_once(
             latency_ms=latency_ms,
         )
     )
-    caption = (getattr(result, "output", "") or "").strip().replace("\n", " ")[:300]
-    return caption, served or model
+    caption = (getattr(result, "output", "") or "").strip().replace("\n", " ")
+    # A caption is a note under one image, not prose. Cut at a sentence end so a
+    # runaway model response cannot paste article text into the figure caption.
+    return _clip_caption(caption), served or model
+
+
+def _clip_caption(text: str, limit: int = 180) -> str:
+    """Trim a vision caption to a single short sentence-level note."""
+    cleaned = re.sub(r"\s+", " ", text or "").strip()
+    if not cleaned:
+        return ""
+    if len(cleaned) <= limit:
+        return cleaned
+    window = cleaned[: limit + 40]
+    stop = max(window.rfind("。"), window.rfind("；"), window.rfind(". "))
+    if stop >= 40:
+        return window[: stop + 1].strip()
+    return cleaned[:limit].rstrip("，,、 ") + "…"
 
 
 def apply_captions(markdown: str, figures: list[Figure]) -> str:

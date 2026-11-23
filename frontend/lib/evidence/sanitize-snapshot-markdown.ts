@@ -10,6 +10,21 @@ export function isFailedFigureCaption(text: string): boolean {
   return FAILED_FIGURE_CAPTION_MARKERS.some((marker) => text.includes(marker))
 }
 
+/** Count figure captions in a stored body that still have no description. */
+export function countFailedFigureCaptions(markdown: string): { total: number; failed: number } {
+  const lines = markdown.split('\n')
+  let total = 0
+  let failed = 0
+  for (const line of lines) {
+    const match = /^>\s*图\s*(\d+)\s*[：:]\s*(.*)$/.exec(line.trim())
+    if (!match) continue
+    total += 1
+    const caption = (match[2] ?? '').trim()
+    if (!caption || isFailedFigureCaption(caption)) failed += 1
+  }
+  return { total, failed }
+}
+
 const TABLE_LINE = /^\s*\|.+\|\s*$/
 
 const FIGURE_LINK = /\[\s*图\s*(\d+)\s*[：:]\s*([^\]]+?)\s*\]\s*\([^)]+\)/g
@@ -228,13 +243,25 @@ function sanitizeSnapshotMarkdownPass(markdown: string): string {
   const out: string[] = []
   let index = 0
 
+  /** A blockquote continues across a bare newline, so figures need a blank line
+   *  on both sides — otherwise the caption swallows the rest of the article. */
+  const pushFigure = (line: string) => {
+    if (out.length > 0 && out[out.length - 1] !== '') out.push('')
+    out.push(line.trim())
+    out.push('')
+  }
+
   while (index < lines.length) {
     if (!isTableLine(lines[index]!)) {
       const line = lines[index]!
-      if (line.trim().startsWith('> 图 ')) {
-        out.push(line)
-      } else if (/^\s*图\s*\d+\s*[：:]/.test(line.trim()) && !line.trim().startsWith('>')) {
-        out.push(`> ${line.trim()}`)
+      const trimmed = line.trim()
+      if (!trimmed) {
+        // Keep paragraph breaks: dropping them merges prose into blockquotes.
+        if (out.length > 0 && out[out.length - 1] !== '') out.push('')
+      } else if (trimmed.startsWith('> 图 ')) {
+        pushFigure(trimmed)
+      } else if (/^\s*图\s*\d+\s*[：:]/.test(trimmed)) {
+        pushFigure(`> ${trimmed}`)
       } else {
         const cleaned = normalizeLoosePipeProse(line)
         if (cleaned) out.push(cleaned)

@@ -56,6 +56,12 @@ export type SignalFigureOut = {
   src: string
 }
 
+export type SignalRecaptionOut = {
+  figures: number
+  captioned: number
+  failed: number
+}
+
 export type DocumentIngestStatus = 'stored' | 'parsed' | 'failed' | 'skipped'
 
 export type DocumentRawOut = {
