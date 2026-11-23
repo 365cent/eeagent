@@ -38,6 +38,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from scripts._dev_env import ensure_object_dir, load_dotenv_file  # noqa: E402
+from scripts.repair_venv_metadata import repair_corrupt_wheel_metadata  # noqa: E402
 
 EXTERNAL_DB_MARKER = ROOT / ".pg" / "use-external-db"
 
@@ -360,6 +361,11 @@ def migrate_and_seed() -> None:
 
 if __name__ == "__main__":
     step("EEA backend bootstrap")
+    stale = repair_corrupt_wheel_metadata()
+    if stale:
+        step(f"removed corrupt venv metadata: {', '.join(stale)}")
+        step("re-syncing locked dependencies...")
+        run(["uv", "sync", "--locked"], cwd=ROOT)
     if sys.platform == "win32":
         download()
         initdb()

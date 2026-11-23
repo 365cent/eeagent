@@ -21,8 +21,10 @@ FastAPI + PostgreSQL 后端，实现《平台实施计划》第 3–8 节的推�
 
 ```bash
 uv sync --locked
-uv run python scripts/bootstrap.py   # 首次 / 重复安全
+uv sync --locked                       # 拉代码后或见 uv/onnxruntime 告警时
+uv run python scripts/bootstrap.py   # 首次 / 重复安全（会清理损坏的 wheel 元数据）
 uv run python scripts/dev.py         # 前台 API + worker；Ctrl+C 结束
+# Windows 日常可跳过每次 uv sync：.venv\Scripts\python scripts\dev.py
 # uv run python scripts/start_api.py  # 后台 API → .pg/api.log
 # uv run python scripts/stop_api.py
 ```

@@ -79,6 +79,11 @@ markers = [
     "db: integration test using eea_test (default)",
 ]
 
+[tool.uv]
+# Windows dev venv often lives on a different drive than the uv cache; copy avoids
+# hardlink warnings and broken partial installs when hardlinks are unsupported.
+link-mode = "copy"
+
 [[tool.uv.index]]
 url = "https://pypi.tuna.tsinghua.edu.cn/simple"
 default = true
