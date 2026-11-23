@@ -386,7 +386,7 @@ async def caption_figure(figure: Figure, *, model: str, retries: int = 0) -> str
     if not base or not models:
         return ""
     attempts = max(retries + 1, len(models))
-    delay_base = float(getattr(settings, "vision_retry_base_delay_seconds", 0.8))
+    delay_base = float(getattr(settings, "vision_retry_base_delay_seconds", 1.5))
     for attempt in range(attempts):
         if attempt:
             # gateway rate-limits long batches; short jittered beat, in model order

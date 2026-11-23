@@ -62,7 +62,7 @@ _TRANSIENT_MARKERS = (
 )
 
 #: A candidate may spend this long streaming reasoning before it must answer.
-ANSWER_PEEK_SECONDS = 2.5
+ANSWER_PEEK_SECONDS = 6.0
 #: ... and at most this many events (one per reasoning token) in that window.
 MAX_PEEK_EVENTS = 16
 
@@ -343,8 +343,8 @@ class HedgedChatModel(Model):
         self,
         models: list[Model],
         *,
-        hedge_delay: float = 2.0,
-        total_timeout: float = 15.0,
+        hedge_delay: float = 4.0,
+        total_timeout: float = 90.0,
         max_parallel: int = 4,
         retries: int = 0,
         on_winner: Callable[[str], Awaitable[None]] | None = None,

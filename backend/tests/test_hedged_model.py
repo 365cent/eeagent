@@ -171,8 +171,8 @@ async def test_hedged_stream_uses_first_token_winner_and_closes_losers():
 
 async def test_hedged_defaults_follow_the_gateway_tuning():
     model = HedgedChatModel([_text_model("only", 0.01)])
-    assert model.hedge_delay == 2.0
-    assert model.total_timeout == 15.0
+    assert model.hedge_delay == 4.0
+    assert model.total_timeout == 90.0
     assert model.max_parallel == 4
 
 

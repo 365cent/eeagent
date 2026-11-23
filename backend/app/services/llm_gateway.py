@@ -584,7 +584,7 @@ async def chat_completion(
             [lambda index=index: attempt(index) for index in range(len(chain))],
             hedge_delay=float(getattr(settings, "chat_hedge_delay_seconds", 2.0)),
             total_timeout=float(
-                getattr(settings, "chat_request_total_timeout_seconds", 25.0)
+                getattr(settings, "chat_request_total_timeout_seconds", 180.0)
             ),
             max_parallel=min(max_parallel, max(1, len(chain))),
             retries=max(0, int(getattr(settings, "chat_model_retries", 0))),

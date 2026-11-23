@@ -66,7 +66,7 @@
 - 网关批量最多 16、限制并发、超时和退避；校验空响应、索引、向量维度和有限数值。无配置时返回不可用状态和降级理由。
 - 已交付独立语义网关与索引校验：chat、embedding、rerank 分别读取 `CHAT_*`、`EMBEDDING_*`、`RERANK_*` 的 URL/key/model，旧 `LLM_*`/`MAAS_*` 已移除；实际网关 embedding 返回 4096 维，rerank 正常；embedding 按 `data[].index` 排序后返回。
 - 新增内容哈希+模型版本的 JSONB 向量缓存，numpy 余弦；词表/主题内容变化失效。直接声明所用依赖，不能依赖开发机偶然安装。
-- 视觉识别链（2026-11-19）：`VISION_MODEL` 严格按配置顺序重试（当前 3.8 → 3.6），重试间隔 `VISION_RETRY_BASE_DELAY_SECONDS`（默认 0.8s）可调；文档元数据记录实际应答的视觉模型；`scripts/probe_model_speed.py` 只读测量对话模型 TTFT/TPS。
+- 视觉识别链（2026-11-19）：`VISION_MODEL` 严格按配置顺序重试（当前 3.8 → 3.6），重试间隔默认 `config.py`（1.5s，内网慢网关）；文档元数据记录实际应答的视觉模型；`scripts/probe_model_speed.py` 只读测量对话模型 TTFT/TPS。
 - 阈值可配置，0.85 仅作旧方案初始实验值，生产阈值由黄金集确认。保留能力边界，不新增向量服务或 pgvector。
 - 入库、建议、auto-tag 共用同一服务。POST /signals/{id}/auto-tag 返回三维建议、分数/理由；已人工确认字段默认不写。
 - TagSuggestion 保留 suggested_tags/source，新增逐候选 details，含词频、相似度、精排分与证据；前端旧字段继续可用。
@@ -214,7 +214,7 @@
 - 2026-11-20 W2：真实网关一轮回答成功（served_model 回传，一次 504 如实记为 turn.failed）；引用可核验、伪造引用被拒；记忆按用户隔离并可删除；变更单重复确认 409 且审计仅 1 条、过期 409、拒绝不写入、已人工确认字段 409 保护。
 
 - [~] P1 · 后端工作流与验收测试已落地（`POST /api/v1/agent/*`、SSE、变更单、记忆）；FE-11 与网关真机签字仍开放 · 依赖 BE-03/04/12/13。
-- 聊天韧性（2026-11-19，网关调速）：HedgedChatModel 首 token 竞速默认 2s 窗口、最多 4 路并行；`CHAT_MODEL` 为空时按网关对话候选与实测 TPS 排序，尝试上限 `max(CHAT_ATTEMPT_BUDGET_FLOOR=30, 候选数)`，同一模型连续尝试 ≤2 次；TPS 为进程内 Pydantic 榜单（EWMA α=0.4、TTL 1200s，失败/空响应只降级不记速度），`GET /llm/status` 暴露榜单、预算与并发参数；非流式入口 25s 墙钟、`_chat_sem=6`；turn.progress 每 5s 心跳；message.completed 与 POST 返回 served_model，FE-11 在完成后显示实际服务模型。
+- 聊天韧性（2026-11-19，网关调速）：HedgedChatModel 首 token 竞速默认 4s 对冲、最多 4 路并行、TTFT 90s；`CHAT_MODEL` 为空时按网关对话候选与实测 TPS 排序，尝试上限 `max(CHAT_ATTEMPT_BUDGET_FLOOR=30, 候选数)`，同一模型连续尝试 ≤2 次；TPS 为进程内 Pydantic 榜单（EWMA α=0.4、TTL 1800s，失败/空响应只降级不记速度），`GET /llm/status` 暴露榜单、预算与并发参数；非流式入口 180s 墙钟、`_chat_sem=6`；turn.progress 每 5s 心跳；message.completed 与 POST 返回 served_model，FE-11 在完成后显示实际服务模型。
 - 网关实测（2026-11-19，企业内网）：`scripts/probe_model_speed.py` 测得 glm-5.3-o-anthropic 32.3 TPS / TTFT 0.58s，desaysv-anthropic 11.8、desaysv 10.8；Qwen3.6-35B 与 deepseek-v4.1-flash-1017 返回空内容（降级不记速度），d3-mini/fasth3 为 404 model_not_found、jev-27b-vl 503；浏览器实战单轮 14.9s 完成，回复脚注显示 `glm-5.3-w4a8-o`，`GET /llm/status` 返回 attempt_budget=30、hedge 2s/4。验收：52 项模型相关测试通过（榜单/预算/竞速/状态/用量）。
 - 流式文本（2026-11-19）：`run_agent_turn` 消费 pydantic-ai 2.x 交给 `event_stream_handler` 的事件流（异步可迭代，而不是单事件），把推理模型 `ThinkingPart` 增量转发为 `thinking.delta`、函数工具调用转发为 `tool.call`；最终答案仍由 `stream_output` 的部分校验增量给出 `text.delta`，校验回退重写时用 `text.replace` 校正。token 增量与心跳不落 `agent_events`（最终消息已单独存库），重连重放只保留工具、引用和审批事件。
 - 来源：实施计划 §7.2 REQ-AGT-01…06；WBS 1.3.10。

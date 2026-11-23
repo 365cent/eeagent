@@ -84,22 +84,20 @@ class Settings(BaseSettings):
     # cannot wedgie the capture worker when the gateway is slow or unreachable.
     doc_ingest_vision_timeout_seconds: float = Field(default=120.0, gt=0)
     agent_patch_ttl_hours: int = Field(default=24, ge=1, le=168)
-    # Hedged chat calls: start the next gateway model after this delay while the
-    # first is still running, then use whichever answers first.
-    chat_hedge_delay_seconds: float = Field(default=2.0, ge=0.2, le=60.0)
+    # Hedged chat: defaults assume a slow, queue-heavy intranet model farm (long
+    # TTFT tail). Hedge near p95, not median, to avoid doubling load. Override
+    # via env only when ops has measured different percentiles for your gateway.
+    chat_hedge_delay_seconds: float = Field(default=4.0, ge=0.2, le=60.0)
     chat_hedge_max_models: int = Field(default=4, ge=1, le=8)
-    # First-token ceiling for the streaming agent; the winner then streams alone.
-    chat_first_token_timeout_seconds: float = Field(default=15.0, ge=3.0, le=120.0)
-    # Reasoning-only models must show answer text within this window or lose.
-    chat_answer_peek_seconds: float = Field(default=2.5, ge=0.5, le=30.0)
-    # Wall clock for one non-streaming chat completion (studio/draft calls).
-    chat_request_total_timeout_seconds: float = Field(default=25.0, ge=5.0, le=300.0)
-    # Hard ceiling on first-token attempts for one user request.
+    # First-token race for streaming agent; big reasoning models may cold-start.
+    chat_first_token_timeout_seconds: float = Field(default=90.0, ge=3.0, le=300.0)
+    # Reasoning-only ids must surface answer text within this peek or lose the race.
+    chat_answer_peek_seconds: float = Field(default=6.0, ge=0.5, le=60.0)
+    # One non-streaming completion (studio, drafts); studio mindmaps often >60s.
+    chat_request_total_timeout_seconds: float = Field(default=180.0, ge=5.0, le=600.0)
     chat_attempt_budget_floor: int = Field(default=30, ge=1, le=200)
-    # Measured TPS samples older than this fall back to the gateway order.
-    chat_model_speed_ttl_seconds: float = Field(default=1200.0, ge=60.0, le=86400.0)
-    # Vision retries keep the configured order; only the paced delay is tunable.
-    vision_retry_base_delay_seconds: float = Field(default=0.8, ge=0.1, le=10.0)
+    chat_model_speed_ttl_seconds: float = Field(default=1800.0, ge=60.0, le=86400.0)
+    vision_retry_base_delay_seconds: float = Field(default=1.5, ge=0.1, le=30.0)
     # Extra attempts per chat model after a transient failure (429/5xx/timeout),
     # still bounded by CHAT_REQUEST_TOTAL_TIMEOUT_SECONDS. 0 = one attempt each.
     chat_model_retries: int = Field(default=2, ge=0, le=5)

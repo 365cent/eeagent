@@ -36,8 +36,9 @@ uv run python scripts/dev.py         # 前台 API + worker；Ctrl+C 结束
 
 文档摄取相关：
 - `CHAT_MODEL` 可留空：按网关 `/models` 的对话候选竞速，尝试次数为 `max(CHAT_ATTEMPT_BUDGET_FLOOR, 候选数)`（默认 30）；每个模型的首 token 与 TPS 在进程内实测并排序（`GET /api/v1/llm/status` 可见），不写回 `.env`，重启后重新采样。显式填写时按你给的顺序重试，不改顺序、不额外发现模型
-- `CHAT_HEDGE_DELAY_SECONDS`（默认 2）/ `CHAT_HEDGE_MAX_MODELS`（默认 4）/ `CHAT_FIRST_TOKEN_TIMEOUT_SECONDS`（默认 15）：首 token 竞速窗口与并发上限；`CHAT_MODEL_RETRIES` 仍按单模型瞬时失败重试
-- `VISION_MODEL` 可留空（自动 Qwen 3.8 → 3.6）；填写后严格按该顺序重试，`VISION_RETRY_BASE_DELAY_SECONDS` 只调节重试间隔（默认 0.8s）
+- 聊天韧性参数（对冲、TTFT、工作室墙钟等）默认在 `app/core/config.py`，面向慢速内网大模型网关；仅需时用环境变量覆盖（见 `.env.example`）
+- `CHAT_HEDGE_DELAY_SECONDS`（默认 4s）/ `CHAT_HEDGE_MAX_MODELS`（默认 4）/ `CHAT_FIRST_TOKEN_TIMEOUT_SECONDS`（默认 90s）；`CHAT_REQUEST_TOTAL_TIMEOUT_SECONDS`（默认 180s，覆盖 studio 等非流式调用）
+- `VISION_MODEL` 可留空（自动 Qwen 3.8 → 3.6）；填写后严格按该顺序重试，`VISION_RETRY_BASE_DELAY_SECONDS` 默认 1.5s
 - 视觉识别记录实际应答的模型 id；`scripts/probe_model_speed.py` 可只读测量各对话模型的 TTFT/TPS
 - `DOC_RAW_UPLOAD_MAX_BYTES` / `DOC_INGEST_MAX_BYTES`：原始上传与 MarkItDown 解析上限，默认各 **120 MiB**（`125829120`）；超过解析上限只保留 blob（`ingest_status=skipped`）库端口等见 `app/core/config.py` 默认值（`DB_PORT`、`API_PORT`、`OBJECT_DIR`…）。
 
