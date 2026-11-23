@@ -85,7 +85,7 @@ export function DeductionChainWorkspace({ onNavigate, initialLandingPointId }: {
                 trace.completeness.unresolved_document_ids.length
                   ? `无法解析的文档引用：${trace.completeness.unresolved_document_ids.join('、')}`
                   : '',
-              ].filter(Boolean).join('；')}
+              ].filter(Boolean).join('；') || '服务端未给出缺失环节明细。'}
             />
           ) : (
             <Alert type="success" showIcon title="当前链路的结构化关联完整。来源文件与图片对象仍需按各自链接核验。" />
@@ -154,11 +154,40 @@ export function DeductionChainWorkspace({ onNavigate, initialLandingPointId }: {
                 </Col>
                 <Col xs={24} lg={12}>
                   <Text strong>反向验证记录</Text>
-                  <Paragraph style={{ whiteSpace: 'pre-wrap' }}>
-                    {trace.vehicle_function.reverse_trace
-                      ? JSON.stringify(trace.vehicle_function.reverse_trace, null, 2)
-                      : '未保存反向验证记录。'}
-                  </Paragraph>
+                  {(() => {
+                    const reverse = trace.vehicle_function?.reverse_trace
+                    if (!reverse) return <Paragraph type="secondary">未保存反向验证记录。</Paragraph>
+                    // Backend validates necessity/coverage/conclusion/full_coverage/
+                    // human_confirmed; an older record with another shape is shown as is.
+                    const keys = ['necessity', 'coverage', 'conclusion', 'full_coverage', 'human_confirmed', 'unresolved_contradictions']
+                    if (!keys.some((key) => key in reverse)) {
+                      return <Paragraph style={{ whiteSpace: 'pre-wrap' }}>{JSON.stringify(reverse, null, 2)}</Paragraph>
+                    }
+                    const coverage = (Array.isArray(reverse.coverage) ? reverse.coverage : []) as Array<{ need?: string; coverage?: string }>
+                    const contradictions = Array.isArray(reverse.unresolved_contradictions) ? reverse.unresolved_contradictions : []
+                    const verdict = reverse.conclusion === 'consistent'
+                    const covered = reverse.full_coverage === true
+                    const confirmed = reverse.human_confirmed === true
+                    return (
+                      <Space orientation="vertical" size={8} style={{ width: '100%', marginTop: 6 }}>
+                        <Space wrap size={4}>
+                          <Tag color={verdict ? 'green' : 'orange'}>正反一致：{verdict ? '一致' : String(reverse.conclusion ?? '未记录')}</Tag>
+                          <Tag color={covered ? 'green' : 'orange'}>诉求覆盖：{covered ? '全覆盖' : '未确认全覆盖'}</Tag>
+                          <Tag color={confirmed ? 'green' : 'orange'}>人工确认：{confirmed ? '已确认' : '未确认'}</Tag>
+                        </Space>
+                        {coverage.length ? coverage.map((row, index) => (
+                          <div key={index}>
+                            <Text>{row.need?.trim() || '未填写诉求'}</Text>
+                            <Paragraph type="secondary" style={{ margin: 0 }}>{row.coverage?.trim() || '未填写覆盖说明'}</Paragraph>
+                          </div>
+                        )) : <Text type="secondary">未逐项记录诉求覆盖。</Text>}
+                        <Paragraph type="secondary" style={{ margin: 0 }}>必要性：{String(reverse.necessity ?? '未填写')}</Paragraph>
+                        {contradictions.length ? (
+                          <Alert type="warning" showIcon title="仍有未解决的正反向矛盾" description={contradictions.map((item) => String(item)).join('；')} />
+                        ) : null}
+                      </Space>
+                    )
+                  })()}
                 </Col>
               </Row>
             ) : <Text type="secondary">该需求点尚未形成车辆功能。</Text>}
@@ -252,7 +281,7 @@ export function DeductionChainWorkspace({ onNavigate, initialLandingPointId }: {
                 {trace.assessment_versions.length ? (
                   <Timeline items={trace.assessment_versions.map((assessment) => ({
                     color: assessment.is_current ? 'green' : 'blue',
-                    children: (
+                    content: (
                       <Space orientation="vertical" size={4}>
                         <Space wrap>
                           <Text strong>v{assessment.version}</Text>
@@ -261,20 +290,30 @@ export function DeductionChainWorkspace({ onNavigate, initialLandingPointId }: {
                           <Text>总分 {assessment.score_total}/25</Text>
                         </Space>
                         <Text type="secondary">操作者：{assessment.operator_subject ?? '—'} · {formatApiDate(assessment.assessed_at)}</Text>
-                        <Paragraph type="secondary">{assessment.strategy_note ?? '未填写策略备注'}</Paragraph>
+                        <Paragraph type="secondary">{assessment.strategy_note?.trim() || '未填写策略备注'}</Paragraph>
                       </Space>
                     ),
                   }))} />
                 ) : <Text type="secondary">尚无已定稿战略版本。</Text>}
               </Col>
             </Row>
-            <Divider />
-            <Alert
-              type="info"
-              showIcon
-              title="依据更新状态：无法确认"
-              description="当前数据模型没有需求复核时间基线，系统不会推断信号或标签更新后是否需要重新复核。"
-            />
+            {(() => {
+              const meta = basisFreshnessMeta(trace.basis_freshness)
+              // Fresh needs no banner: the tag above already says so. Only surface
+              // the states that ask the reader to act.
+              if (meta.color === 'green') return null
+              return (
+                <>
+                  <Divider />
+                  <Alert
+                    type={meta.color === 'orange' ? 'warning' : 'info'}
+                    showIcon
+                    title={`依据更新状态：${meta.title}`}
+                    description={meta.description}
+                  />
+                </>
+              )
+            })()}
           </Card>
         </Space>
       ) : landingPointId ? (
