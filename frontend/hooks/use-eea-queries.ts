@@ -138,6 +138,9 @@ export function useVocabUsage(kind = 'tech_tag') {
   return useQuery({
     queryKey: [...eeaQueryKeys.vocabUsage, kind],
     queryFn: () => fetchVocabUsage(kind),
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
   })
 }
 
@@ -153,7 +156,9 @@ export function useSignalTagSuggestions(signalId: string) {
     queryKey: eeaQueryKeys.tagSuggestions(signalId),
     queryFn: () => fetchSignalTagSuggestions(signalId),
     enabled: Boolean(signalId),
-    staleTime: 120_000,
+    staleTime: 0,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
     retry: 1,
   })
 }

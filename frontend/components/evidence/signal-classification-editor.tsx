@@ -125,7 +125,12 @@ export function SignalClassificationEditor({
           模型建议（需人工明确采用）
           {suggestionsQuery.data?.source ? ` · ${suggestionSourceLabel(suggestionsQuery.data.source)}` : ''}
         </Text>
-        {suggestionsQuery.data?.degraded_reason ? (
+        {suggestionsQuery.isFetching && !suggestionsQuery.isLoading ? (
+          <Text type="secondary" style={{ display: 'block' }}>
+            正在检查模型与环节/类型建议…
+          </Text>
+        ) : null}
+        {suggestionsQuery.data?.degraded_reason && !suggestionsQuery.isFetching ? (
           <Text type="secondary" style={{ display: 'block' }}>
             {suggestionsQuery.data.degraded_reason}
           </Text>

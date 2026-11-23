@@ -154,7 +154,12 @@ export function SignalTagsEditor({ signalId, tags, updatedAt }: SignalTagsEditor
           {suggestionsQuery.data?.source ? ` · ${suggestionSourceLabel(suggestionsQuery.data.source)}` : ''}
           {suggestionsQuery.data ? ` · ${scoreHint(suggestionsQuery.data)}` : ''}
         </Text>
-        {suggestionsQuery.data?.degraded_reason ? (
+        {suggestionsQuery.isFetching && !suggestionsQuery.isLoading ? (
+          <Text type="secondary" style={{ display: 'block' }}>
+            正在检查模型与标签建议…
+          </Text>
+        ) : null}
+        {suggestionsQuery.data?.degraded_reason && !suggestionsQuery.isFetching ? (
           <Text type="warning" style={{ display: 'block' }}>
             {suggestionsQuery.data.degraded_reason}
           </Text>

@@ -222,3 +222,37 @@ async def test_endpoint_uses_llm_when_available(client, monkeypatch):
     assert payload["source"] == "llm-rerank-refine"
     assert payload["protected_fields"] == []
     assert payload["degraded_reason"] is None
+
+
+async def test_endpoint_embedding_rerank_llm_structured_only(client, monkeypatch):
+    """Rerank tags stand when LLM pick fails; structured LLM still fills stage/type."""
+    import app.api.v1.signals as signals_api
+
+    async def good_structured(title, body):
+        return LLMTagSuggestion(
+            value_chain_stage_code="delivery_oem", signal_type_code="technology", tech_tags=[]
+        )
+
+    async def rerank_only(*_a, **_k):
+        return ["eFuse", "域控制器"], "embedding-rerank", 0.71
+
+    monkeypatch.setattr(signals_api, "suggest_tags_with_llm", good_structured)
+    monkeypatch.setattr(signals_api, "suggest_tech_tags", rerank_only)
+    resp = await client.post(
+        "/api/v1/signals",
+        json={
+            "title": "eFuse 信号",
+            "url": "https://example.com/efuse3",
+            "channel_code": "web",
+            "body_text": "eFuse 智能配电。",
+        },
+    )
+    assert resp.status_code == 201, resp.text
+    sid = resp.json()["id"]
+    payload = (await client.get(f"/api/v1/signals/{sid}/tag-suggestions")).json()
+    assert payload["source"] == "embedding-rerank"
+    assert payload["value_chain_stage_code"] == "delivery_oem"
+    assert payload["signal_type_code"] == "technology"
+    assert payload["degraded_reason"] == (
+        "标签精选暂不可用，已保留语义精排候选；环节与类型已由对话模型建议。"
+    )

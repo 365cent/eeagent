@@ -1032,10 +1032,13 @@ async def tag_suggestions(
             degraded_reason = "RERANK 未配置，语义精排不可用；对话模型暂不可用，已使用词频建议。"
         elif chat_ready:
             degraded_reason = "对话模型或语义精排暂不可用，已使用词频建议。可运行 scripts/probe_model_gateways.py 排查。"
-    elif tag_source == "embedding-rerank" and chat_cred:
-        degraded_reason = "对话模型暂不可用；标签已语义精排，环节与类型见规则或单独 LLM。"
     elif tag_source == "embedding-rerank":
-        degraded_reason = "对话模型未配置；标签已语义精排。"
+        if not chat_cred:
+            degraded_reason = "对话模型未配置；标签已语义精排。"
+        elif llm is None:
+            degraded_reason = "对话模型暂不可用；标签已语义精排，环节与类型见规则或单独 LLM。"
+        else:
+            degraded_reason = "标签精选暂不可用，已保留语义精排候选；环节与类型已由对话模型建议。"
     elif chat_cred and tag_source != "llm-rerank-refine":
         degraded_reason = "标签精选模型暂不可用，已使用精排/词频结果。"
     elif not chat_ready and not semantic_api.semantic_configured():
