@@ -19,7 +19,6 @@ Figure order for evidence/captions remains this module's rel walk, not preview z
 from __future__ import annotations
 
 import asyncio
-import base64
 import hashlib
 import io
 import os
@@ -32,19 +31,22 @@ import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import httpx
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings, model_chain
-from app.platform.http import open_async_http_client
+from app.services.caption_cache import load_caption, store_caption
 from app.services.llm_gateway import resolve_vision_model
 from app.services.llm_prompts import VISION_CAPTION_PROMPT as _CAPTION_PROMPT
-from app.services.llm_usage import log_llm_call, usage_from_chat_payload
+from app.services.llm_usage import (
+    http_status_of,
+    log_llm_call,
+    usage_from_agent_result,
+    usage_without_result,
+)
 from app.services.doc_structure import assign_figure_locations
 
 MAX_FIGURES = 8  # default only; runtime cap comes from settings.max_figures
 MAX_FIGURE_BYTES = 4 * 1024 * 1024
-VISION_TIMEOUT = 60.0
 
 _IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".gif", ".bmp", ".tif", ".tiff"}
 _EXT_MIME = {
@@ -385,6 +387,11 @@ async def caption_figure(figure: Figure, *, model: str, retries: int = 0) -> str
     models = model_chain(model)
     if not base or not models:
         return ""
+    for candidate in models:
+        cached = load_caption(figure.data, candidate)
+        if cached is not None:
+            figure.caption_model = cached.served_model or candidate
+            return cached.caption
     attempts = max(retries + 1, len(models))
     delay_base = float(getattr(settings, "vision_retry_base_delay_seconds", 1.5))
     for attempt in range(attempts):
@@ -397,104 +404,76 @@ async def caption_figure(figure: Figure, *, model: str, retries: int = 0) -> str
         )
         if caption:
             figure.caption_model = served or current
+            store_caption(figure.data, current, caption, served_model=served)
             return caption
     return ""
+
+
+_CAPTION_CACHE_SETTING = {"messages": False}
+
+
+def _caption_agent(model: str, settings) -> "Agent[None, str]":
+    """Pydantic AI agent for one vision caption.
+
+    The static instruction block stays first so a provider can cache the prompt
+    prefix. Each figure is a one-off conversation, so the conversation itself is
+    not written to the prompt cache (it is never read back).
+    """
+    from pydantic_ai import Agent
+    from pydantic_ai.models.openai import OpenAIChatModel
+
+    from app.platform.llm import gateway_openai_provider
+
+    return Agent(
+        OpenAIChatModel(model, provider=gateway_openai_provider(settings)),
+        output_type=str,
+        system_prompt=_CAPTION_PROMPT,
+        model_settings={
+            "temperature": 0,
+            "max_tokens": int(getattr(settings, "vision_caption_max_tokens", 1024)),
+            "cache": dict(_CAPTION_CACHE_SETTING),
+        },
+    )
 
 
 async def _caption_once(
     figure: Figure, *, model: str, settings, base: str, attempt: int = 1
 ) -> tuple[str, str]:
-    """One vision attempt: returns (caption, model that answered)."""
-    encoded = base64.b64encode(figure.data).decode("ascii")
-    payload = {
-        "model": model,
-        # Reasoning-only ids (Qwen3.6-35B) spend the whole budget on reasoning
-        # and return finish_reason=length with empty content at 128 tokens, so
-        # the ceiling must leave room for the caption itself.
-        "max_tokens": int(getattr(settings, "vision_caption_max_tokens", 1024)),
-        "temperature": 0,
-        "messages": [
-            {
-                "role": "user",
-                "content": [
-                    {"type": "text", "text": _CAPTION_PROMPT},
-                    {
-                        "type": "image_url",
-                        "image_url": {"url": f"data:{figure.mime};base64,{encoded}"},
-                    },
-                ],
-            }
-        ],
-    }
-    headers = {"Content-Type": "application/json"}
-    if settings.chat_api_key_value:
-        headers["Authorization"] = f"Bearer {settings.chat_api_key_value}"
+    """One vision attempt through Pydantic AI; returns (caption, served model)."""
+    from pydantic_ai import BinaryContent
+
     started = time.perf_counter()
     try:
-        async with open_async_http_client(timeout=VISION_TIMEOUT) as client:
-            response = await client.post(
-                f"{base}/chat/completions", headers=headers, json=payload
-            )
-    except httpx.HTTPError:
+        result = await _caption_agent(model, settings).run(
+            [BinaryContent(data=figure.data, media_type=figure.mime or "image/png")]
+        )
+    except Exception as exc:  # noqa: BLE001 - unknown ids fall through the chain
         log_llm_call(
-            usage_from_chat_payload(
-                None,
+            usage_without_result(
                 task="vision_caption",
                 requested_model=model,
-                served_model="",
-                model_attempt=1,
+                latency_ms=int((time.perf_counter() - started) * 1000),
                 caller_attempt=attempt,
                 fallback=attempt > 1,
-                latency_ms=int((time.perf_counter() - started) * 1000),
-                model_requests=None,
+                http_status=http_status_of(exc),
             )
         )
         return "", ""
     latency_ms = int((time.perf_counter() - started) * 1000)
-    data: object = None
-    try:
-        data = response.json()
-    except ValueError:
-        data = None
-    usage = data.get("usage") if isinstance(data, dict) and isinstance(data.get("usage"), dict) else None
-    served = ""
-    if isinstance(data, dict) and isinstance(data.get("model"), str):
-        served = data["model"]
-    if response.status_code >= 400:
-        log_llm_call(
-            usage_from_chat_payload(
-                usage,
-                task="vision_caption",
-                requested_model=model,
-                served_model=served or model,
-                model_attempt=1,
-                caller_attempt=attempt,
-                fallback=attempt > 1,
-                latency_ms=latency_ms,
-                http_status=response.status_code,
-                model_requests=1 if usage else None,
-            )
-        )
-        return "", served or model
+    response = getattr(result, "response", None)
+    served = str(getattr(response, "model_name", None) or "")
     log_llm_call(
-        usage_from_chat_payload(
-            usage,
+        usage_from_agent_result(
+            result,
             task="vision_caption",
             requested_model=model,
-            served_model=served or model,
-            model_attempt=1,
             caller_attempt=attempt,
             fallback=attempt > 1,
             latency_ms=latency_ms,
         )
     )
-    try:
-        content = data["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError):
-        return "", served or model
-    if not isinstance(content, str):
-        return "", served or model
-    return content.strip().replace("\n", " ")[:300], served or model
+    caption = (getattr(result, "output", "") or "").strip().replace("\n", " ")[:300]
+    return caption, served or model
 
 
 def apply_captions(markdown: str, figures: list[Figure]) -> str:

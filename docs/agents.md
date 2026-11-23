@@ -34,7 +34,7 @@
 | --- | --- | --- |
 | 通用 chat | `llm_gateway.py` ~272 | `temperature=0.3`, `max_tokens=1200` |
 | Studio | `signals.py` ~665 | `temperature=0.2`, `max_tokens=1600`, 最多 3 次模型尝试 |
-| Vision caption | `doc_ingest.py` ~367 | `temperature=0`, `max_tokens=128`, 每模型一次 + `VISION_CAPTION_RETRY` 轮换 |
+| Vision caption | `doc_ingest.py` `_caption_agent` | Pydantic AI `Agent(output_type=str)`; `temperature=0`, `max_tokens` from `VISION_CAPTION_MAX_TOKENS` (default 1024); stable system prompt with library prompt caching; 图像 sha256 + 模型 + `PROMPT_REVISION` 落盘缓存 |
 | Tags / excerpt | `llm.py` ~120 | Pydantic AI 8s 超时 |
 | Durable agent | `agent_workflow.py` ~45 | 无单独 reasoning/输出预算 |
 
@@ -95,10 +95,10 @@
 
 **当前：**
 
-```text
-用一句简体中文描述这张图的要点（不超过 60 字）。只描述可见内容，
-不要推测背景，不要输出 Markdown。
-```
+Prompt 正文见 `llm_prompts.VISION_CAPTION_PROMPT`（`PROMPT_REVISION` 随文本变化）。
+图像走 Pydantic AI `BinaryContent`，指令固定在 system prompt，便于缓存前缀；
+单图结果按 图像 sha256 + 请求模型 + `PROMPT_REVISION` 落盘到
+`OBJECT_DIR/caption-cache`，重复采集同一张图不再调用网关。
 
 **建议：**
 

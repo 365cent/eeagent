@@ -6,6 +6,9 @@ from contextlib import asynccontextmanager
 from app.core.bootstrap_env import bootstrap_environment
 
 bootstrap_environment()
+# Pydantic AI prints a startup banner on first Agent use; captions and tags
+# would otherwise add it to API logs.
+os.environ.setdefault("PYDANTIC_AI_NO_BANNER", "1")
 
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())

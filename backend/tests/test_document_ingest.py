@@ -671,3 +671,78 @@ def test_real_efuse_word_has_seven_images_and_eight_insertions():
     assert len(figures) == 7
     assert sum(figure.occurrence_count for figure in figures) == 8
     assert max(figure.occurrence_count for figure in figures) == 2
+
+async def test_caption_figure_serves_the_second_call_from_cache(tmp_path, monkeypatch):
+    """Duplicate captures of the same image must not call the gateway twice."""
+    from app.services import caption_cache
+
+    monkeypatch.setattr(caption_cache, "cache_root", lambda directory=None: tmp_path)
+    settings = doc_ingest.get_settings().model_copy(update={"chat_base_url": "https://example.test"})
+    monkeypatch.setattr(doc_ingest, "get_settings", lambda: settings)
+    calls = {"n": 0}
+
+    async def fake_once(figure, *, model, settings, base, attempt=1):
+        calls["n"] += 1
+        return "cached caption", model
+
+    monkeypatch.setattr(doc_ingest, "_caption_once", fake_once)
+    data = b"PNG" + b"q" * 50
+    first = doc_ingest.Figure(index=1, source="a.png", mime="image/png", data=data)
+    second = doc_ingest.Figure(index=1, source="a.png", mime="image/png", data=data)
+    assert await doc_ingest.caption_figure(first, model="qwen-a", retries=0) == "cached caption"
+    assert await doc_ingest.caption_figure(second, model="qwen-a", retries=0) == "cached caption"
+    assert calls["n"] == 1
+    assert second.caption_model == "qwen-a"
+
+
+async def test_caption_once_sends_the_image_through_pydantic_ai(monkeypatch):
+    from types import SimpleNamespace
+
+    from pydantic_ai import BinaryContent
+    from pydantic_ai.usage import RunUsage
+
+    seen: dict[str, object] = {}
+
+    class StubAgent:
+        async def run(self, content):
+            seen["content"] = content
+            return SimpleNamespace(
+                output="line one\nline two",
+                response=SimpleNamespace(model_name="qwen-served"),
+                usage=RunUsage(),
+                new_messages=lambda: [],
+            )
+
+    monkeypatch.setattr(doc_ingest, "_caption_agent", lambda model, settings: StubAgent())
+    figure = doc_ingest.Figure(index=2, source="b.png", mime="image/jpeg", data=b"jpegbytes")
+    caption, served = await doc_ingest._caption_once(
+        figure,
+        model="Qwen3.8-27B",
+        settings=doc_ingest.get_settings(),
+        base="https://example.test",
+        attempt=2,
+    )
+    assert caption == "line one line two"
+    assert served == "qwen-served"
+    part = seen["content"][0]
+    assert isinstance(part, BinaryContent)
+    assert part.data == b"jpegbytes"
+    assert part.media_type == "image/jpeg"
+
+
+async def test_caption_once_returns_empty_when_the_gateway_rejects_the_id(monkeypatch):
+    class FailingAgent:
+        async def run(self, content):
+            del content
+            raise RuntimeError("model_not_found")
+
+    monkeypatch.setattr(doc_ingest, "_caption_agent", lambda model, settings: FailingAgent())
+    figure = doc_ingest.Figure(index=3, source="c.png", mime="image/png", data=b"bytes")
+    caption, served = await doc_ingest._caption_once(
+        figure,
+        model="missing-model",
+        settings=doc_ingest.get_settings(),
+        base="https://example.test",
+    )
+    assert caption == ""
+    assert served == ""

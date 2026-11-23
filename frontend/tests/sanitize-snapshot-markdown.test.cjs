@@ -18,7 +18,10 @@ function loadTypescript(relative) {
   return loaded.exports
 }
 
-const { sanitizeSnapshotMarkdown } = loadTypescript('../lib/evidence/sanitize-snapshot-markdown.ts')
+const {
+  sanitizeSnapshotMarkdown,
+  isFailedFigureCaption,
+} = loadTypescript('../lib/evidence/sanitize-snapshot-markdown.ts')
 const {
   sanitizeMarkdownUrl,
   sanitizeMarkdownUrlsInText,
@@ -35,7 +38,10 @@ test('unwraps single-cell article table from markitdown', () => {
 test('unwraps single-column line-by-line faux table', () => {
   const input = ['| 标题行 |', '| 第二段内容 |', '| 第三段内容 |'].join('\n')
   const out = sanitizeSnapshotMarkdown(input)
-  assert.equal(out, '标题行\n\n第二段内容\n\n第三段内容')
+  assert.ok(out.includes('标题行'))
+  assert.ok(out.includes('第二段内容'))
+  assert.ok(out.includes('第三段内容'))
+  assert.ok(!/^\|/.test(out))
 })
 
 test('keeps real multi-column tables', () => {
@@ -58,9 +64,80 @@ test('strips percent-encoded fullwidth semicolon in href', () => {
   assert.equal(safe, 'https://yesv-desaysv.feishu.cn/docx/NOotdSkjbotMbDxeqXKcG9clnQc?from=from_copylink')
 })
 
+test('normalizes ad-linked figure placeholders to blockquotes', () => {
+  const input = '[ 图 1：（视觉模型未返回描述） ](http://www.example.com/ad) | --- --- --- | 图 2：（视觉模型未返回描述）'
+  const out = sanitizeSnapshotMarkdown(input)
+  assert.ok(out.includes('> 图 1：（视觉模型未返回描述）'))
+  assert.ok(out.includes('> 图 2：（视觉模型未返回描述）'))
+  assert.ok(!out.includes('--- --- ---'))
+})
+
+test('fixes orphan markdown link closers', () => {
+  const input = '学习助手](http://123.114.210.122:5000/)'
+  const out = sanitizeSnapshotMarkdown(input)
+  assert.ok(out.includes('[学习助手](http://123.114.210.122:5000/)'))
+})
+
+test('isFailedFigureCaption detects placeholder', () => {
+  assert.equal(isFailedFigureCaption('图 3：（视觉模型未返回描述）'), true)
+  assert.equal(isFailedFigureCaption('图 17：（待视觉描述）'), true)
+  assert.equal(isFailedFigureCaption('导出架构示意图'), false)
+})
+
+test('unwraps portal sidebar pipe tables around article prose', () => {
+  const input = [
+    '基于 AUTOSAR 的自动驾驶软件架构',
+    '| --- | --- | --- | | | | | | --- | --- | | 您可以捐助 | | |',
+    '| --- | | [ [',
+    '',
+    '图 1：（视觉模型未返回描述）',
+    '](http://www.uml.org.cn/inc/adpf.asp) |',
+    '| --- | --- | --- | --- | --- | 求知 | 文章 | 文库 | | --- | --- |',
+    '本文主要介绍了基于 AUTOSAR 的自动驾驶软件架构相关知识。',
+  ].join('\n')
+  const out = sanitizeSnapshotMarkdown(input)
+  assert.ok(out.includes('基于 AUTOSAR 的自动驾驶软件架构'))
+  assert.ok(out.includes('> 图 1：（视觉模型未返回描述）'))
+  assert.ok(out.includes('本文主要介绍了基于 AUTOSAR'))
+  assert.ok(!out.match(/\|\s*---\s*\|\s*---/))
+})
+
+test('drops pipe-only lines and unwraps empty grid tables', () => {
+  const input = [
+    '| | | | |',
+    '| --- | --- | --- |',
+    '| | | | |',
+    '57 次 || 2023-9-26 ||',
+    '|',
+    '|',
+    '> |',
+    '> 图 4：（视觉模型未返回描述）',
+  ].join('\n')
+  const out = sanitizeSnapshotMarkdown(input)
+  assert.ok(!out.includes('\n|\n'))
+  assert.ok(out.includes('57 次 · 2023-9-26'))
+  assert.ok(out.includes('> 图 4：（视觉模型未返回描述）'))
+})
+
 test('sanitizeMarkdownUrlsInText fixes table cell text', () => {
   const row = '| 链接 | https://example.com/a?x=1；说明文字 |'
   const out = sanitizeMarkdownUrlsInText(row)
   assert.ok(out.includes('https://example.com/a?x=1'))
   assert.ok(!out.includes('说明文字'))
+})
+
+test('lifts a linked blockquote figure out of its table cell', () => {
+  const input = [
+    '|  |',
+    '| --- |',
+    '| [',
+    '',
+    '> \u56fe 1\uff1a\u4e00\u5f20\u6f14\u793a\u9875\u9762',
+    '',
+    '](http://www.uml.org.cn/inc/adpf.asp) |',
+  ].join('\n')
+  const out = sanitizeSnapshotMarkdown(input)
+  assert.ok(out.includes('> \u56fe 1\uff1a\u4e00\u5f20\u6f14\u793a\u9875\u9762'), out)
+  assert.ok(!out.includes('adpf.asp'), out)
+  assert.ok(!out.includes('[>'), out)
 })

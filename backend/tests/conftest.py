@@ -187,6 +187,19 @@ def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config
             item.add_marker(pytest.mark.db)
 
 
+@pytest.fixture(autouse=True)
+def _clear_caption_cache():
+    """Vision captions are cached on disk; a test must not seed the next one."""
+    try:
+        from app.services.caption_cache import cache_root
+    except Exception:
+        yield
+        return
+    shutil.rmtree(cache_root(), ignore_errors=True)
+    yield
+    shutil.rmtree(cache_root(), ignore_errors=True)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def _prepared_test_db(request: pytest.FixtureRequest):
     """Create eea_test if absent, migrate it to head (repeat-safe), and hold

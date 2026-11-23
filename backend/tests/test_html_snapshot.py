@@ -353,3 +353,19 @@ def test_inlined_content_image_becomes_a_figure_quote_without_payload() -> None:
     assert payload[:40] not in snap.body_md
     assert len(snap.figures) == 1
     assert snap.figures[0].caption == "公示名单截图"
+
+
+def test_linked_content_image_drops_the_wrapping_link() -> None:
+    import base64
+
+    payload = base64.b64encode(b"\x89PNG\r\n" + b"x" * 2000).decode("ascii")
+    html = (
+        "<html><body><article><p>\u6b63\u6587\u6bb5\u843d</p>"
+        '<a href="http://ads.example/click">'
+        f'<img alt="\u56fe\u793a" src="data:image/png;base64,{payload}">'
+        "</a></article></body></html>"
+    )
+    snap = parse_html_snapshot(html)
+    assert "> \u56fe 1\uff1a\u56fe\u793a" in snap.body_md
+    assert "ads.example" not in snap.body_md
+    assert "[> \u56fe" not in snap.body_md

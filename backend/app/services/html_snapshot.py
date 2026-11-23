@@ -351,9 +351,14 @@ def _lift_content_images(container) -> list:
         figures.append(
             Figure(index=index, source=f"html-img-{index}", mime=mime, data=data, caption=alt)
         )
+        anchor = img.find_parent("a")
         token = container.new_tag("p")
         token.string = f"EEAFIG{index}"
         img.replace_with(token)
+        if anchor is not None:
+            # Ad or click wrappers around a figure turn the caption into link
+            # text and trap it inside a table cell. Keep any text, drop the link.
+            anchor.unwrap()
     return figures
 
 
