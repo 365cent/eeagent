@@ -7,10 +7,10 @@ import { fetchSignalStudio } from '@/lib/api/eea-api'
 import { eeaErrorMessage } from '@/lib/api/client'
 import type {
   StudioInfographicPayload,
-  StudioMindmapNode,
   StudioMindmapPayload,
 } from '@/lib/api/types'
 import { SignalBodyMarkdown } from '@/components/evidence/signal-body-markdown'
+import { StudioMindmap } from '@/components/evidence/studio-mindmap'
 import { PlatformEmptyState } from '@/components/shared/empty-state'
 
 const { Text, Title, Paragraph } = Typography
@@ -27,31 +27,10 @@ type EvidenceStudioPaneProps = {
   onInvalidate?: () => void
 }
 
-function MindmapTree({ node, depth = 0 }: { node: StudioMindmapNode; depth?: number }) {
-  const children = node.children ?? []
-  return (
-    <li className={`evidence-mindmap-node depth-${Math.min(depth, 3)}`}>
-      <span className="evidence-mindmap-label">{node.label}</span>
-      {children.length > 0 ? (
-        <ul className="evidence-mindmap-children">
-          {children.map((child, index) => (
-            <MindmapTree key={`${depth}-${index}-${child.label}`} node={child} depth={depth + 1} />
-          ))}
-        </ul>
-      ) : null}
-    </li>
-  )
-}
-
 function MindmapView({ data }: { data: StudioMindmapPayload }) {
   return (
     <div className="evidence-studio-mindmap">
-      <Title level={4}>{data.title}</Title>
-      <ul className="evidence-mindmap-root">
-        {data.children.map((child, index) => (
-          <MindmapTree key={`root-${index}-${child.label}`} node={child} depth={0} />
-        ))}
-      </ul>
+      <StudioMindmap data={data} />
     </div>
   )
 }
@@ -169,7 +148,7 @@ export function EvidenceStudioPane({
             <Alert
               type="warning"
               showIcon
-              message="本次生成失败"
+              title="本次生成失败"
               description={error}
               action={
                 <Button size="small" icon={<ReloadOutlined />} loading={loading} onClick={handleRegenerate}>
