@@ -2,6 +2,7 @@ package importdrain
 
 import (
 	"context"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -15,7 +16,19 @@ import (
 	"eea/capture/internal/platform"
 )
 
-const WorkerID = "capture-client"
+// WorkerID identifies this client instance. A unique value per process keeps
+// the server-side claim quota per instance instead of shared by every client.
+var WorkerID = newWorkerID()
+
+func newWorkerID() string {
+	host, err := os.Hostname()
+	if err != nil || host == "" {
+		host = "capture-client"
+	}
+	var suffix [4]byte
+	_, _ = rand.Read(suffix[:])
+	return fmt.Sprintf("%s:%d:%x", host, os.Getpid(), suffix)
+}
 
 // jobCaptureTimeout bounds one page capture so a single hanging site cannot
 // stall the rest of the server queue. Timeouts are recorded as failures

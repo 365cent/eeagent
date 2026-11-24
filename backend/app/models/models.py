@@ -258,11 +258,12 @@ class CaptureClientClaim(Base):
 
     __tablename__ = "eea_capture_client_claim"
     __table_args__ = (
-        Index("eea_capture_client_claim_window_idx", "client_subject", "claimed_at"),
+        Index("eea_capture_client_claim_worker_idx", "client_worker_id", "claimed_at"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     client_subject: Mapped[str] = mapped_column(Text, nullable=False)
+    client_worker_id: Mapped[str | None] = mapped_column(Text)
     job_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("eea_capture_job.id", ondelete="CASCADE"), nullable=False
     )

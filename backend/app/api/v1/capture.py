@@ -451,13 +451,14 @@ async def claim_capture_job_for_client(
 
             await on_import_capture_job_closed(batch_id)
         raise HTTPException(429, "capture job exceeded the client claim limit")
+    client_key = worker_id[:120]
     cutoff = now - timedelta(seconds=settings.capture_client_claim_window_seconds)
     await db.execute(
-        select(func.pg_advisory_xact_lock(func.hashtextextended(f"capture-client:{actor.subject}", 0)))
+        select(func.pg_advisory_xact_lock(func.hashtextextended(f"capture-client:{client_key}", 0)))
     )
     await db.execute(
         delete(CaptureClientClaim).where(
-            CaptureClientClaim.client_subject == actor.subject,
+            CaptureClientClaim.client_worker_id == client_key,
             CaptureClientClaim.claimed_at < cutoff,
         )
     )
@@ -466,7 +467,7 @@ async def claim_capture_job_for_client(
             select(func.count())
             .select_from(CaptureClientClaim)
             .where(
-                CaptureClientClaim.client_subject == actor.subject,
+                CaptureClientClaim.client_worker_id == client_key,
                 CaptureClientClaim.claimed_at >= cutoff,
             )
         )
@@ -478,7 +479,12 @@ async def claim_capture_job_for_client(
             headers={"Retry-After": str(settings.capture_client_claim_window_seconds)},
         )
     db.add(
-        CaptureClientClaim(client_subject=actor.subject, job_id=job.id, claimed_at=now)
+        CaptureClientClaim(
+            client_subject=actor.subject,
+            client_worker_id=client_key,
+            job_id=job.id,
+            claimed_at=now,
+        )
     )
     job.client_claim_count += 1
     job.status = "running"
