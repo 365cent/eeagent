@@ -33,8 +33,13 @@ func extensionIDFromManifest(extRoot string) string {
 	return ""
 }
 
+// extensionLoadWait covers a cold Edge start on a loaded machine; 20s proved
+// too tight on Windows and produced false failures before the service worker
+// registered.
+const extensionLoadWait = 45 * time.Second
+
 func (b *Browser) waitForSingleFileExtension(ctx context.Context) (string, error) {
-	deadline := time.Now().Add(20 * time.Second)
+	deadline := time.Now().Add(extensionLoadWait)
 	for time.Now().Before(deadline) {
 		if targets, err := fetchDevToolsTargets(ctx, b.devtoolsHost); err == nil {
 			if id := extensionIDFromTargets(targets); id != "" {
@@ -52,7 +57,7 @@ func (b *Browser) waitForSingleFileExtension(ctx context.Context) (string, error
 		case <-time.After(250 * time.Millisecond):
 		}
 	}
-	return "", fmt.Errorf("no SingleFile chrome-extension target within 20s (check staged extension at %s)", b.extensionPath)
+	return "", fmt.Errorf("no SingleFile chrome-extension target within %s (check staged extension at %s)", extensionLoadWait, b.extensionPath)
 }
 
 func (b *Browser) resolveExtensionID(ctx context.Context) (string, error) {

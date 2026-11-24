@@ -37,6 +37,32 @@ const testPage = `<!DOCTYPE html>
 </body>
 </html>`
 
+// testProfile removes the browser profile with retries: Chromium can keep a
+// Crashpad file open for a moment after Close, and t.TempDir's single RemoveAll
+// then fails the test during cleanup.
+func testProfile(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("", "eea-capture-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		deadline := time.Now().Add(10 * time.Second)
+		for {
+			err := os.RemoveAll(dir)
+			if err == nil {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Logf("profile cleanup left %s: %v", dir, err)
+				return
+			}
+			time.Sleep(200 * time.Millisecond)
+		}
+	})
+	return dir
+}
+
 func TestCaptureExtensionModeLocalPage(t *testing.T) {
 	if testing.Short() {
 		t.Skip("launches a real browser")
@@ -61,7 +87,7 @@ func TestCaptureExtensionModeLocalPage(t *testing.T) {
 	browser, err := Launch(ctx, Options{
 		Engine:                  engine,
 		ArchiveMode:             ArchiveModeExtension,
-		UserDataDir:             t.TempDir(),
+		UserDataDir:             testProfile(t),
 		Headless:                true,
 		SingleFileExtensionPath: extRoot,
 	})
@@ -107,7 +133,7 @@ func TestCaptureLocalPage(t *testing.T) {
 
 	browser, err := Launch(ctx, Options{
 		Engine:      engine,
-		UserDataDir: t.TempDir(),
+		UserDataDir: testProfile(t),
 		Headless:    true,
 	})
 	if err != nil {
@@ -165,7 +191,7 @@ setTimeout(function () {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	browser, err := Launch(ctx, Options{
-		Engine: "edge", UserDataDir: t.TempDir(), Headless: true,
+		Engine: "edge", UserDataDir: testProfile(t), Headless: true,
 		ReadyWait: 10 * time.Second, MinTextChars: 8,
 	})
 	if err != nil {
@@ -200,7 +226,7 @@ func TestCaptureRejectsChallengePage(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	browser, err := Launch(ctx, Options{
-		Engine: "edge", UserDataDir: t.TempDir(), Headless: true,
+		Engine: "edge", UserDataDir: testProfile(t), Headless: true,
 		ReadyWait: 800 * time.Millisecond,
 	})
 	if err != nil {
@@ -235,7 +261,7 @@ func TestCaptureRejectsChallengeTitleWithArticleShell(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	browser, err := Launch(ctx, Options{
-		Engine: "edge", UserDataDir: t.TempDir(), Headless: true,
+		Engine: "edge", UserDataDir: testProfile(t), Headless: true,
 		ReadyWait: 800 * time.Millisecond,
 	})
 	if err != nil {
@@ -272,7 +298,7 @@ func TestCaptureRejectsURLTitledShell(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	browser, err := Launch(ctx, Options{
-		Engine: "edge", UserDataDir: t.TempDir(), Headless: true,
+		Engine: "edge", UserDataDir: testProfile(t), Headless: true,
 		ReadyWait: 800 * time.Millisecond,
 	})
 	if err != nil {
@@ -332,7 +358,7 @@ imgs.forEach((img) => io.observe(img));
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
 	browser, err := Launch(ctx, Options{
-		Engine: "edge", UserDataDir: t.TempDir(), Headless: true,
+		Engine: "edge", UserDataDir: testProfile(t), Headless: true,
 	})
 	if err != nil {
 		t.Fatalf("launch: %v", err)
