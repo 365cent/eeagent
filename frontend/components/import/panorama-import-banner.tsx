@@ -18,7 +18,7 @@ export function PanoramaImportBanner({
   variant?: 'alert' | 'panel'
 }) {
   const type = panoramaImportAlertType(batch.status)
-  const active = batch.status === 'capturing' || batch.status === 'structuring'
+  const showDownload = batch.status !== 'completed'
   const download = (
     <Typography.Link
       href={getCaptureClientDownloadUrl()}
@@ -33,7 +33,7 @@ export function PanoramaImportBanner({
     return (
       <div className={compact ? 'panorama-import-banner--compact' : undefined}>
         <ImportBatchProgressBody batch={batch} showTitle />
-        {active ? download : null}
+        {showDownload ? download : null}
       </div>
     )
   }
@@ -47,7 +47,7 @@ export function PanoramaImportBanner({
       description={
         <>
           <ImportBatchProgressBody batch={batch} />
-          {active ? download : null}
+          {showDownload ? download : null}
         </>
       }
       style={compact ? undefined : { marginBottom: 16 }}

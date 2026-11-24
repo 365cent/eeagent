@@ -332,6 +332,7 @@ async def test_waiting_client_jobs_expire_when_batch_is_idle(client):
     body = (await client.get(f"/api/v1/imports/panorama/{batch_id}")).json()
     assert body["status"] == "failed"
     assert body["capture_jobs_pending"] == 0
+    assert "客户端" in (body["error"] or "")
 
 
 @pytest.mark.anyio
