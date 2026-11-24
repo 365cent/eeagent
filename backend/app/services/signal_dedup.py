@@ -2,7 +2,7 @@
 
 Two copies are redundant when they describe the same evidence:
 
-* same ``url_normalized`` (the same article captured again - the capture path
+* the same article URL (the same page captured again - the capture path
   already marks those with a ``(重复采集 #n)`` title suffix), or
 * different URLs but the same ``body_sha256`` (the same document uploaded twice).
 
@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
+from urllib.parse import parse_qsl, urlencode, urlsplit
 from dataclasses import dataclass, field
 from typing import Iterable, Sequence
 
@@ -146,23 +147,57 @@ async def _load_candidates(db: AsyncSession) -> list[Signal]:
     return list(rows)
 
 
+#: Query keys a share/link wrapper adds; they do not identify an article.
+TRACKING_QUERY_KEYS = {
+    "from", "wfr", "spm", "share", "share_token", "share_from", "scene",
+    "srcid", "chksm", "clicktime", "enterid", "sessionid", "utm_source",
+    "utm_medium", "utm_campaign", "utm_term", "utm_content",
+}
+
+
+def article_url_key(url: str | None) -> str:
+    """Article identity from a URL, keeping content-bearing query parameters.
+
+    ``Signal.url_normalized`` drops the whole query string, so every
+    ``site/s?id=1`` article collapses onto ``site/s`` and unrelated pages look
+    like duplicates. Deletion is irreversible, so only a tracking-free URL is
+    allowed to join a group: two genuinely different articles must never be
+    offered as copies of each other.
+    """
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    try:
+        parts = urlsplit(raw if "://" in raw else f"https://{raw}")
+    except ValueError:
+        return raw
+    query = sorted(
+        (key, value)
+        for key, value in parse_qsl(parts.query, keep_blank_values=False)
+        if key.lower() not in TRACKING_QUERY_KEYS
+    )
+    base = f"{parts.scheme.lower()}://{(parts.netloc or '').lower()}{parts.path.rstrip('/')}"
+    return f"{base}?{urlencode(query)}" if query else base
+
+
 def group_signals(signals: Sequence[Signal]) -> list[DuplicateGroup]:
     """Pure grouping/diffing, so the rules are testable without a database."""
     by_url: dict[str, list[Signal]] = defaultdict(list)
     by_body: dict[str, list[Signal]] = defaultdict(list)
     for signal in signals:
-        if signal.url_normalized:
-            by_url[signal.url_normalized].append(signal)
+        url_key = article_url_key(signal.url)
+        if url_key:
+            by_url[url_key].append(signal)
         if signal.body_sha256:
             by_body[signal.body_sha256].append(signal)
 
     groups: list[DuplicateGroup] = []
     claimed: set[uuid.UUID] = set()
 
-    for url_normalized, members in by_url.items():
+    for url_key, members in by_url.items():
         if len(members) < 2:
             continue
-        groups.append(_build_group(f"url:{url_normalized}", "url", members))
+        groups.append(_build_group(f"url:{url_key}", "url", members))
         claimed.update(signal.id for signal in members)
 
     # Same content behind different URLs (an upload next to a captured page).

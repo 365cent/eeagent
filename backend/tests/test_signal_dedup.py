@@ -126,6 +126,21 @@ def test_same_content_under_different_urls_is_a_suspected_duplicate():
     assert groups[0].identical is False  # different URL/title: a human decides
 
 
+def test_different_articles_sharing_a_bare_path_are_not_duplicates():
+    """Baidu/CSDN keep article identity in ?id=, which url_normalized drops."""
+    first = _FakeSignal(url_normalized="https://baijiahao.baidu.com/s?id=111")
+    second = _FakeSignal(url_normalized="https://baijiahao.baidu.com/s?id=222")
+    assert group_signals([first, second]) == []
+
+
+def test_tracking_parameters_do_not_split_a_duplicate():
+    plain = _FakeSignal(url_normalized="https://example.com/a/1")
+    shared = _FakeSignal(url_normalized="https://example.com/a/1?from=timeline&utm_source=wx")
+    groups = group_signals([plain, shared])
+    assert len(groups) == 1
+    assert {m.signal.id for m in groups[0].members} == {plain.id, shared.id}
+
+
 def test_single_signals_are_not_groups():
     assert group_signals([_FakeSignal()]) == []
     assert group_signals([]) == []
