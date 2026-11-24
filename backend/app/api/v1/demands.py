@@ -181,7 +181,10 @@ async def update_demand(
         if cross_validation_error:
             raise HTTPException(422, cross_validation_error)
     if data.get("review_status") == "confirmed" and d.review_status != "confirmed":
-        d.confirmed_at = datetime.now(timezone.utc)
+        # Same clock as DemandPoint.updated_at (onupdate=func.now()): comparing a
+        # Python timestamp against a Postgres one misreads a fresh row as stale
+        # whenever the two clocks drift apart.
+        d.confirmed_at = func.now()
         d.confirmed_by_subject = actor.subject
     invalidate_functions = False
     for field, value in data.items():
