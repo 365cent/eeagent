@@ -379,6 +379,9 @@ export function FunctionDerivationEditor() {
     })
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: key }),
+      // The landing-point workbench lists every function under its own key, so a
+      // function saved here stayed missing there until a full reload.
+      queryClient.invalidateQueries({ queryKey: functionQueryKey(null) }),
       queryClient.invalidateQueries({ queryKey: eeaQueryKeys.panorama }),
     ])
     setDemandId(saved.demand_point_id)
