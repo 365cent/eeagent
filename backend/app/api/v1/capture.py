@@ -19,9 +19,11 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 from functools import partial
+from pathlib import Path
 
 from anyio import to_thread
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi.responses import FileResponse
 
 from app.core.capture_identity import assert_capture_job_access, get_capture_identity
 from app.core.identity import OperatorIdentity
@@ -50,6 +52,32 @@ router = APIRouter(
     tags=["capture"],
     dependencies=[Depends(require_feature(EVIDENCE_CAPTURE))],
 )
+
+
+def _client_dist_dir() -> Path:
+    configured = get_settings().capture_client_dist_dir.strip()
+    if configured:
+        return Path(configured).expanduser()
+    return Path(__file__).resolve().parents[3].parent / "client" / "dist"
+
+
+def _newest_client_artifact() -> Path | None:
+    dist = _client_dist_dir()
+    if not dist.is_dir():
+        return None
+    candidates = [path for path in dist.glob("capture-*-windows-*.zip") if path.is_file()]
+    if not candidates:
+        return None
+    return max(candidates, key=lambda path: path.stat().st_mtime)
+
+
+@router.get("/client-download", include_in_schema=False)
+async def download_capture_client():
+    """Serve the newest Windows client build copied onto the server."""
+    artifact = _newest_client_artifact()
+    if artifact is None:
+        raise HTTPException(404, "capture client build not found")
+    return FileResponse(artifact, filename=artifact.name, media_type="application/zip")
 
 
 async def _signal_detail(db: AsyncSession, signal_id: uuid.UUID):
@@ -413,6 +441,10 @@ async def claim_capture_job_for_client(
     job.worker_id = worker_id[:120]
     job.lease_until = now + timedelta(minutes=30)
     job.started_at = job.started_at or now
+    if job.import_batch_id is not None:
+        batch = await db.get(PanoramaImportBatch, job.import_batch_id)
+        if batch is not None:
+            batch.updated_at = now
     await db.commit()
     await db.refresh(job)
     return await _capture_job_out(db, job)
@@ -544,6 +576,10 @@ async def client_submit_capture_job(
         publisher=job.publisher,
         source_label=job.source_label,
     )
+    if job.import_batch_id is not None:
+        batch = await db.get(PanoramaImportBatch, job.import_batch_id)
+        if batch is not None:
+            batch.updated_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(job)
     return await _capture_job_out(db, job)

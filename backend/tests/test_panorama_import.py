@@ -1,6 +1,7 @@
 """Panorama workbook import and client-awaiting capture jobs."""
 from __future__ import annotations
 
+import uuid
 from io import BytesIO
 
 import pytest
@@ -300,3 +301,92 @@ async def test_batch_closes_when_last_url_fails_after_a_success(client):
     assert body["signals_retained"] == 1
     assert body["signals_failed"] == 1
     assert body["capture_jobs_pending"] == 0
+
+
+@pytest.mark.anyio
+async def test_waiting_client_jobs_expire_when_batch_is_idle(client):
+    from datetime import datetime, timedelta, timezone
+
+    from app.db.base import SessionLocal
+    from app.models.models import PanoramaImportBatch
+    from app.services.capture_jobs import expire_waiting_client_jobs
+
+    unique = uuid.uuid4().hex
+    source_url = f"https://example.com/panorama-timeout-{unique}"
+    resp = await client.post(
+        "/api/v1/imports/capture-urls", json={"text": f"{source_url}\n"}
+    )
+    assert resp.status_code == 201, resp.text
+    batch_id = resp.json()["id"]
+    async with SessionLocal() as db:
+        batch = await db.get(PanoramaImportBatch, uuid.UUID(batch_id))
+        batch.updated_at = datetime.now(timezone.utc) - timedelta(minutes=31)
+        await db.commit()
+
+    expired = await expire_waiting_client_jobs()
+
+    assert expired >= 1
+    jobs = (await client.get("/api/v1/capture/jobs?status=failed&limit=50")).json()
+    job = next(j for j in jobs if j.get("source_url") == source_url)
+    assert "\u5ba2\u6237\u7aef" in (job["error"] or "")
+    body = (await client.get(f"/api/v1/imports/panorama/{batch_id}")).json()
+    assert body["status"] == "failed"
+    assert body["capture_jobs_pending"] == 0
+
+
+@pytest.mark.anyio
+async def test_waiting_client_jobs_survive_a_recent_batch(client):
+    from datetime import datetime, timedelta, timezone
+
+    from app.db.base import SessionLocal
+    from app.models.models import PanoramaImportBatch
+    from app.services.capture_jobs import expire_waiting_client_jobs
+
+    unique = uuid.uuid4().hex
+    source_url = f"https://example.com/panorama-fresh-{unique}"
+    resp = await client.post(
+        "/api/v1/imports/capture-urls", json={"text": f"{source_url}\n"}
+    )
+    assert resp.status_code == 201, resp.text
+    batch_id = resp.json()["id"]
+    async with SessionLocal() as db:
+        batch = await db.get(PanoramaImportBatch, uuid.UUID(batch_id))
+        batch.updated_at = datetime.now(timezone.utc) - timedelta(minutes=29)
+        await db.commit()
+
+    assert await expire_waiting_client_jobs() == 0
+
+    jobs = (await client.get("/api/v1/capture/jobs?status=awaiting_client&limit=50")).json()
+    assert any(j.get("source_url") == source_url for j in jobs)
+
+
+@pytest.mark.anyio
+async def test_client_claim_refreshes_batch_activity(client):
+    from datetime import datetime, timedelta, timezone
+
+    from app.db.base import SessionLocal
+    from app.models.models import PanoramaImportBatch
+
+    unique = uuid.uuid4().hex
+    source_url = f"https://example.com/panorama-claim-{unique}"
+    resp = await client.post(
+        "/api/v1/imports/capture-urls", json={"text": f"{source_url}\n"}
+    )
+    assert resp.status_code == 201, resp.text
+    batch_id = resp.json()["id"]
+    async with SessionLocal() as db:
+        batch = await db.get(PanoramaImportBatch, uuid.UUID(batch_id))
+        batch.updated_at = datetime.now(timezone.utc) - timedelta(minutes=31)
+        await db.commit()
+
+    jobs = (await client.get("/api/v1/capture/jobs?status=awaiting_client&limit=50")).json()
+    job = next(j for j in jobs if j.get("source_url") == source_url)
+    claimed = await client.post(
+        f"/api/v1/capture/jobs/{job['id']}/claim", data={"worker_id": "test-client"}
+    )
+    assert claimed.status_code == 200, claimed.text
+
+    async with SessionLocal() as db:
+        batch = await db.get(PanoramaImportBatch, uuid.UUID(batch_id))
+        assert (datetime.now(timezone.utc) - batch.updated_at).total_seconds() < 60
+

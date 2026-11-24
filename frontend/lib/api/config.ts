@@ -18,3 +18,8 @@ export function getEeaApiBase(): string {
   }
   return DEFAULT_API_BASE
 }
+
+/** Server-hosted Windows capture client build (newest zip in client/dist). */
+export function getCaptureClientDownloadUrl(): string {
+  return getEeaApiBase() + '/capture/client-download'
+}

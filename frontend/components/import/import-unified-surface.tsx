@@ -5,8 +5,9 @@ import { CopyOutlined, FileAddOutlined, LinkOutlined, PaperClipOutlined } from '
 import { Alert, App as AntApp, Button, Input, Typography } from 'antd'
 import type { PasteAnalysis } from '@/lib/import-paste-analysis'
 import { importModeHint, primarySubmitLabel } from '@/lib/import-paste-analysis'
+import { getCaptureClientDownloadUrl } from '@/lib/api/config'
 
-const { Text } = Typography
+const { Text, Link } = Typography
 
 export const IMPORT_FILE_ACCEPT =
   '.html,.htm,.pdf,.doc,.docx,.ppt,.pptx,.md,.txt,.png,.jpg,.jpeg,.xlsx,.xlsm'
@@ -154,7 +155,15 @@ export function ImportUnifiedSurface({
           type="info"
           showIcon
           title={`${analysis.urls.length} 条链接由本机 EEA Capture 客户端采集`}
-          description="请复制链接并粘贴到客户端窗口采集；也可以在平台排队，客户端在线时会自动领取任务。"
+          description={
+            <>
+              请复制链接并粘贴到客户端窗口采集；也可以在平台排队，客户端在线时会自动领取任务。
+              {' '}
+              <Link href={getCaptureClientDownloadUrl()} download>
+                下载 Windows 客户端
+              </Link>
+            </>
+          }
           action={
             <Button size="small" icon={<CopyOutlined />} onClick={() => void copyLinkList()}>
               复制链接

@@ -23,7 +23,7 @@ from sqlalchemy import and_, or_, select, update
 
 from app.core.config import get_settings
 from app.db.base import SessionLocal
-from app.models.models import CaptureJob, Signal
+from app.models.models import CaptureJob, PanoramaImportBatch, Signal
 from app.services.objectstore import load_bytes
 from app.services.url_fetch import FetchError, RetryableFetchError, fetch_url
 
@@ -87,6 +87,57 @@ async def _close_failed_batches(batch_ids: set[uuid.UUID]) -> None:
             await on_import_capture_job_closed(batch_id)
         except Exception:
             logger.exception("could not close panorama import batch %s", batch_id)
+
+
+async def expire_waiting_client_jobs(now: datetime | None = None) -> int:
+    """Fail jobs whose batch saw no client activity for the wait window.
+
+    The window is per batch, not per job: a client processes one URL at a time,
+    so expiring each job N minutes after creation would kill the tail of a long
+    batch while the client is still working.
+    """
+    settings = get_settings()
+    now = now or _now()
+    cutoff = now - timedelta(seconds=settings.capture_client_wait_seconds)
+    minutes = max(1, settings.capture_client_wait_seconds // 60)
+    error = (
+        f"客户端在 {minutes} 分钟内未响应；请下载并启动 EEA Capture 客户端后重试。"
+    )
+    async with SessionLocal() as db:
+        rows = (
+            await db.execute(
+                select(CaptureJob.id, CaptureJob.import_batch_id)
+                .join(PanoramaImportBatch, PanoramaImportBatch.id == CaptureJob.import_batch_id)
+                .where(
+                    CaptureJob.status == "awaiting_client",
+                    CaptureJob.stage == "awaiting_client",
+                    PanoramaImportBatch.status == "capturing",
+                    PanoramaImportBatch.updated_at <= cutoff,
+                )
+            )
+        ).all()
+        if not rows:
+            return 0
+        job_ids = [job_id for job_id, _ in rows]
+        batch_ids = {batch_id for _, batch_id in rows if batch_id is not None}
+        result = await db.execute(
+            update(CaptureJob)
+            .where(CaptureJob.id.in_(job_ids), CaptureJob.status == "awaiting_client")
+            .values(
+                status="failed",
+                stage="failed",
+                error=error,
+                finished_at=now,
+                lease_until=None,
+                worker_id=None,
+                updated_at=now,
+            )
+        )
+        await db.commit()
+        expired = result.rowcount or 0
+    await _close_failed_batches(batch_ids)
+    logger.info("expired %s client-waiting capture jobs", expired)
+    return expired
 
 
 async def claim_next_job(worker_id: str) -> uuid.UUID | None:
@@ -422,6 +473,10 @@ async def worker_loop(stop_event: asyncio.Event | None = None) -> None:
     worker_id = make_worker_id()
     pause = max(get_settings().capture_worker_poll_seconds, 0.1)
     while stop_event is None or not stop_event.is_set():
+        try:
+            await expire_waiting_client_jobs()
+        except Exception as exc:
+            logger.warning("capture queue timeout sweep failed (%s)", exc.__class__.__name__)
         try:
             job_id = await claim_next_job(worker_id)
         except Exception as exc:

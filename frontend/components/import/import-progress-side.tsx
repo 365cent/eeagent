@@ -3,15 +3,19 @@
 import { FileOutlined } from '@ant-design/icons'
 import { Alert, Button, Progress, Space, Typography } from 'antd'
 import type { PanoramaImportBatchOut } from '@/lib/api/types'
+import { getCaptureClientDownloadUrl } from '@/lib/api/config'
 import { ImportBatchProgressBody } from '@/components/import/import-batch-progress-body'
 
-const { Text } = Typography
+const { Text, Link } = Typography
 
 function ImportSideNotes() {
   return (
     <div className="import-side-notes">
       <Text type="secondary">拖入 HTML 快照 / 文档 → 平台解析入库</Text>
       <Text type="secondary">多行 http(s) 链接 → EEA Capture 客户端采集（需在线）</Text>
+      <Link href={getCaptureClientDownloadUrl()} download>
+        下载 EEA Capture 客户端（Windows）
+      </Link>
       <Text type="secondary">单链接或正文 → 直接保存信号</Text>
     </div>
   )
