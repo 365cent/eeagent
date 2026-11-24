@@ -28,14 +28,14 @@ from fastapi.responses import FileResponse
 from app.core.capture_identity import assert_capture_job_access, get_capture_identity
 from app.core.identity import OperatorIdentity
 from app.services.orphan_objects import record_orphan_object, resolve_orphan_object
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.platform.launchdarkly import EVIDENCE_CAPTURE, require_feature, track_workflow_success
 from app.db.base import get_db
-from app.models.models import CaptureJob, Document, PanoramaImportBatch, Signal
+from app.models.models import CaptureClientClaim, CaptureJob, Document, PanoramaImportBatch, Signal
 from app.schemas.schemas import CaptureJobOut, CaptureResult
 from app.services.doc_ingest import normalize_document_mime
 from app.services.objectstore import save_bytes
@@ -436,7 +436,8 @@ async def claim_capture_job_for_client(
     if job.status != "awaiting_client":
         raise HTTPException(409, f"job is not awaiting client capture (status={job.status})")
     now = datetime.now(timezone.utc)
-    if job.client_claim_count >= get_settings().capture_client_max_claims:
+    settings = get_settings()
+    if job.client_claim_count >= settings.capture_client_max_claims:
         job.status = "failed"
         job.stage = "failed"
         job.error = "客户端重复领取但未完成，已超过最大次数；请重试或联系管理员。"
@@ -450,6 +451,35 @@ async def claim_capture_job_for_client(
 
             await on_import_capture_job_closed(batch_id)
         raise HTTPException(429, "capture job exceeded the client claim limit")
+    cutoff = now - timedelta(seconds=settings.capture_client_claim_window_seconds)
+    await db.execute(
+        select(func.pg_advisory_xact_lock(func.hashtextextended(f"capture-client:{actor.subject}", 0)))
+    )
+    await db.execute(
+        delete(CaptureClientClaim).where(
+            CaptureClientClaim.client_subject == actor.subject,
+            CaptureClientClaim.claimed_at < cutoff,
+        )
+    )
+    recent_claims = (
+        await db.execute(
+            select(func.count())
+            .select_from(CaptureClientClaim)
+            .where(
+                CaptureClientClaim.client_subject == actor.subject,
+                CaptureClientClaim.claimed_at >= cutoff,
+            )
+        )
+    ).scalar_one()
+    if recent_claims >= settings.capture_client_max_claims_per_window:
+        raise HTTPException(
+            429,
+            "capture client claim rate exceeded",
+            headers={"Retry-After": str(settings.capture_client_claim_window_seconds)},
+        )
+    db.add(
+        CaptureClientClaim(client_subject=actor.subject, job_id=job.id, claimed_at=now)
+    )
     job.client_claim_count += 1
     job.status = "running"
     job.stage = "capturing"

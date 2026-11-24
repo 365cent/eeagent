@@ -38,6 +38,8 @@ class Settings(BaseSettings):
     capture_worker_max_attempts: int = Field(default=3, ge=1)
     capture_client_wait_seconds: int = Field(default=1800, ge=60)
     capture_client_max_claims: int = Field(default=3, ge=1)
+    capture_client_claim_window_seconds: int = Field(default=600, ge=60)
+    capture_client_max_claims_per_window: int = Field(default=60, ge=1)
     capture_client_dist_dir: str = ""
     db_host: str = "127.0.0.1"
     db_port: int = 54329

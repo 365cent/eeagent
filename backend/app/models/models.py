@@ -253,6 +253,24 @@ class CaptureJob(Base):
     cancel_requested_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class CaptureClientClaim(Base):
+    """One claim event, used to rate-limit a capture client across jobs."""
+
+    __tablename__ = "eea_capture_client_claim"
+    __table_args__ = (
+        Index("eea_capture_client_claim_window_idx", "client_subject", "claimed_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    client_subject: Mapped[str] = mapped_column(Text, nullable=False)
+    job_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("eea_capture_job.id", ondelete="CASCADE"), nullable=False
+    )
+    claimed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class CaptureToken(Base):
     """Server-issued capture upload credential; only the SHA-256 digest is stored."""
 

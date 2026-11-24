@@ -437,3 +437,52 @@ async def test_client_claim_limit_stops_a_repeated_claim_loop(client):
         row = await db.get(CaptureJob, uuid.UUID(job["id"]))
         assert row.client_claim_count == 0
 
+
+@pytest.mark.anyio
+async def test_client_claim_rate_limit_blocks_rotating_jobs(client, monkeypatch):
+    from app.api.v1 import capture as capture_api
+    from app.core.config import get_settings
+    from app.db.base import SessionLocal
+    from app.models.models import CaptureJob
+
+    settings = get_settings().model_copy(
+        update={
+            "capture_client_max_claims_per_window": 2,
+            "capture_client_claim_window_seconds": 3600,
+        }
+    )
+    monkeypatch.setattr(capture_api, "get_settings", lambda: settings)
+
+    unique = uuid.uuid4().hex
+    first_url = f"https://example.com/panorama-rate-a-{unique}"
+    second_url = f"https://example.com/panorama-rate-b-{unique}"
+    resp = await client.post(
+        "/api/v1/imports/capture-urls", json={"text": f"{first_url}\n{second_url}\n"}
+    )
+    assert resp.status_code == 201, resp.text
+    jobs = (await client.get("/api/v1/capture/jobs?status=awaiting_client&limit=50")).json()
+    first_job = next(j for j in jobs if j.get("source_url") == first_url)
+    second_job = next(j for j in jobs if j.get("source_url") == second_url)
+
+    for _ in range(2):
+        claimed = await client.post(
+            f"/api/v1/capture/jobs/{first_job['id']}/claim",
+            data={"worker_id": "test-client"},
+        )
+        assert claimed.status_code == 200, claimed.text
+        released = await client.post(
+            f"/api/v1/capture/jobs/{first_job['id']}/client-release",
+            data={"worker_id": "test-client", "reason": "abort"},
+        )
+        assert released.status_code == 200, released.text
+
+    blocked = await client.post(
+        f"/api/v1/capture/jobs/{second_job['id']}/claim",
+        data={"worker_id": "test-client"},
+    )
+    assert blocked.status_code == 429
+    assert blocked.headers.get("Retry-After")
+    async with SessionLocal() as db:
+        row = await db.get(CaptureJob, uuid.UUID(second_job["id"]))
+        assert row.status == "awaiting_client"
+
