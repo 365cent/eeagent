@@ -9,6 +9,7 @@ import pytest
 
 from app.services import signal_dedup
 from app.services.signal_dedup import fingerprint, group_signals, keep_priority
+from app.services.tagging import normalize_url
 from tests.support import create_signal
 
 pytestmark = [pytest.mark.anyio, pytest.mark.db]
@@ -25,13 +26,18 @@ class _FakeTag:
 
 
 class _FakeSignal:
-    """Minimal Signal stand-in so grouping rules are testable without a DB."""
+    """Minimal Signal stand-in so grouping rules are testable without a DB.
+
+    Real rows keep the raw URL in ``url`` and a query-free key in
+    ``url_normalized``; the fake does the same so grouping tests see the split.
+    """
 
     def __init__(
         self,
         *,
         title: str = "同一篇文章",
-        url_normalized: str = "http://example.com/a",
+        url: str | None = None,
+        url_normalized: str | None = None,
         body_sha256: str | None = None,
         snapshot_html_object_key: str | None = None,
         tags: tuple[str, ...] = (),
@@ -44,8 +50,10 @@ class _FakeSignal:
     ) -> None:
         self.id = uuid.uuid4()
         self.title = title
-        self.url = url_normalized
-        self.url_normalized = url_normalized
+        self.url = url if url is not None else (url_normalized or "http://example.com/a")
+        self.url_normalized = (
+            url_normalized if url_normalized is not None else normalize_url(self.url)
+        )
         self.body_sha256 = body_sha256
         self.snapshot_html_object_key = snapshot_html_object_key
         self.tags = [_FakeTag(name) for name in tags]
@@ -127,18 +135,83 @@ def test_same_content_under_different_urls_is_a_suspected_duplicate():
 
 
 def test_different_articles_sharing_a_bare_path_are_not_duplicates():
-    """Baidu/CSDN keep article identity in ?id=, which url_normalized drops."""
-    first = _FakeSignal(url_normalized="https://baijiahao.baidu.com/s?id=111")
-    second = _FakeSignal(url_normalized="https://baijiahao.baidu.com/s?id=222")
+    """Baidu keeps article identity in ?id=, which url_normalized drops.
+
+    Regression guard for the old grouping key: it read url_normalized, so these
+    two different articles were offered as deletable copies of each other.
+    """
+    first = _FakeSignal(url="https://baijiahao.baidu.com/s?id=111")
+    second = _FakeSignal(url="https://baijiahao.baidu.com/s?id=222")
+
+    assert first.url_normalized == second.url_normalized  # what the old key saw
     assert group_signals([first, second]) == []
 
 
-def test_tracking_parameters_do_not_split_a_duplicate():
-    plain = _FakeSignal(url_normalized="https://example.com/a/1")
-    shared = _FakeSignal(url_normalized="https://example.com/a/1?from=timeline&utm_source=wx")
+def test_wechat_share_wrapper_does_not_split_the_same_article():
+    plain = _FakeSignal(url="https://mp.weixin.qq.com/s?__biz=1&mid=2&idx=1&sn=abc")
+    shared = _FakeSignal(
+        url="https://mp.weixin.qq.com/s?__biz=1&mid=2&idx=1&sn=abc&from=timeline&scene=1",
+        title="同一篇文章 (重复采集 #2)",
+    )
+
     groups = group_signals([plain, shared])
+
     assert len(groups) == 1
     assert {m.signal.id for m in groups[0].members} == {plain.id, shared.id}
+    assert groups[0].identical is True  # safe to delete without asking
+
+
+def test_from_is_content_on_other_hosts_so_pages_stay_apart():
+    """A list that pages by ?from= must not merge: deletion is permanent."""
+    phone = _FakeSignal(url="https://example.com/models?from=phone", title="车型列表")
+    laptop = _FakeSignal(url="https://example.com/models?from=laptop", title="车型列表")
+
+    assert phone.url_normalized == laptop.url_normalized  # same path
+    assert group_signals([phone, laptop]) == []
+
+
+def test_re_capture_with_unknown_tracking_param_is_a_suspect_group():
+    """?t= is not in the denylist, but the duplicate suffix proves a re-capture."""
+    first = _FakeSignal(url="https://example.com/a/1?t=100")
+    second = _FakeSignal(url="https://example.com/a/1?t=200", title="同一篇文章 (重复采集 #2)")
+
+    groups = group_signals([first, second])
+
+    assert [group.kind for group in groups] == ["url_suspect"]
+    group = groups[0]
+    assert group.identical is False  # a human picks the survivor
+    assert "url" in group.different_fields  # the card has something to show
+    assert set(group.values["url"]) == {str(first.id), str(second.id)}
+
+
+def test_suspect_fallback_does_not_merge_never_re_captured_urls():
+    """Without the duplicate suffix, same url_normalized is not evidence."""
+    page_one = _FakeSignal(url="https://example.com/list?page=1", title="列表")
+    page_two = _FakeSignal(url="https://example.com/list?page=2", title="列表")
+
+    assert page_one.url_normalized == page_two.url_normalized
+    assert group_signals([page_one, page_two]) == []
+
+
+def test_suspect_fallback_does_not_split_a_real_url_group():
+    same_key = _FakeSignal(url="https://example.com/a?t=1")
+    same_key_copy = _FakeSignal(url="https://example.com/a?t=1", title="同一篇文章 (重复采集 #2)")
+    third = _FakeSignal(url="https://example.com/a?t=2", title="同一篇文章 (重复采集 #3)")
+
+    groups = group_signals([same_key, same_key_copy, third])
+
+    assert [group.kind for group in groups] == ["url"]  # third has no partner left
+    assert {m.signal.id for m in groups[0].members} == {same_key.id, same_key_copy.id}
+
+
+def test_utm_parameters_are_tracking_on_every_host():
+    plain = _FakeSignal(url="https://example.com/a/1")
+    tagged = _FakeSignal(url="https://example.com/a/1?utm_source=wx&utm_medium=share")
+
+    groups = group_signals([plain, tagged])
+
+    assert len(groups) == 1
+    assert {m.signal.id for m in groups[0].members} == {plain.id, tagged.id}
 
 
 def test_single_signals_are_not_groups():
@@ -178,6 +251,26 @@ async def test_scan_and_cleanup_endpoints(client):
     assert result["skipped"] == []
     assert (await client.get(f"/api/v1/signals/{copy['id']}")).status_code == 404
     assert (await client.get(f"/api/v1/signals/{keep['id']}")).status_code == 200
+
+
+async def test_scan_endpoint_serializes_a_suspect_group(client):
+    """The API accepts url_suspect and keeps it out of the auto-delete path."""
+    first = await create_signal(client, url="https://example.com/live?t=1", title="线上文章")
+    second = await create_signal(
+        client, url="https://example.com/live?t=2", title="线上文章 (重复采集 #2)"
+    )
+
+    scan = (await client.get("/api/v1/signals/duplicates")).json()
+    group = next(
+        candidate
+        for candidate in scan["groups"]
+        if any(member["id"] == second["id"] for member in candidate["members"])
+    )
+
+    assert group["kind"] == "url_suspect"
+    assert group["identical"] is False
+    assert "url" in group["different_fields"]
+    assert {member["id"] for member in group["members"]} == {first["id"], second["id"]}
 
 
 async def test_cleanup_never_deletes_the_last_copy_of_a_group(client):

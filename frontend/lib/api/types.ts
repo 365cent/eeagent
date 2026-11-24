@@ -861,8 +861,12 @@ export type DuplicateMember = {
 
 export type DuplicateGroup = {
   key: string
-  /** url = same source link; body = same content behind a different URL. */
-  kind: 'url' | 'body'
+  /**
+   * url = same source link; body = same content behind a different URL;
+   * url_suspect = re-captured title (重复采集 #n) but the URLs differ, so a
+   * human picks the survivor (never auto-deleted).
+   */
+  kind: 'url' | 'body' | 'url_suspect'
   identical: boolean
   different_fields: string[]
   field_labels: Record<string, string>

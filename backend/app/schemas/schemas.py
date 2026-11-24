@@ -361,7 +361,9 @@ class DuplicateMemberOut(BaseModel):
 
 class DuplicateGroupOut(BaseModel):
     key: str
-    kind: Literal["url", "body"]
+    # url_suspect: same url_normalized, titles marked (重复采集 #n), raw URL keys
+    # differ (an unknown tracking parameter); never identical, a human decides.
+    kind: Literal["url", "body", "url_suspect"]
     identical: bool
     different_fields: list[str] = []
     field_labels: dict[str, str] = {}

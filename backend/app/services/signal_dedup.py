@@ -11,6 +11,13 @@ can be deleted without losing information. Otherwise the caller gets a
 field-by-field comparison and picks the survivor: this module never decides
 which of two genuinely different records the library should keep.
 
+A third kind exists for one case: the capture path suffixes a re-captured title
+with ``(重复采集 #n)`` keyed on ``url_normalized``, while this module groups on a
+query-aware URL key. When an unknown tracking parameter makes those two keys
+differ, the re-capture would disappear from the scan, so it is reported as
+``url_suspect``: the titles already prove the platform treated them as the same
+article, but a human still picks the survivor.
+
 The suggested survivor follows one fixed order (documented in
 :func:`keep_priority`): HTML archive, then extracted body, then the most
 complete classification (tags + theme + excerpt), then the oldest capture - the
@@ -30,7 +37,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.models import Signal, SignalTag
-from app.services.signal_duplicate import strip_duplicate_title_suffix
+from app.services.signal_duplicate import (
+    strip_duplicate_title_suffix,
+    title_indicates_duplicate_url,
+)
 
 #: Fields compared to decide whether two copies are interchangeable.
 COMPARED_FIELDS = (
@@ -124,7 +134,7 @@ class DuplicateGroup:
 
     @property
     def identical(self) -> bool:
-        return not self.different_fields
+        return not self.different_fields and self.kind != "url_suspect"
 
     @property
     def survivor(self) -> Signal:
@@ -147,12 +157,39 @@ async def _load_candidates(db: AsyncSession) -> list[Signal]:
     return list(rows)
 
 
-#: Query keys a share/link wrapper adds; they do not identify an article.
-TRACKING_QUERY_KEYS = {
-    "from", "wfr", "spm", "share", "share_token", "share_from", "scene",
-    "srcid", "chksm", "clicktime", "enterid", "sessionid", "utm_source",
-    "utm_medium", "utm_campaign", "utm_term", "utm_content",
-}
+#: Query keys every site uses for campaign tracking; they never identify content.
+UNIVERSAL_TRACKING_KEYS = frozenset({
+    "utm_source", "utm_medium", "utm_campaign", "utm_term", "utm_content",
+    "spm",  # shopping-page token (Alibaba and copies); never content
+})
+
+#: Share-wrapper keys scoped to the hosts that actually add them. Names like
+#: ``from``/``scene`` are content-bearing elsewhere (``/models?from=phone`` on a
+#: model list), and merging those would offer a real page for deletion.
+HOST_TRACKING_KEYS: tuple[tuple[tuple[str, ...], frozenset[str]], ...] = (
+    (
+        ("weixin.qq.com",),
+        frozenset({
+            "from", "scene", "subscene", "ascene", "share", "share_token",
+            "share_from", "clicktime", "enterid", "sessionid",
+        }),
+    ),
+    (
+        ("baidu.com",),
+        frozenset({"wfr", "srcid", "chksm"}),
+    ),
+)
+
+
+def _host_tracking_keys(host: str | None) -> frozenset[str]:
+    """Extra keys this host invents for sharing, if any."""
+    if not host:
+        return frozenset()
+    keys: set[str] = set()
+    for suffixes, extra in HOST_TRACKING_KEYS:
+        if any(host == suffix or host.endswith(f".{suffix}") for suffix in suffixes):
+            keys |= extra
+    return frozenset(keys)
 
 
 def article_url_key(url: str | None) -> str:
@@ -162,7 +199,9 @@ def article_url_key(url: str | None) -> str:
     ``site/s?id=1`` article collapses onto ``site/s`` and unrelated pages look
     like duplicates. Deletion is irreversible, so only a tracking-free URL is
     allowed to join a group: two genuinely different articles must never be
-    offered as copies of each other.
+    offered as copies of each other. Campaign keys (``utm_*``) are stripped
+    everywhere; share-wrapper keys are stripped only on the hosts that add them
+    (WeChat, Baidu), because ``from``/``scene`` identify content elsewhere.
     """
     raw = (url or "").strip()
     if not raw:
@@ -171,10 +210,12 @@ def article_url_key(url: str | None) -> str:
         parts = urlsplit(raw if "://" in raw else f"https://{raw}")
     except ValueError:
         return raw
+    host = (parts.hostname or "").lower()
+    ignored = UNIVERSAL_TRACKING_KEYS | _host_tracking_keys(host)
     query = sorted(
         (key, value)
         for key, value in parse_qsl(parts.query, keep_blank_values=False)
-        if key.lower() not in TRACKING_QUERY_KEYS
+        if key.lower() not in ignored
     )
     base = f"{parts.scheme.lower()}://{(parts.netloc or '').lower()}{parts.path.rstrip('/')}"
     return f"{base}?{urlencode(query)}" if query else base
@@ -184,12 +225,15 @@ def group_signals(signals: Sequence[Signal]) -> list[DuplicateGroup]:
     """Pure grouping/diffing, so the rules are testable without a database."""
     by_url: dict[str, list[Signal]] = defaultdict(list)
     by_body: dict[str, list[Signal]] = defaultdict(list)
+    by_url_norm: dict[str, list[Signal]] = defaultdict(list)
     for signal in signals:
         url_key = article_url_key(signal.url)
         if url_key:
             by_url[url_key].append(signal)
         if signal.body_sha256:
             by_body[signal.body_sha256].append(signal)
+        if signal.url_normalized:
+            by_url_norm[signal.url_normalized].append(signal)
 
     groups: list[DuplicateGroup] = []
     claimed: set[uuid.UUID] = set()
@@ -199,6 +243,22 @@ def group_signals(signals: Sequence[Signal]) -> list[DuplicateGroup]:
             continue
         groups.append(_build_group(f"url:{url_key}", "url", members))
         claimed.update(signal.id for signal in members)
+
+    # A re-capture whose URL gained a tracking parameter unknown to us is two
+    # different article keys but one url_normalized; the platform already
+    # marked it ``(重复采集 #n)``. Report it for a human instead of dropping it.
+    for url_norm, members in by_url_norm.items():
+        unclaimed = [signal for signal in members if signal.id not in claimed]
+        if len(unclaimed) < 2:
+            continue
+        if not any(title_indicates_duplicate_url(signal.title) for signal in unclaimed):
+            continue
+        suspect = _build_group(f"url_suspect:{url_norm}", "url_suspect", unclaimed)
+        if "url" not in suspect.different_fields:
+            suspect.different_fields.append("url")
+            suspect.values["url"] = {str(member.id): member.signal.url for member in suspect.members}
+        groups.append(suspect)
+        claimed.update(signal.id for signal in unclaimed)
 
     # Same content behind different URLs (an upload next to a captured page).
     for body_sha, members in by_body.items():
