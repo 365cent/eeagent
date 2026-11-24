@@ -33,7 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.platform.launchdarkly import EVIDENCE_CAPTURE, require_feature, track_workflow_success
 from app.db.base import get_db
-from app.models.models import CaptureJob, Document, Signal
+from app.models.models import CaptureJob, Document, PanoramaImportBatch, Signal
 from app.schemas.schemas import CaptureJobOut, CaptureResult
 from app.services.doc_ingest import normalize_document_mime
 from app.services.objectstore import save_bytes
@@ -491,9 +491,9 @@ async def client_fail_capture_job(
     await db.commit()
     await db.refresh(job)
     if job.import_batch_id is not None:
-        from app.services.panorama_import import refresh_batch_capture_stats
+        from app.services.panorama_import_hooks import on_import_capture_job_closed
 
-        await refresh_batch_capture_stats(db, job.import_batch_id)
+        await on_import_capture_job_closed(job.import_batch_id)
     return await _capture_job_out(db, job)
 
 
@@ -586,6 +586,12 @@ async def retry_capture_job(
     job.error = None
     job.started_at = None
     job.finished_at = None
+    if job.import_batch_id is not None:
+        batch = await db.get(PanoramaImportBatch, job.import_batch_id)
+        if batch is not None and batch.status == "failed":
+            batch.status = "capturing"
+            batch.error = None
+            batch.structure_finished_at = None
     await db.commit()
     await db.refresh(job)
     return await _capture_job_out(db, job)
@@ -615,4 +621,8 @@ async def cancel_capture_job(
         raise HTTPException(409, f"job cannot be cancelled (status={job.status})")
     await db.commit()
     await db.refresh(job)
+    if job.status == "cancelled" and job.import_batch_id is not None:
+        from app.services.panorama_import_hooks import on_import_capture_job_closed
+
+        await on_import_capture_job_closed(job.import_batch_id)
     return await _capture_job_out(db, job)

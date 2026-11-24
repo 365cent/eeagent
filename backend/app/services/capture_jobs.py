@@ -76,6 +76,19 @@ async def reclaim_stale_client_captures(now: datetime | None = None) -> int:
         return len(rows)
 
 
+async def _close_failed_batches(batch_ids: set[uuid.UUID]) -> None:
+    """Finalize import batches whose last job just failed; never block a claim."""
+    if not batch_ids:
+        return
+    from app.services.panorama_import_hooks import on_import_capture_job_closed
+
+    for batch_id in batch_ids:
+        try:
+            await on_import_capture_job_closed(batch_id)
+        except Exception:
+            logger.exception("could not close panorama import batch %s", batch_id)
+
+
 async def claim_next_job(worker_id: str) -> uuid.UUID | None:
     """Claim one ready job; expired leases are eligible for recovery."""
     settings = get_settings()
@@ -92,6 +105,7 @@ async def claim_next_job(worker_id: str) -> uuid.UUID | None:
             )
             .with_for_update(skip_locked=True)
         )
+        failed_batch_ids: set[uuid.UUID] = set()
         for row in expired.scalars():
             if _is_client_browser_capture(row):
                 row.status = "awaiting_client"
@@ -106,6 +120,8 @@ async def claim_next_job(worker_id: str) -> uuid.UUID | None:
             row.finished_at = now
             row.lease_until = None
             row.worker_id = None
+            if row.import_batch_id is not None:
+                failed_batch_ids.add(row.import_batch_id)
 
         eligible = and_(
             or_(
@@ -128,6 +144,7 @@ async def claim_next_job(worker_id: str) -> uuid.UUID | None:
         job = result.scalar_one_or_none()
         if job is None:
             await db.commit()
+            await _close_failed_batches(failed_batch_ids)
             return None
         job.status = "running"
         job.stage = "processing"
@@ -138,6 +155,7 @@ async def claim_next_job(worker_id: str) -> uuid.UUID | None:
         job.started_at = job.started_at or now
         job.finished_at = None
         await db.commit()
+        await _close_failed_batches(failed_batch_ids)
         return job.id
 
 
@@ -150,7 +168,7 @@ async def _is_cancel_requested(job_id: uuid.UUID) -> bool:
 async def _mark_cancelled(job_id: uuid.UUID, worker_id: str) -> None:
     now = _now()
     async with SessionLocal() as db:
-        await db.execute(
+        result = await db.execute(
             update(CaptureJob)
             .where(CaptureJob.id == job_id, CaptureJob.worker_id == worker_id)
             .values(
@@ -162,8 +180,14 @@ async def _mark_cancelled(job_id: uuid.UUID, worker_id: str) -> None:
                 finished_at=now,
                 updated_at=now,
             )
+            .returning(CaptureJob.import_batch_id)
         )
+        batch_id = result.scalar_one_or_none()
         await db.commit()
+    if batch_id is not None:
+        from app.services.panorama_import_hooks import on_import_capture_job_closed
+
+        await on_import_capture_job_closed(batch_id)
 
 
 async def heartbeat(job_id: uuid.UUID, worker_id: str) -> bool:
@@ -240,7 +264,12 @@ async def _mark_failed(job_id: uuid.UUID, worker_id: str, exc: Exception) -> Non
         job.lease_until = None
         job.worker_id = None
         job.finished_at = None if can_retry else now
+        batch_id = job.import_batch_id if not can_retry else None
         await db.commit()
+    if batch_id is not None:
+        from app.services.panorama_import_hooks import on_import_capture_job_closed
+
+        await on_import_capture_job_closed(batch_id)
 
 
 async def _mark_succeeded(job_id: uuid.UUID, worker_id: str, signal_id: uuid.UUID) -> None:

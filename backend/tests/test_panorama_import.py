@@ -208,7 +208,11 @@ async def test_client_fail_marks_import_job_failed(client):
     assert failed.status_code == 200
     assert failed.json()["status"] == "failed"
     batch = await client.get(f"/api/v1/imports/panorama/{batch_id}")
-    assert batch.json()["signals_failed"] >= 1
+    body = batch.json()
+    assert body["signals_failed"] >= 1
+    assert body["status"] == "failed"
+    assert body["capture_jobs_pending"] == 0
+    assert body["error"]
 
 
 @pytest.mark.anyio
@@ -234,3 +238,65 @@ async def test_reclaim_stale_client_captures(client):
     assert n >= 1
     refreshed = await client.get(f"/api/v1/capture/jobs/{job['id']}")
     assert refreshed.json()["status"] == "awaiting_client"
+
+
+@pytest.mark.anyio
+async def test_batch_closes_when_last_url_fails_after_a_success(client):
+    """A late failure still closes the batch: the success hook ran too early."""
+    import asyncio
+    import uuid
+
+    from sqlalchemy import select
+
+    from app.db.base import SessionLocal
+    from app.models.models import CaptureJob
+    from app.services.capture_jobs import make_worker_id, run_claimed_job
+
+    unique = uuid.uuid4().hex
+    ok_url = f"https://example.com/panorama-ok-{unique}"
+    bad_url = f"https://example.com/panorama-bad-{unique}"
+    resp = await client.post(
+        "/api/v1/imports/capture-urls", json={"text": f"{ok_url}\n{bad_url}\n"}
+    )
+    assert resp.status_code == 201, resp.text
+    batch_id = resp.json()["id"]
+    jobs = (await client.get("/api/v1/capture/jobs?status=awaiting_client&limit=50")).json()
+    ok_job = next(j for j in jobs if j.get("source_url") == ok_url)
+    bad_job = next(j for j in jobs if j.get("source_url") == bad_url)
+
+    await client.post(
+        f"/api/v1/capture/jobs/{ok_job['id']}/claim", data={"worker_id": "test-client"}
+    )
+    html = b"<html><head><title>Batch fixture</title></head><body>evidence</body></html>"
+    submit = await client.post(
+        f"/api/v1/capture/jobs/{ok_job['id']}/client-submit",
+        data={"worker_id": "test-client"},
+        files={"file": ("archive.html", html, "text/html")},
+    )
+    assert submit.status_code == 200, submit.text
+    await asyncio.sleep(0.05)
+    worker = make_worker_id()
+    async with SessionLocal() as db:
+        row = (
+            await db.execute(select(CaptureJob).where(CaptureJob.id == ok_job["id"]))
+        ).scalar_one()
+        row.status = "running"
+        row.worker_id = worker
+        row.stage = "processing"
+        await db.commit()
+    await run_claimed_job(ok_job["id"], worker)
+
+    await client.post(
+        f"/api/v1/capture/jobs/{bad_job['id']}/claim", data={"worker_id": "test-client"}
+    )
+    failed = await client.post(
+        f"/api/v1/capture/jobs/{bad_job['id']}/client-fail",
+        data={"worker_id": "test-client", "error": "captcha"},
+    )
+    assert failed.status_code == 200, failed.text
+
+    body = (await client.get(f"/api/v1/imports/panorama/{batch_id}")).json()
+    assert body["status"] == "completed"
+    assert body["signals_retained"] == 1
+    assert body["signals_failed"] == 1
+    assert body["capture_jobs_pending"] == 0
