@@ -50,6 +50,7 @@ from app.domains.evidence.signal_queries import find_signal, get_signal_detail, 
 from app.domains.evidence.signal_record import create_signal_record as _create_signal_record
 from app.domains.evidence.theme_match import match_theme as _match_theme, theme_display_tags
 from app.services.audit import record_correction
+from app.services.demand_validation import confirmed_demand_citing
 from app.services.signal_dedup import (
     FIELD_LABELS,
     DuplicateGroup,
@@ -974,6 +975,16 @@ async def assign_theme(
         if theme is None:
             raise HTTPException(404, "theme not found")
     old = s.tech_theme_id
+    if old is not None and old != payload.tech_theme_id:
+        # A confirmed demand cites this signal as evidence from its theme. Moving
+        # the signal would leave that demand unable to derive or publish anything,
+        # with no way back from the UI.
+        citing = await confirmed_demand_citing(db, s.id, old)
+        if citing is not None:
+            raise HTTPException(
+                409,
+                f"该信号是已确认需求「{citing}」的证据，移出主题后该需求无法再推导功能；请先调整需求证据或来源主题",
+            )
     s.tech_theme_id = payload.tech_theme_id
     if old != payload.tech_theme_id:
         await record_correction(

@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.models import Signal, SignalTag, TechTheme, Vocab
+from app.models.models import DemandPoint, Signal, SignalTag, TechTheme, Vocab
 
 DEMAND_STEP_KEYS = (
     "fact_identification",
@@ -49,6 +49,32 @@ def validate_demand_trace_shape(trace: Any) -> tuple[str | None, set[uuid.UUID]]
             return f"需求推导步骤 {expected_key} 存在重复证据 ID（REQ-DEM-03）", set()
         signal_ids.update(step_ids)
     return None, signal_ids
+
+
+async def confirmed_demand_citing(
+    db: AsyncSession, signal_id: uuid.UUID, theme_id: uuid.UUID | None
+) -> str | None:
+    """Name of a confirmed demand that cites this signal from this theme, if any."""
+    if theme_id is None:
+        return None
+    demands = (
+        await db.execute(
+            select(DemandPoint).where(
+                DemandPoint.review_status == 'confirmed',
+                DemandPoint.source_tech_theme_id == theme_id,
+            )
+        )
+    ).scalars()
+    wanted = str(signal_id)
+    for demand in demands:
+        steps = (demand.derivation_trace or {}).get('steps') or []
+        cited = {str(item) for step in steps for item in (step.get('evidence_signal_ids') or [])}
+        cited.update(
+            str(item) for item in ((demand.cross_validation or {}).get('evidence_signal_ids') or [])
+        )
+        if wanted in cited:
+            return demand.name
+    return None
 
 
 async def validate_demand_trace(

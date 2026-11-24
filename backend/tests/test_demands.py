@@ -245,6 +245,25 @@ async def test_confirmed_demand_enters_derivation(client):
     assert func["demand_point_id"] == demand["id"]
 
 
+async def test_moving_evidence_out_of_a_confirmed_demand_is_refused(client):
+    """REQ-DEM-03: a confirmed demand cites its evidence from its theme.
+
+    Re-theming that signal would leave the demand unable to save or publish any
+    function, with no way back from the UI, so the move is refused up front.
+    """
+    theme = await create_theme(client)
+    demand = await create_confirmed_demand(client, theme_id=theme["id"])
+    cited = demand["derivation_trace"]["steps"][0]["evidence_signal_ids"][0]
+    signal = (await client.get(f"/api/v1/signals/{cited}")).json()
+
+    blocked = await client.put(
+        f"/api/v1/signals/{cited}/theme",
+        json={"tech_theme_id": None, "expected_updated_at": signal["updated_at"]},
+    )
+    assert blocked.status_code == 409, blocked.text
+    assert "已确认需求" in blocked.json()["detail"]
+
+
 async def test_demand_counts_follow_theme_metrics_convention(client):
     """REQ-DEM-08 / REQ-DEM-14: the demand point records signal frequency
     (and source count) using the same counting convention as the theme."""

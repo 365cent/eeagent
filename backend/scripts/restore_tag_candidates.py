@@ -47,12 +47,30 @@ def put(path: str, payload: dict) -> dict:
         return json.load(response)
 
 
+def audited_tags() -> dict[str, list[str]]:
+    """Last tag set recorded per signal by the audit trail."""
+    latest: dict[str, list[str]] = {}
+    for row in get('/audit'):
+        if row.get('field_name') != 'tech_tags':
+            continue
+        value = row.get('human_value') or row.get('new_value') or []
+        if isinstance(value, list) and value:
+            latest[str(row['entity_id'])] = [str(name) for name in value]
+    return latest
+
+
 def plan() -> list[tuple[dict, list[str]]]:
+    audited = audited_tags()
     todo = []
     for signal in get('/signals?limit=200'):
         candidates = (signal.get('classification_basis') or {}).get('tag_candidates') or []
         current = list(signal.get('tags') or [])
         add: list[str] = []
+        # The audit trail is authoritative: it records the tag set a person or
+        # the pipeline last applied, which the recall pool cannot reconstruct.
+        for name in audited.get(str(signal['id']), []):
+            if name not in current and name not in add:
+                add.append(name)
         for candidate in candidates:
             name = ACRONYMS.get(str(candidate).strip().lower())
             if name and name not in current and name not in add:
