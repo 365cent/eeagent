@@ -391,3 +391,49 @@ async def test_client_claim_refreshes_batch_activity(client):
         batch = await db.get(PanoramaImportBatch, uuid.UUID(batch_id))
         assert (datetime.now(timezone.utc) - batch.updated_at).total_seconds() < 60
 
+
+@pytest.mark.anyio
+async def test_client_claim_limit_stops_a_repeated_claim_loop(client):
+    from app.core.config import get_settings
+    from app.db.base import SessionLocal
+    from app.models.models import CaptureJob
+
+    unique = uuid.uuid4().hex
+    source_url = f"https://example.com/panorama-claim-limit-{unique}"
+    resp = await client.post(
+        "/api/v1/imports/capture-urls", json={"text": f"{source_url}\n"}
+    )
+    assert resp.status_code == 201, resp.text
+    batch_id = resp.json()["id"]
+    jobs = (await client.get("/api/v1/capture/jobs?status=awaiting_client&limit=50")).json()
+    job = next(j for j in jobs if j.get("source_url") == source_url)
+
+    limit = get_settings().capture_client_max_claims
+    for _ in range(limit):
+        claimed = await client.post(
+            f"/api/v1/capture/jobs/{job['id']}/claim", data={"worker_id": "test-client"}
+        )
+        assert claimed.status_code == 200, claimed.text
+        released = await client.post(
+            f"/api/v1/capture/jobs/{job['id']}/client-release",
+            data={"worker_id": "test-client", "reason": "abort"},
+        )
+        assert released.status_code == 200, released.text
+
+    blocked = await client.post(
+        f"/api/v1/capture/jobs/{job['id']}/claim", data={"worker_id": "test-client"}
+    )
+    assert blocked.status_code == 429
+    failed = (await client.get(f"/api/v1/capture/jobs/{job['id']}")).json()
+    assert failed["status"] == "failed"
+    assert "重复领取" in (failed["error"] or "")
+    body = (await client.get(f"/api/v1/imports/panorama/{batch_id}")).json()
+    assert body["status"] == "failed"
+    assert body["capture_jobs_pending"] == 0
+
+    retried = await client.post(f"/api/v1/capture/jobs/{job['id']}/retry")
+    assert retried.status_code == 202, retried.text
+    async with SessionLocal() as db:
+        row = await db.get(CaptureJob, uuid.UUID(job["id"]))
+        assert row.client_claim_count == 0
+

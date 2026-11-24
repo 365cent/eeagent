@@ -231,6 +231,7 @@ class CaptureJob(Base):
     status: Mapped[str] = mapped_column(Text, nullable=False, default="queued", server_default="queued")
     stage: Mapped[str] = mapped_column(Text, nullable=False, default="queued", server_default="queued")
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    client_claim_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     heartbeat_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

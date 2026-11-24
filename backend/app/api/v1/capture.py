@@ -436,6 +436,21 @@ async def claim_capture_job_for_client(
     if job.status != "awaiting_client":
         raise HTTPException(409, f"job is not awaiting client capture (status={job.status})")
     now = datetime.now(timezone.utc)
+    if job.client_claim_count >= get_settings().capture_client_max_claims:
+        job.status = "failed"
+        job.stage = "failed"
+        job.error = "客户端重复领取但未完成，已超过最大次数；请重试或联系管理员。"
+        job.worker_id = None
+        job.lease_until = None
+        job.finished_at = now
+        batch_id = job.import_batch_id
+        await db.commit()
+        if batch_id is not None:
+            from app.services.panorama_import_hooks import on_import_capture_job_closed
+
+            await on_import_capture_job_closed(batch_id)
+        raise HTTPException(429, "capture job exceeded the client claim limit")
+    job.client_claim_count += 1
     job.status = "running"
     job.stage = "capturing"
     job.worker_id = worker_id[:120]
@@ -616,6 +631,7 @@ async def retry_capture_job(
     job.status = "queued"
     job.stage = "queued"
     job.attempt_count = 0
+    job.client_claim_count = 0
     job.available_at = datetime.now(timezone.utc)
     job.lease_until = None
     job.worker_id = None
