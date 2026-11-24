@@ -1,12 +1,13 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { InboxOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
+import { ClearOutlined, InboxOutlined, PlusOutlined, SearchOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Col, Input, Row, Select, Space, Spin, Statistic, Table, Tooltip } from 'antd'
 import { PageHeader } from '@/components/shared/page-header'
 import { QueryFailure } from '@/components/shared/query-failure'
 import { signalsTableLocale } from '@/components/shared/empty-state'
 import { buildSignalTableColumns } from '@/features/evidence/signal-columns'
+import { SignalDuplicateCleanupModal } from '@/components/evidence/signal-duplicate-cleanup'
 import { useOverviewStats, useRefCodeMaps, useSignalsListFiltered } from '@/hooks/use-eea-queries'
 import { useSignalTablePagination } from '@/lib/signal-table-pagination'
 import type { Signal } from '@/types/platform'
@@ -30,6 +31,7 @@ export function SignalsView({
 }) {
   const [stage, setStage] = useState('全部环节')
   const [tagFilter, setTagFilter] = useState('')
+  const [dedupeOpen, setDedupeOpen] = useState(false)
   const pager = useSignalTablePagination()
   const { rows: signalRows, total, isLoading, isError, refetch } = useSignalsListFiltered({
     query,
@@ -61,6 +63,9 @@ export function SignalsView({
         description="收集产业信号，留存可追溯证据，并通过封闭词表完成机器预标。"
         action={
           <Space>
+            <Button icon={<ClearOutlined />} onClick={() => setDedupeOpen(true)}>
+              清理重复
+            </Button>
             <Button icon={<InboxOutlined />} onClick={() => onNavigate('archived')}>
               归档证据库
             </Button>
@@ -104,6 +109,11 @@ export function SignalsView({
           />
         )}
       </Card>
+      <SignalDuplicateCleanupModal
+        open={dedupeOpen}
+        onClose={() => setDedupeOpen(false)}
+        onCleaned={() => void refetch()}
+      />
     </>
   )
 }
