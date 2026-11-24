@@ -214,7 +214,9 @@ def article_url_key(url: str | None) -> str:
     ignored = UNIVERSAL_TRACKING_KEYS | _host_tracking_keys(host)
     query = sorted(
         (key, value)
-        for key, value in parse_qsl(parts.query, keep_blank_values=False)
+        # keep_blank_values: ``?id=`` is a real (if empty) parameter and must not
+        # collapse onto the parameter-less URL.
+        for key, value in parse_qsl(parts.query, keep_blank_values=True)
         if key.lower() not in ignored
     )
     base = f"{parts.scheme.lower()}://{(parts.netloc or '').lower()}{parts.path.rstrip('/')}"

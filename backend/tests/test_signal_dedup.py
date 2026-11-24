@@ -204,6 +204,15 @@ def test_suspect_fallback_does_not_split_a_real_url_group():
     assert {m.signal.id for m in groups[0].members} == {same_key.id, same_key_copy.id}
 
 
+def test_blank_query_value_stays_a_different_url():
+    """``?id=`` is a parameter with an empty value, not the bare page."""
+    bare = _FakeSignal(url="https://example.com/x")
+    blank = _FakeSignal(url="https://example.com/x?id=")
+
+    assert bare.url_normalized == blank.url_normalized  # what the old key saw
+    assert group_signals([bare, blank]) == []
+
+
 def test_utm_parameters_are_tracking_on_every_host():
     plain = _FakeSignal(url="https://example.com/a/1")
     tagged = _FakeSignal(url="https://example.com/a/1?utm_source=wx&utm_medium=share")
