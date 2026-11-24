@@ -11,9 +11,14 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import re
 import asyncio
+import json
+import re
 import sys
+import time
+
+
+from pathlib import Path
 
 from sqlalchemy import delete, func, select
 
@@ -82,6 +87,19 @@ async def purge(kind: str, apply: bool, everything: bool) -> int:
         print('dry run: re-run with --apply to delete')
         return len(rows)
     ids = [tag_id for tag_id, _ in rows]
+    # Deletion is irreversible and nothing else records which signal carried
+    # which tag, so keep a snapshot next to the backup folder.
+    snapshot = Path(__file__).resolve().parent.parent / 'data' / f'purged-tags-{int(time.time())}.json'
+    snapshot.parent.mkdir(parents=True, exist_ok=True)
+    snapshot.write_text(
+        json.dumps(
+            {'kind': kind, 'tags': [{'id': str(tag_id), 'name': name} for tag_id, name in rows]},
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding='utf-8',
+    )
+    print('snapshot: ' + str(snapshot))
     async with SessionLocal() as db:
         await db.execute(delete(SignalTag).where(SignalTag.vocab_id.in_(ids)))
         await db.execute(delete(Vocab).where(Vocab.id.in_(ids)))
