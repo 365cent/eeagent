@@ -45,6 +45,13 @@
   line-height: 1.6;
 }
 
+.signal-dedupe-select.ant-checkbox-wrapper {
+  min-inline-size: 44px;
+  min-block-size: 44px;
+  margin-inline-end: 0;
+  justify-content: center;
+}
+
 .signal-dedupe-diff-value {
   display: inline-block;
   max-width: 100%;
