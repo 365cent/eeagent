@@ -4,9 +4,13 @@ import type { TagCluster } from '@/lib/topic-clustering'
 /** Enough of a signal row for naming, source counts, and theme assignment. */
 export function signalFromClusterMember(member: ClusterMemberOut | SignalNeighborOut): SignalOut {
   const host = member.source_host || 'evidence.local'
-  const url = host.includes('.')
-    ? `https://${host}/signals/${member.signal_id}`
-    : `https://evidence.local/${encodeURIComponent(host)}/${member.signal_id}`
+  // Prefer the member's real URL (document members carry eea://document/<id>)
+  // so source counting and dedup use actual provenance, not a synthesized host.
+  const url = member.url?.trim() || (
+    host.includes('.')
+      ? `https://${host}/signals/${member.signal_id}`
+      : `https://evidence.local/${encodeURIComponent(host)}/${member.signal_id}`
+  )
   return {
     id: member.signal_id,
     title: member.title,

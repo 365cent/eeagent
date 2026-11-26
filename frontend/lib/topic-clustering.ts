@@ -179,6 +179,10 @@ function titleDedupKey(title: string): string {
 export function evidenceSourceKey(signal: SignalOut): string {
   const raw = signal.url_normalized?.trim() || signal.url?.trim()
   if (raw) {
+    // An uploaded document is its own origin (REQ-DEM-14 counts sources by
+    // primary URL, and every eea://document/<id> is distinct). Letting these
+    // fall through to channel would collapse all documents into one source.
+    if (/^eea:\/\/document\//i.test(raw)) return raw.toLowerCase()
     try {
       const href = raw.startsWith('http') ? raw : `https://${raw}`
       return new URL(href).hostname.toLowerCase()
@@ -191,9 +195,14 @@ export function evidenceSourceKey(signal: SignalOut): string {
   return signal.channel_code?.trim().toLowerCase() || signal.id
 }
 
-/** Excludes captcha shells, non-retained rows, and capture-failure titles. */
+/** Excludes captcha shells, non-retained rows, and capture-failure titles.
+ *
+ * Document-derived signals count as evidence here: a corpus may be entirely
+ * uploaded reports, and topic creation on this page is a human confirm. The
+ * automatic theme-aggregate preview on the signal page still skips them
+ * (BE-05 keeps document assignment manual until re-extraction is accepted).
+ */
 export function isReliableTopicEvidence(signal: SignalOut): boolean {
-  if (signal.document_id) return false
   const status = signal.evidence_status_code?.trim()
   if (status && status !== 'retained') return false
   const title = titleForEvidenceCheck(signal.title)
@@ -366,7 +375,7 @@ export function proposeNaturalTopicName(
 export function clusterUnassignedSignals(signals: SignalOut[], minOverlap = 2): TagCluster[] {
   const pool = dedupeSignalsByUrl(
     signals.filter(
-      (s) => !s.tech_theme_id && !s.document_id && (s.tags?.length ?? 0) > 0 && isReliableTopicEvidence(s),
+      (s) => !s.tech_theme_id && (s.tags?.length ?? 0) > 0 && isReliableTopicEvidence(s),
     ),
   )
   const used = new Set<string>()

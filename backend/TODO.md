@@ -100,6 +100,7 @@
 - 聚类仅输出候选名称、成员和解释；人工确认后创建主题/开放标签。离线脚本默认只出报告，显式 apply 才写；不创建封闭类目。
 - 2026-11-26 多来源覆盖切片：新增 tests/test_signal_sources.py 五项用例——新信号自动生成 1 条主来源（provenance=primary）；补充 URL 按 normalize_url 去重（大小写/尾斜杠/query 归一），重复提交返回同一行，主 URL 作为补充提交返回主来源；归档信号拒绝新增来源（409）；无权限角色 403；主题 source_count 计入补充 URL，跨信号共享主 URL 只计一次，归档成员的来源仍计入（signal_frequency 排除归档）。证据：5 passed；主题/聚类/归档相关 34 passed。真实 8/16 案例仍待 DOC-02。
 - 2026-11-26 结构化归集依据切片：GET /signals/{id}/theme-aggregate-preview 现在返回 structured_basis（tech_object/underlying_capability/change_direction，wave-1 按标签长度排序的启发式）与 basis_reason（一致性门控失败时给出原因）；复用此前未接线的 aggregation_structured_basis/structured_basis_consistent。前端类型同步为可选字段，主题抽屉在候选预览中展示非空的技术对象/底层能力/变化方向，组件 antd lint 与 pnpm build 通过。证据：pytest tests/test_aggregation.py -q → 14 passed；OpenAPI 路径快照 1 passed；pnpm typecheck 通过。
+- 2026-11-26 聚类样本修复（生产 10.215.35.10:8090 现象：/createTopic 样本 0、无候选）：`/themes/cluster-report` 曾用 `document_id IS NULL` 把上传文档信号全部排除，文档语料必然空样本；手动整理面板与前端 `isReliableTopicEvidence`/`clusterUnassignedSignals` 同样排除文档信号，连勾选都做不到。现改为网页与文档留存信号同一池（仍只输出候选，写入仍需人工确认；`theme-aggregate-preview` 对文档信号的自动归集门控不变，符合「文档信号人工指定」）。`eea://document/<id>` 按文档计为不同来源（REQ-DEM-14 按主链 URL 去重），成员输出新增 `url` 供前端按真实来源计数。阈值 0.7→0.75：2026-11-26 生产 5 篇报告中 3 篇只共享「架构」一个标签，相似度 0.25–0.29 恰好低于 0.3，0.7 下全部为单例；0.75 后形成 3 信号/3 来源的「架构」候选。证据：tests/test_tag_clustering.py 新增文档语料用例；tag/themes/openapi/document_signals 38 passed；pnpm typecheck 通过。
 - 验收：8 条信号/16 URL 的隔离测试 fixture、共享 URL、归档、重新归集、同词异义/异词同义；真实 8/16 复现等待 DOC-02 数据。
 
 ## BE-06 需求点推导与复核

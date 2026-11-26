@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import {
   App as AntApp,
   Alert,
@@ -81,7 +81,7 @@ function figureStatus(figure: DocumentFigureOut) {
   return <Tag color="success">已就绪</Tag>
 }
 
-export function DocumentResearchPanel({
+export const DocumentResearchPanel = memo(function DocumentResearchPanel({
   documentId,
   focus,
   onFocusChange,
@@ -441,4 +441,4 @@ export function DocumentResearchPanel({
       ) : null}
     </div>
   )
-}
+})

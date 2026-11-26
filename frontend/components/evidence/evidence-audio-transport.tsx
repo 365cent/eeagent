@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PauseOutlined, CaretRightOutlined, BorderOutlined } from '@ant-design/icons'
 import { Button, Space, Typography } from 'antd'
 import { buildAudioOverviewSegments, type AudioOverviewSegment } from '@/lib/evidence/audio-overview-segments'
@@ -107,6 +107,9 @@ function useEvidenceAudioOverview({ markdown, articleRef }: UseEvidenceAudioOver
     return () => window.speechSynthesis?.removeEventListener('voiceschanged', onVoices)
   }, [])
 
+  // Segmenting walks the whole snapshot; keep it off the parent's render path.
+  const segmentCount = useMemo(() => buildAudioOverviewSegments(markdown).length, [markdown])
+
   return {
     playing,
     paused,
@@ -115,6 +118,7 @@ function useEvidenceAudioOverview({ markdown, articleRef }: UseEvidenceAudioOver
     pause,
     stop,
     canPlay: Boolean(markdown.trim()),
+    segmentCount,
   }
 }
 
@@ -124,14 +128,13 @@ type EvidenceAudioTransportProps = {
 }
 
 export function EvidenceAudioTransport({ markdown, articleRef }: EvidenceAudioTransportProps) {
-  const { playing, paused, segmentIndex, play, pause, stop, canPlay } = useEvidenceAudioOverview({
-    markdown,
-    articleRef,
-  })
+  const { playing, paused, segmentIndex, play, pause, stop, canPlay, segmentCount } =
+    useEvidenceAudioOverview({
+      markdown,
+      articleRef,
+    })
 
   if (!canPlay) return null
-
-  const previewTotal = buildAudioOverviewSegments(markdown).length
 
   return (
     <div className="evidence-audio-transport">
@@ -152,9 +155,9 @@ export function EvidenceAudioTransport({ markdown, articleRef }: EvidenceAudioTr
         <Button size="small" icon={<BorderOutlined />} disabled={!playing && !paused} onClick={stop}>
           停止
         </Button>
-        {(playing || paused) && previewTotal > 0 ? (
+        {(playing || paused) && segmentCount > 0 ? (
           <Text type="secondary" className="evidence-audio-transport-meta">
-            第 {segmentIndex + 1} / {previewTotal} 段
+            第 {segmentIndex + 1} / {segmentCount} 段
           </Text>
         ) : null}
       </Space>

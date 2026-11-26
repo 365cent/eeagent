@@ -289,6 +289,7 @@ export type ClusterMemberOut = {
   updated_at: string
   source_host: string
   assigned?: boolean
+  url?: string
 }
 
 export type ThemeClusterProposal = {
@@ -312,6 +313,7 @@ export type SignalNeighborOut = {
   updated_at: string
   source_host: string
   assigned: boolean
+  url?: string
 }
 
 export type ThemeClusterTagPoint = {

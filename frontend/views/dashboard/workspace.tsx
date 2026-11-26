@@ -203,6 +203,7 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
   const [sourceOpen, setSourceOpen] = useState(true)
   const [previewOpen, setPreviewOpen] = useState(true)
   const [stageView, setStageView] = useState<EvidenceStageView>('markdown')
+  const [visitedStageViews, setVisitedStageViews] = useState<EvidenceStageView[]>(['markdown'])
   const [bodyText, setBodyText] = useState<string | null>(null)
   const [canonicalMd, setCanonicalMd] = useState<string | null>(null)
   const [archiveFrameLoaded, setArchiveFrameLoaded] = useState(false)
@@ -380,6 +381,12 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
     stageViewLockedRef.current = false
   }, [signalId])
 
+  // Panes mount on first visit and stay mounted: building the deck, archive,
+  // research and chat subtrees at once is what stalled the detail page.
+  useEffect(() => {
+    setVisitedStageViews((prev) => (prev.includes(stageView) ? prev : [...prev, stageView]))
+  }, [stageView])
+
   useEffect(() => {
     if (stageViewLockedRef.current) return
     if (documentPreviewPending) {
@@ -441,8 +448,10 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
   }, [detail?.body_object_key, apiId])
 
   useEffect(() => {
+    // Only a new signal loads a new archive document. Switching tabs must not
+    // bring the loading cover back over an already loaded frame.
     setArchiveFrameLoaded(false)
-  }, [apiId, stageView, detail?.updated_at, detail?.evidence_status_code])
+  }, [apiId])
 
 
   useEffect(() => {
@@ -553,6 +562,11 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
   }
 
   const segmentedValue = coreStageViews.includes(stageView) ? stageView : undefined
+  const paneClass = (view: EvidenceStageView) =>
+    `evidence-stage-tab-pane${stageView === view ? ' is-active' : ''}`
+  // Keep visited panes mounted so returning to a tab reuses the rendered DOM.
+  const paneMounted = (view: EvidenceStageView) =>
+    stageView === view || visitedStageViews.includes(view)
 
   return (
     <div className={workspaceLayoutClass}>
@@ -716,110 +730,124 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
           <EvidenceAudioTransport markdown={markdownSource} articleRef={markdownArticleRef} />
         ) : null}
         <div className="evidence-stage-panel">
-          <div className={`evidence-stage-tab-pane${stageView === 'preview' ? ' is-active' : ''}`}>
-            {documentId && documentPreviewMode === 'deck' ? (
-              <DocumentDeckPreviewLazy documentId={documentId} />
-            ) : documentId && documentPreviewMode === 'pdf' ? (
-              <DocumentPdfViewerLazy documentId={documentId} filename={documentQuery.data?.filename} />
-            ) : (
-              <PlatformEmptyState
-                title="无法预览文档"
-                description="该信号未关联可预览的 PDF、Office 或 PPTX 文档。"
-              />
-            )}
-          </div>
-          <div className={`evidence-stage-tab-pane${stageView === 'archive' ? ' is-active' : ''}`}>
-            {hasArchive && apiId ? (
-              <>
-                {!archiveFrameLoaded ? (
-                  <div className="evidence-archive-frame-loading">
-                    <Spin description="加载归档网页…" />
-                  </div>
-                ) : null}
-                <iframe
-                  title="HTML 归档回放"
-                  className="evidence-archive-frame-full"
-                  sandbox="allow-same-origin"
-                  referrerPolicy="no-referrer"
-                  src={signalArchiveUrl(apiId)}
-                  onLoad={() => setArchiveFrameLoaded(true)}
+          {paneMounted('preview') ? (
+            <div className={paneClass('preview')}>
+              {documentId && documentPreviewMode === 'deck' ? (
+                <DocumentDeckPreviewLazy documentId={documentId} />
+              ) : documentId && documentPreviewMode === 'pdf' ? (
+                <DocumentPdfViewerLazy documentId={documentId} filename={documentQuery.data?.filename} />
+              ) : (
+                <PlatformEmptyState
+                  title="无法预览文档"
+                  description="该信号未关联可预览的 PDF、Office 或 PPTX 文档。"
                 />
-              </>
-            ) : (
-              <PlatformEmptyState title="暂无 HTML 归档" description="该信号未留存 SingleFile 快照，可查看解析快照或继续用研究助手提问。" />
-            )}
-          </div>
-          <div className={['evidence-stage-tab-pane', stageView === 'research' ? 'is-active' : ''].filter(Boolean).join(' ')}>
-            {documentId ? (
-              <DocumentResearchPanel
-                key={`${documentId}-${documentRefreshKey}`}
-                documentId={documentId}
-                focus={researchFocus}
-                onFocusChange={updateResearchFocus}
-                onReingested={handleDocumentReingested}
-              />
-            ) : (
-              <PlatformEmptyState title="无法打开文档研究" description="该证据未关联可解析文档。" />
-            )}
-          </div>
-          <div className={`evidence-stage-tab-pane${stageView === 'markdown' ? ' is-active' : ''}`}>
-            {failedCaptionCount > 0 ? (
-              <div className="evidence-figure-pending-bar">
-                <span className="evidence-figure-pending-text">
-                  本篇有 {failedCaptionCount} 张图片未生成描述
-                </span>
-                <Button
-                  size="small"
-                  loading={recaptioning}
-                  onClick={() => void handleRegenerateCaptions()}
-                >
-                  重新生成整篇图注
-                </Button>
-              </div>
-            ) : null}
-            <SignalBodyMarkdown
-              ref={markdownArticleRef}
-              markdown={markdownSource || signal.title}
-              figureByIndex={figureByIndex}
-            />
-          </div>
-          <div className={`evidence-stage-tab-pane${stageView === 'mindmap' ? ' is-active' : ''}`}>
-            <EvidenceStudioPane
-              signalId={apiId}
-              kind="mindmap"
-              fetchEnabled={stageView === 'mindmap'}
-              cached={studioCache.mindmap}
-              onLoaded={(payload) => rememberStudioResult('mindmap', payload as StudioMindmapPayload)}
-              onInvalidate={() => forgetStudioResult('mindmap')}
-            />
-          </div>
-          <div className={`evidence-stage-tab-pane${stageView === 'report' ? ' is-active' : ''}`}>
-            <EvidenceStudioPane
-              signalId={apiId}
-              kind="report"
-              fetchEnabled={stageView === 'report'}
-              cached={studioCache.report}
-              onLoaded={(payload) => rememberStudioResult('report', payload as string)}
-              onInvalidate={() => forgetStudioResult('report')}
-            />
-          </div>
-          <div className={`evidence-stage-tab-pane${stageView === 'infographic' ? ' is-active' : ''}`}>
-            <EvidenceStudioPane
-              signalId={apiId}
-              kind="infographic"
-              fetchEnabled={stageView === 'infographic'}
-              cached={studioCache.infographic}
-              onLoaded={(payload) => rememberStudioResult('infographic', payload as StudioInfographicPayload)}
-              onInvalidate={() => forgetStudioResult('infographic')}
-            />
-          </div>
-          <div
-            className={`evidence-stage-tab-pane evidence-stage-tab-pane-assistant${stageView === 'assistant' ? ' is-active' : ''}`}
-          >
-            <div className="evidence-assistant-shell chat-card evidence-stage-chat">
-              <EvidenceAssistantChat signalId={apiId} onCitation={handleCitation} />
+              )}
             </div>
-          </div>
+          ) : null}
+          {paneMounted('archive') ? (
+            <div className={paneClass('archive')}>
+              {hasArchive && apiId ? (
+                <>
+                  {!archiveFrameLoaded ? (
+                    <div className="evidence-archive-frame-loading">
+                      <Spin description="加载归档网页…" />
+                    </div>
+                  ) : null}
+                  <iframe
+                    title="HTML 归档回放"
+                    className="evidence-archive-frame-full"
+                    sandbox="allow-same-origin"
+                    referrerPolicy="no-referrer"
+                    src={signalArchiveUrl(apiId)}
+                    onLoad={() => setArchiveFrameLoaded(true)}
+                  />
+                </>
+              ) : (
+                <PlatformEmptyState title="暂无 HTML 归档" description="该信号未留存 SingleFile 快照，可查看解析快照或继续用研究助手提问。" />
+              )}
+            </div>
+          ) : null}
+          {paneMounted('research') ? (
+            <div className={paneClass('research')}>
+              {documentId ? (
+                <DocumentResearchPanel
+                  key={`${documentId}-${documentRefreshKey}`}
+                  documentId={documentId}
+                  focus={researchFocus}
+                  onFocusChange={updateResearchFocus}
+                  onReingested={handleDocumentReingested}
+                />
+              ) : (
+                <PlatformEmptyState title="无法打开文档研究" description="该证据未关联可解析文档。" />
+              )}
+            </div>
+          ) : null}
+          {paneMounted('markdown') ? (
+            <div className={paneClass('markdown')}>
+              {failedCaptionCount > 0 ? (
+                <div className="evidence-figure-pending-bar">
+                  <span className="evidence-figure-pending-text">
+                    本篇有 {failedCaptionCount} 张图片未生成描述
+                  </span>
+                  <Button
+                    size="small"
+                    loading={recaptioning}
+                    onClick={() => void handleRegenerateCaptions()}
+                  >
+                    重新生成整篇图注
+                  </Button>
+                </div>
+              ) : null}
+              <SignalBodyMarkdown
+                ref={markdownArticleRef}
+                markdown={markdownSource || signal.title}
+                figureByIndex={figureByIndex}
+              />
+            </div>
+          ) : null}
+          {paneMounted('mindmap') ? (
+            <div className={paneClass('mindmap')}>
+              <EvidenceStudioPane
+                signalId={apiId}
+                kind="mindmap"
+                fetchEnabled={stageView === 'mindmap'}
+                cached={studioCache.mindmap}
+                onLoaded={(payload) => rememberStudioResult('mindmap', payload as StudioMindmapPayload)}
+                onInvalidate={() => forgetStudioResult('mindmap')}
+              />
+            </div>
+          ) : null}
+          {paneMounted('report') ? (
+            <div className={paneClass('report')}>
+              <EvidenceStudioPane
+                signalId={apiId}
+                kind="report"
+                fetchEnabled={stageView === 'report'}
+                cached={studioCache.report}
+                onLoaded={(payload) => rememberStudioResult('report', payload as string)}
+                onInvalidate={() => forgetStudioResult('report')}
+              />
+            </div>
+          ) : null}
+          {paneMounted('infographic') ? (
+            <div className={paneClass('infographic')}>
+              <EvidenceStudioPane
+                signalId={apiId}
+                kind="infographic"
+                fetchEnabled={stageView === 'infographic'}
+                cached={studioCache.infographic}
+                onLoaded={(payload) => rememberStudioResult('infographic', payload as StudioInfographicPayload)}
+                onInvalidate={() => forgetStudioResult('infographic')}
+              />
+            </div>
+          ) : null}
+          {paneMounted('assistant') ? (
+            <div className={`${paneClass('assistant')} evidence-stage-tab-pane-assistant`}>
+              <div className="evidence-assistant-shell chat-card evidence-stage-chat">
+                <EvidenceAssistantChat signalId={apiId} onCitation={handleCitation} />
+              </div>
+            </div>
+          ) : null}
         </div>
       </section>
       {previewOpen ? (

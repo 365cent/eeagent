@@ -567,6 +567,25 @@ mark.evidence-tts-highlight {
   display: flex;
 }
 
+/*
+ * Switching tabs used to tear the subtree out of layout with `display: none`,
+ * so every visit re-laid out the whole article. Keep the visited pane rendered
+ * and let the browser cache its layout instead.
+ */
+@supports (content-visibility: hidden) {
+  .evidence-stage-tab-pane {
+    display: flex;
+  }
+
+  .evidence-stage-tab-pane:not(.is-active) {
+    content-visibility: hidden;
+    flex: 0 0 auto;
+    height: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+}
+
 .document-pdf-viewer {
   display: flex;
   flex-direction: column;

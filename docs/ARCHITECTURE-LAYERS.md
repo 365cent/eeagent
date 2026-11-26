@@ -72,6 +72,7 @@ cd backend && uv run lint-imports
 
 | 日期 | 变化 | 影响方 |
 | --- | --- | --- |
+| 2026-11-26 | GET /themes/cluster-report 样本改为网页 + 上传文档的留存信号（不再排除 document_id）；`eea://document/<id>` 按文档计为不同 source_host；ClusterMemberOut/SignalNeighborOut 新增可选 url；默认距离阈值 0.7→0.75（共同标签 1/N 也能成组）。文档信号仍只能人工确认写入，theme-aggregate-preview 自动归集门控不变 | BE-05、FE-04、FE-11 |
 | 2026-11-26 | DELETE /landing-points/{id} 返回 204；删除前写 deleted 审计快照（功能、名称、域、角色、标准/评估数）并级联标准/评估；GET /audit 响应新增 reason、model_version、rule_version、skill_version、score_source | BE-08、BE-03、FE-07/08 |
 | 2026-11-26 | GET /signals/{id}/theme-aggregate-preview 新增可选 structured_basis（tech_object/underlying_capability/change_direction）与 basis_reason；一致性门控失败时清除推荐 | BE-05、FE-04 |
 | 2026-11-26 | 采集 submission 指纹统一使用规范化后的 MIME：POST /capture 与 POST /capture/jobs、client-submit 对同一 .pptx + octet-stream 互相重放而非 409 | BE-01、CC-02、FE-02 |

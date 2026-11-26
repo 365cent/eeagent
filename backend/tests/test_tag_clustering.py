@@ -225,6 +225,79 @@ async def test_cluster_report_uses_live_unassigned_tags(client):
 
 
 @pytest.mark.no_db
+def test_document_urls_count_one_source_per_document():
+    """`eea://document/<id>` must not collapse every upload into one source."""
+    from app.services.tag_clustering import cluster_source_host, document_source_key
+
+    a = document_source_key("eea://document/9a20400c-4e07-4fc4-9592-787119bde1f1")
+    b = document_source_key("eea://document/6a4ada10-600c-4c04-a7a1-6a1eb182969e")
+    assert a == "document-9a20400c"
+    assert b == "document-6a4ada10"
+    assert a != b, "two uploaded reports are two sources (REQ-DEM-14 counts by primary URL)"
+    assert document_source_key("https://reports.example/a") is None
+    assert document_source_key("") is None
+    assert (
+        cluster_source_host("eea://document/9a20400c-4e07-4fc4-9592-787119bde1f1", None, None, "web")
+        == a
+    )
+    assert cluster_source_host("https://a.example/x", None, None, "web") == "a.example"
+
+
+@pytest.mark.anyio
+async def test_cluster_report_covers_a_document_only_corpus(client, monkeypatch):
+    """Production shape: every retained signal is an uploaded report.
+
+    The report pool used to filter `document_id IS NULL`, so a document-only
+    corpus clustered 0 samples and /createTopic could never propose a topic.
+    """
+    from app.services import doc_ingest
+
+    async def fake_ingest(data, filename, mime, **kwargs):
+        return doc_ingest.IngestResult(
+            canonical_md=f"# {filename}\n\n区域控制器与跨域电子电气架构的段落正文。\n",
+            markitdown_version="0.1.9",
+            figures=[],
+            vision_model=None,
+        )
+
+    monkeypatch.setattr(
+        "app.domains.evidence.document_pipeline.ingest_document", fake_ingest
+    )
+
+    async def document_signal(filename: str, content: bytes) -> dict:
+        uploaded = await client.post(
+            "/api/v1/documents/raw",
+            files={"file": (filename, content, "application/octet-stream")},
+        )
+        assert uploaded.status_code == 201, uploaded.text
+        created = await client.post(
+            "/api/v1/signals",
+            json={"document_id": uploaded.json()["id"], "channel_code": "web"},
+        )
+        assert created.status_code == 201, created.text
+        return created.json()
+
+    doc_a = await document_signal("区域架构系列研究报告.docx", b"doc-a-bytes")
+    doc_b = await document_signal("跨域控制器架构研究报告.docx", b"doc-b-bytes")
+    await set_signal_tags(client, doc_a["id"], ["区域控制", "架构", "跨域"])
+    await set_signal_tags(client, doc_b["id"], ["区域控制", "架构", "电子电气"])
+
+    report = (await client.get("/api/v1/themes/cluster-report")).json()
+    assert report["sample_size"] >= 2, "document-derived retained signals must join the pool"
+    assert report["unassigned_count"] >= 2
+    family = next(
+        cluster
+        for cluster in report["clusters"]
+        if {doc_a["id"], doc_b["id"]} <= {m["signal_id"] for m in cluster["members"]}
+    )
+    assert family["source_count"] == 2, "two uploaded documents are two distinct sources"
+    members = {m["signal_id"]: m for m in family["members"]}
+    assert members[doc_a["id"]]["url"].startswith("eea://document/")
+    assert members[doc_b["id"]]["url"].startswith("eea://document/")
+    assert len({m["source_host"] for m in family["members"]}) == 2
+
+
+@pytest.mark.no_db
 def test_sparse_tag_sets_sharing_two_tags_are_grouped():
     """Real captures carry 2-6 tags; sharing two of them must still form a family.
 

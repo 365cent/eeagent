@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { App as AntApp, Button, Card, Collapse, Descriptions, Input, Select, Space, Spin, Tag, Typography } from 'antd'
 import { isUuid } from '@/lib/api/api-errors'
@@ -78,7 +78,10 @@ type EvidenceAssistantChatProps = {
   onCitation?: (refId: string, kind: string) => void
 }
 
-export function EvidenceAssistantChat({ signalId, onCitation }: EvidenceAssistantChatProps) {
+export const EvidenceAssistantChat = memo(function EvidenceAssistantChat({
+  signalId,
+  onCitation,
+}: EvidenceAssistantChatProps) {
   const { message: messageApi } = AntApp.useApp()
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
@@ -669,4 +672,4 @@ export function EvidenceAssistantChat({ signalId, onCitation }: EvidenceAssistan
       </Space>
     </>
   )
-}
+})

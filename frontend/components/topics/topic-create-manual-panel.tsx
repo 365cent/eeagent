@@ -120,7 +120,6 @@ export function TopicCreateManualPanel({ onNavigate }: { onNavigate: NavigateFn 
 
   const pool = useMemo(() => {
     return signals.filter((signal) => {
-      if (signal.document_id) return false
       if (onlyUnassigned && signal.tech_theme_id) return false
       return isReliableTopicEvidence(signal)
     })

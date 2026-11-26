@@ -36,8 +36,8 @@ export function useTopicClusterCandidates() {
   const themeTagMap = useMemo(() => buildThemeTagMap(themes ?? []), [themes])
 
   const stats = useMemo(() => {
-    const unassigned = signals.filter((s) => !s.tech_theme_id && !s.document_id)
-    const noTags = signals.filter((s) => !s.document_id && !(s.tags?.length ?? 0))
+    const unassigned = signals.filter((s) => !s.tech_theme_id)
+    const noTags = signals.filter((s) => !(s.tags?.length ?? 0))
     const candidateTopics =
       clusterReportQuery.data?.clusters.length ?? clusterUnassignedSignals(signals).length
     return {

@@ -1,6 +1,7 @@
 """Live technical-tag clustering for theme proposals.
 
-Reads retained signals and their current ``tech_tag`` names.
+Reads retained signals and their current ``tech_tag`` names - web captures and
+uploaded-document signals alike, because a corpus may be entirely documents.
 Builds a binary tag matrix, then uses scikit-learn average-linkage
 agglomerative clustering on cosine distance. A lone signal that does not
 join any multi-source family stays its own proposal. The report is a
@@ -44,9 +45,11 @@ POOL_LIMIT = 800
 # article carries only a handful of tags (2-6), so two articles that share two
 # tags sit around 0.5 distance even when they describe the same technology.
 # 0.45 (= similarity 0.55) therefore left every article a singleton and no
-# candidate topic could ever satisfy the two-source rule. 0.7 keeps a real
-# overlap bar while still forming families on this tag density.
-COSINE_DISTANCE_THRESHOLD = 0.7
+# candidate topic could ever satisfy the two-source rule. 0.75 = similarity
+# 0.25 keeps a real overlap bar while still joining reports that share one of
+# three or four tags (1/sqrt(3*4) = 0.29, 1/4 = 0.25): measured on the 2026-11-26
+# production corpus of uploaded reports, 0.7 left all five as singletons.
+COSINE_DISTANCE_THRESHOLD = 0.75
 # Cohesion is the mean pairwise similarity of a family, i.e. 1 - distance.
 # Keep it derived so the two knobs cannot contradict each other.
 MIN_COHESION = round(1.0 - COSINE_DISTANCE_THRESHOLD, 4)
@@ -78,6 +81,7 @@ class TagSignal:
     source_host: str
     url_key: str
     assigned: bool = False
+    url: str = ""
 
 
 def source_host(url: str | None, publisher: str | None, channel: str | None) -> str:
@@ -86,13 +90,44 @@ def source_host(url: str | None, publisher: str | None, channel: str | None) -> 
         try:
             href = raw if "://" in raw else f"https://{raw}"
             host = urlparse(href).hostname
-            if host:
+            if host and host.lower() != "document":
                 return host.lower()
         except ValueError:
             pass
     if publisher and publisher.strip():
         return publisher.strip().lower()
     return (channel or "unknown").strip().lower() or "unknown"
+
+
+_DOCUMENT_URL_PREFIX = "eea://document/"
+
+
+def document_source_key(url: str | None) -> str | None:
+    """`eea://document/<id>` → one stable source id per uploaded document.
+
+    Theme source counting dedups by a signal's primary URL (REQ-DEM-14), where
+    every document URL is distinct, so two uploaded reports are two sources.
+    The bare `document` host would collapse every upload into one source and a
+    document-only corpus could never satisfy the two-source topic rule.
+    """
+    raw = (url or "").strip()
+    if not raw.lower().startswith(_DOCUMENT_URL_PREFIX):
+        return None
+    doc_id = raw[len(_DOCUMENT_URL_PREFIX) :].strip().split("/", 1)[0]
+    return f"document-{doc_id[:8]}" if doc_id else None
+
+
+def cluster_source_host(
+    url: str | None,
+    publisher: str | None,
+    source_label: str | None,
+    channel: str | None,
+) -> str:
+    """Source identity for the cluster report; documents count per document."""
+    doc_key = document_source_key(url)
+    if doc_key:
+        return doc_key
+    return source_host(url, publisher, channel)
 
 
 def reliable_title(title: str) -> bool:
@@ -347,6 +382,7 @@ def _member(record: TagSignal) -> ClusterMemberOut:
         updated_at=record.updated_at,
         source_host=record.source_host,
         assigned=record.assigned,
+        url=record.url,
     )
 
 
@@ -361,6 +397,7 @@ def _neighbor(record: TagSignal, similarity: float, shared: list[str]) -> Signal
         updated_at=record.updated_at,
         source_host=record.source_host,
         assigned=record.assigned,
+        url=record.url,
     )
 
 
@@ -523,16 +560,21 @@ def cluster_tag_signals(records: list[TagSignal], *, truncated: bool = False) ->
 
 
 async def build_theme_cluster_report(db: AsyncSession) -> ThemeClusterReport:
-    """Cluster live tech tags. Families may already belong to a theme; writing stays a separate confirm."""
+    """Cluster live tech tags, web and document-derived signals alike.
+
+    A corpus built from uploaded reports is all `eea://document/...` signals;
+    excluding them left the report empty exactly when evidence existed. They
+    join as proposal candidates only - writing a theme stays a separate human
+    confirm, and the automatic theme-aggregate preview still skips them
+    (BE-05: document signals keep manual assignment until re-extraction is
+    accepted). Families may already belong to a theme.
+    """
     rows = (
         (
             await db.execute(
                 select(Signal)
                 .options(selectinload(Signal.tags).selectinload(SignalTag.vocab))
-                .where(
-                    Signal.document_id.is_(None),
-                    Signal.evidence_status_code == "retained",
-                )
+                .where(Signal.evidence_status_code == "retained")
                 .order_by(Signal.updated_at.desc())
             )
         )
@@ -555,16 +597,20 @@ async def build_theme_cluster_report(db: AsyncSession) -> ThemeClusterReport:
         )
         if not tags:
             continue
-        url_key = (signal.url_normalized or signal.url or str(signal.id)).strip().lower()
+        url = (signal.url_normalized or signal.url or "").strip()
+        url_key = (url or str(signal.id)).strip().lower()
         record = TagSignal(
             id=signal.id,
             title=signal.title,
             tags=tags,
             stage=signal.value_chain_stage_code,
             updated_at=signal.updated_at,
-            source_host=source_host(signal.url_normalized or signal.url, signal.publisher, signal.channel_code),
+            source_host=cluster_source_host(
+                url, signal.publisher, signal.source_label, signal.channel_code
+            ),
             url_key=url_key,
             assigned=signal.tech_theme_id is not None,
+            url=url,
         )
         current = by_url.get(url_key)
         if current is None or record.updated_at >= current.updated_at:

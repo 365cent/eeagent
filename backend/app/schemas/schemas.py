@@ -140,6 +140,7 @@ class ClusterMemberOut(BaseModel):
     updated_at: datetime
     source_host: str
     assigned: bool = False
+    url: str = ""
 
 
 class ThemeClusterProposal(BaseModel):
@@ -165,6 +166,7 @@ class SignalNeighborOut(BaseModel):
     updated_at: datetime
     source_host: str
     assigned: bool = False
+    url: str = ""
 
 
 class ThemeClusterMapRegion(BaseModel):
