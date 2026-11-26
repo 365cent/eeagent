@@ -49,7 +49,7 @@
 - 完成检索标题、发布主体、摘要与技术标签，以及来源/渠道/环节/状态/主题筛选。保留列表兼容形状，通过响应总数头提供分页总量。
 - 归档后禁止新自动推导和自动覆盖，历史链路仍可读；恢复后需要重新复核。补正文后按规则更新状态，禁止仅修改状态制造成功。
 - archive 回放使用隔离 iframe 与受限响应策略；文件/图片缺失返回明确错误。
-- 2026-11-26 失效对象切片：GET /signals/{id}/body、/archive、/figures 与文档 /canonical.md、/preview.pdf 在对象键存在但文件缺失时统一返回 404 并带上对象键；文档来源信号的 /figures 由静默空列表改为明确 404（前端 fetchSignalFigureByIndex 已有回退解析，不会弹错）。新增 tests/test_missing_objects.py 四项用例。证据：4 passed；文档/信号相关 47 passed。
+- 2026-11-26 失效对象切片：GET /signals/{id}/body、/archive、/figures 与文档 /canonical.md、/preview.pdf 在对象键存在但文件缺失时统一返回 404 并带上对象键；文档来源信号的 /figures 由静默空列表改为明确 404（前端 fetchSignalFigureByIndex 已有回退解析，不会弹错）。新增 tests/test_missing_objects.py 五项用例（含图块行图片缺失 404 与 recaption 转 needs_review）。证据：5 passed；文档/信号相关 47 passed。
 - 验收：各状态转换、分页边界、中文/标签搜索、归档与恢复、失效对象、粘贴修复和回放隔离均有覆盖。
 
 ## BE-03 操作者与审计

@@ -8,6 +8,7 @@ import pytest
 from sqlalchemy import select
 
 from app.db.base import SessionLocal
+from app.models.agent_models import DocumentFigure
 from app.models.models import Document
 from app.services.objectstore import delete_object
 from tests.support import create_signal
@@ -120,3 +121,31 @@ async def test_missing_document_raw_returns_404_for_preview_and_figures(client, 
     figures = await client.get(f"/api/v1/signals/{signal_id}/figures")
     assert figures.status_code == 404, figures.text
     assert "raw object" in figures.json()["detail"]
+
+async def test_missing_figure_image_returns_404_and_recaption_marks_review(
+    client, fake_doc_ingest
+):
+    captured = await _capture_pdf(client)
+    document_id = uuid.UUID(captured["document"]["id"])
+    async with SessionLocal() as db:
+        db.add(
+            DocumentFigure(
+                document_id=document_id,
+                figure_index=1,
+                object_key="documents/figures/missing.png",
+                mime="image/png",
+                source="embedded",
+                caption="stale caption",
+            )
+        )
+        await db.commit()
+
+    image = await client.get(f"/api/v1/documents/{document_id}/figures/1/image")
+    assert image.status_code == 404, image.text
+    assert "missing from the object store" in image.json()["detail"]
+
+    recaption = await client.post(f"/api/v1/documents/{document_id}/figures/1/recaption")
+    assert recaption.status_code == 200, recaption.text
+    body = recaption.json()
+    assert body["review_status"] == "needs_review"
+    assert "未留存" in body["review_reason"]

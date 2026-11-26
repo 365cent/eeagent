@@ -87,10 +87,10 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 - Problem: a document-backed signal's figures endpoint returned 200 [] when the raw document blob was gone, while HTML signals already returned a clear 404. The other read paths had clear 404s but no tests, so the "missing object" acceptance item was unverified.
 - What changed (backend/app/api/v1/signals.py): the document figure branch raises 404 for a missing document row, a missing raw object key, or a missing blob instead of falling through to an empty list.
-- Tests (backend/tests/test_missing_objects.py): signal body, archive and figures after deleting the stored object; document canonical.md and preview.pdf after deleting their blobs; document-signal figures after deleting the raw blob.
-- Evidence: pytest tests/test_missing_objects.py -q -> 4 passed; related document/signal files -> 47 passed (37.1 s); full backend suite after the change -> 586 passed, 2 skipped (6:04).
+- Tests (backend/tests/test_missing_objects.py): signal body, archive and figures after deleting the stored object; document canonical.md and preview.pdf after deleting their blobs; document-signal figures after deleting the raw blob; a figure row whose image blob is missing returns 404 and recaption marks it needs_review instead of failing.
+- Evidence: pytest tests/test_missing_objects.py -q -> 5 passed; related document/signal files -> 47 passed (37.1 s); full backend suite after the service change -> 586 passed, 2 skipped (6:04).
 - Note: frontend fetchSignalFigureByIndex already catches figure errors and falls back to archive parsing, so the 404 does not surface as a user-facing error.
-- Not done: storage-fault injection on Linux/PostgreSQL, and figure rows whose individual object is missing (the endpoint has a 404 path but no test yet). The parent task stays open.
+- Not done: storage-fault injection on Linux/PostgreSQL. The parent task stays open.
 
 ## 2026-11-24
 
