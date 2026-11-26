@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import mimetypes
 import uuid
+import re
 from pathlib import Path
 
 from fastapi import HTTPException
@@ -56,10 +57,79 @@ def document_raw_out(doc: Document) -> DocumentRawOut:
     )
 
 
-def document_title(document: Document) -> str:
-    if document.filename:
-        return Path(document.filename).stem or document.filename
-    return f"文档 {document.sha256[:8]}"
+def document_title(document: Document, canonical: str | None = None) -> str:
+    """Human title for a document-derived signal.
+
+    A camera/scan filename is usually a number or a hash and says nothing, so an
+    extracted title (MarkItDown heading or the first title lines) wins whenever
+    the file name looks arbitrary. A meaningful file name still wins over a
+    noisy first paragraph.
+    """
+    stem = Path(document.filename).stem if document.filename else ""
+    extracted = extract_title_from_markdown(canonical) if canonical else ""
+    if extracted and _looks_arbitrary(stem):
+        return extracted
+    return stem or extracted or f"文档 {document.sha256[:8]}"
+
+
+_TITLE_ORG = re.compile(
+    r"(委员会|公司|大学|研究院|研究所|协会|中心|集团|学会|有限|Inc\.|Ltd\.|University|Institute|Consortium)"
+)
+_TITLE_DATE = re.compile(r"^(\d{4}\s*年?)(\s*\d{1,2}\s*月)?(\s*\d{1,2}\s*日)?$")
+_ARBITRARY_STEM = re.compile(r"^[\d\W_]+$|^[0-9a-f]{8,}$")
+
+
+def _looks_arbitrary(stem: str) -> bool:
+    """Scanner names, numeric ids and hashes carry no meaning worth keeping."""
+    candidate = stem.strip()
+    return not candidate or len(candidate) < 6 or bool(_ARBITRARY_STEM.match(candidate))
+
+
+def extract_title_from_markdown(markdown: str, max_len: int = 80) -> str:
+    """A document's own title: first heading, else its first title-like lines.
+
+    PDF text has no heading markup, so the first paragraph is used while its
+    lines stay short and before an organisation or date line appears (the
+    pattern of a cover page: title lines, then issuer, then date).
+    """
+    lines = [line.strip() for line in (markdown or "").splitlines()]
+    for line in lines[:40]:
+        if line.startswith("#"):
+            heading = line.lstrip("#").strip()
+            if heading:
+                return heading[:max_len]
+
+    parts: list[str] = []
+    for line in lines[:30]:
+        if not line:
+            if parts:
+                break
+            continue
+        if _TITLE_DATE.match(line) or _TITLE_ORG.search(line):
+            break
+        if len(line) > 60:
+            if not parts:
+                parts.append(line[:max_len])
+            break
+        if sum(len(part) for part in parts) + len(line) > max_len:
+            break
+        parts.append(line)
+        if len(parts) >= 3:
+            break
+    return _join_title_lines(parts)[:max_len]
+
+
+def _join_title_lines(parts: list[str]) -> str:
+    """Join wrapped title lines: no space inside CJK, one space between words."""
+    joined = ""
+    for part in parts:
+        if not joined:
+            joined = part
+        elif joined[-1].isascii() and part[:1].isascii():
+            joined += " " + part
+        else:
+            joined += part
+    return joined.strip()
 
 
 
@@ -128,6 +198,7 @@ async def ingest_stored_document(
     data: bytes,
     *,
     vision_captions: bool = True,
+    on_progress: "ProgressCallback | None" = None,
 ) -> None:
     _, max_parse = doc_limits()
     if len(data) > max_parse:
@@ -145,6 +216,7 @@ async def ingest_stored_document(
             doc.filename,
             doc.mime,
             vision_captions=vision_captions,
+            on_progress=on_progress,
         )
         md_bytes = result.canonical_md.encode("utf-8")
         doc.canonical_md_object_key = save_bytes(md_bytes, folder="documents", ext="md")

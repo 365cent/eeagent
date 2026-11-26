@@ -52,6 +52,7 @@ async def create_signal_from_document(
     capture_submission_sha256: str | None = None,
     vision_captions: bool = False,
     ingest: bool = True,
+    on_progress: object | None = None,
 ) -> tuple[Signal, DocumentRawOut]:
     """Document bytes → raw blob + ingest + derived signal (mirrors
     POST /documents/raw dedupe + POST /signals document_id path)."""
@@ -67,7 +68,9 @@ async def create_signal_from_document(
             mime=mime,
         )
         if ingest and doc.ingest_status != "parsed":
-            await ingest_stored_document(db, doc, data, vision_captions=vision_captions)
+            await ingest_stored_document(
+                db, doc, data, vision_captions=vision_captions, on_progress=on_progress
+            )
     else:
         doc = document
     if doc.ingest_status == "failed":
@@ -77,7 +80,7 @@ async def create_signal_from_document(
     canonical = canonical_markdown(doc)
     body_text = body_text or build_document_body_summary(doc.filename or "", canonical)
     url = source_url or f"eea://document/{doc.id}"
-    title = title or document_title(doc)
+    title = title or document_title(doc, canonical)
     excerpt = excerpt or (
         excerpt_from_canonical(title, canonical)
         if canonical

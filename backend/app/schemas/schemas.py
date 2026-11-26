@@ -992,12 +992,17 @@ class CaptureJobOut(BaseModel):
         "queued",
         "fetching",
         "processing",
+        "parsing",
+        "captioning",
+        "indexing",
         "completed",
         "failed",
         "cancelled",
         "awaiting_client",
         "capturing",
     ]
+    # 0-100 ingest progress for the current stage.
+    progress: int = 0
     attempt_count: int
     created_at: datetime
     updated_at: datetime

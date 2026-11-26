@@ -122,6 +122,7 @@ async def _capture_job_out(db: AsyncSession, job: CaptureJob) -> CaptureJobOut:
         submission_id=job.submission_id,
         status=job.status,
         stage=job.stage,
+        progress=job.progress or 0,
         attempt_count=job.attempt_count,
         created_at=job.created_at,
         updated_at=job.updated_at,

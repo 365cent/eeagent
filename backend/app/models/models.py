@@ -208,8 +208,8 @@ class CaptureJob(Base):
             name="ck_capture_job_status",
         ),
         CheckConstraint(
-            "stage IN ('queued', 'fetching', 'processing', 'completed', 'failed', 'cancelled', "
-            "'awaiting_client', 'capturing')",
+            "stage IN ('queued', 'fetching', 'processing', 'parsing', 'captioning', 'indexing', "
+            "'completed', 'failed', 'cancelled', 'awaiting_client', 'capturing')",
             name="ck_capture_job_stage",
         ),
         CheckConstraint("attempt_count >= 0", name="ck_capture_job_attempt_count"),
@@ -230,6 +230,8 @@ class CaptureJob(Base):
     via: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, nullable=False, default="queued", server_default="queued")
     stage: Mapped[str] = mapped_column(Text, nullable=False, default="queued", server_default="queued")
+    # 0-100, written with the stage so the import panel can show real progress.
+    progress: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     client_claim_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
     available_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

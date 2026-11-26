@@ -104,6 +104,9 @@ export type CaptureJobStage =
   | 'queued'
   | 'fetching'
   | 'processing'
+  | 'parsing'
+  | 'captioning'
+  | 'indexing'
   | 'completed'
   | 'failed'
   | 'cancelled'
@@ -122,6 +125,8 @@ export type CaptureJobOut = {
   submission_id: string
   status: CaptureJobStatus
   stage: CaptureJobStage
+  /** 0-100 ingest progress reported by the worker. */
+  progress?: number
   attempt_count: number
   created_at: string
   updated_at: string

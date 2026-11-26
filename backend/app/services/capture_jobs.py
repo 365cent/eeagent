@@ -336,6 +336,7 @@ async def _mark_succeeded(job_id: uuid.UUID, worker_id: str, signal_id: uuid.UUI
             .values(
                 status="succeeded",
                 stage="completed",
+                progress=100,
                 signal_id=signal_id,
                 error=None,
                 lease_until=None,
@@ -396,18 +397,22 @@ async def _execute_capture(job_id: uuid.UUID, worker_id: str) -> None:
             settings = get_settings()
             if not source_url or settings.app_env == "production" or not settings.capture_server_fetch_enabled:
                 raise HTTPException(422, "此采集任务没有可处理的上传文件")
-            await _set_stage(job_id, worker_id, "fetching")
+            await _set_stage(job_id, worker_id, "fetching", 5)
             try:
                 page = await fetch_url(source_url)
             except FetchError:
                 raise
             data, filename, mime, source_url = page.data, page.filename, page.content_type, page.final_url
 
-        await _set_stage(job_id, worker_id, "processing")
+        await _set_stage(job_id, worker_id, "parsing", 10)
         if await _is_cancel_requested(job_id):
             await _mark_cancelled(job_id, worker_id)
             return
         figure_vision = import_batch_id is None
+
+        async def report_progress(stage: str, percent: int) -> None:
+            await _set_stage(job_id, worker_id, stage, percent)
+
         signal, _ = await ingest_capture_payload(
             db,
             data=data,
@@ -421,6 +426,7 @@ async def _execute_capture(job_id: uuid.UUID, worker_id: str) -> None:
             capture_submission_sha256=fingerprint,
             figure_vision_captions=figure_vision,
             document_vision_captions=False,
+            on_progress=report_progress,
         )
         signal_id = signal.id
         await _mark_succeeded(job_id, worker_id, signal_id)
@@ -449,8 +455,13 @@ async def run_claimed_job(job_id: uuid.UUID, worker_id: str) -> None:
             pass
 
 
-async def _set_stage(job_id: uuid.UUID, worker_id: str, stage: str) -> None:
+async def _set_stage(
+    job_id: uuid.UUID, worker_id: str, stage: str, progress: int | None = None
+) -> None:
     now = _now()
+    values: dict[str, object] = {"stage": stage, "heartbeat_at": now, "updated_at": now}
+    if progress is not None:
+        values["progress"] = max(0, min(100, int(progress)))
     async with SessionLocal() as db:
         await db.execute(
             update(CaptureJob)
@@ -459,7 +470,7 @@ async def _set_stage(job_id: uuid.UUID, worker_id: str, stage: str) -> None:
                 CaptureJob.status == "running",
                 CaptureJob.worker_id == worker_id,
             )
-            .values(stage=stage, heartbeat_at=now, updated_at=now)
+            .values(**values)
         )
         await db.commit()
 

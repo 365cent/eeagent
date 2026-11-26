@@ -34,6 +34,8 @@ export type ImportFileJobState = {
   uploadProcessing: boolean
   uploadFileName: string | null
   jobStageLabel: string | null
+  /** Server-reported 0-100 ingest progress (null until the first poll answers). */
+  jobProgress: number | null
   jobError: string | null
   activeJobId: string | null
 }
@@ -51,7 +53,7 @@ export function ImportProgressSide({
   onRetryJob,
   onCancelJob,
 }: ImportProgressSideProps) {
-  const { uploadProgress, uploadProcessing, uploadFileName, jobStageLabel, jobError, activeJobId } =
+  const { uploadProgress, uploadProcessing, uploadFileName, jobStageLabel, jobProgress, jobError, activeJobId } =
     fileJob
 
   const batchActive =
@@ -84,10 +86,14 @@ export function ImportProgressSide({
           ) : null}
           {uploadProgress !== null ? (
             <Progress
-              percent={uploadProcessing ? 100 : uploadProgress}
+              percent={
+                uploadProcessing ? Math.max(uploadProgress, jobProgress ?? 0) : uploadProgress
+              }
               status={jobError ? 'exception' : uploadProcessing ? 'active' : 'normal'}
               format={() =>
-                uploadProcessing ? jobStageLabel ?? '处理中…' : `上传 ${uploadProgress}%`
+                uploadProcessing
+                  ? `${jobStageLabel ?? '处理中…'} · ${Math.max(uploadProgress, jobProgress ?? 0)}%`
+                  : `上传 ${uploadProgress}%`
               }
             />
           ) : null}

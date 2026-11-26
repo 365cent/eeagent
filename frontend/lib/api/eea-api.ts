@@ -459,8 +459,18 @@ export function captureJobStageLabel(stage: CaptureJobOut['stage'], status: Capt
   switch (stage) {
     case 'fetching':
       return '抓取页面…'
+    case 'parsing':
+      return '解析正文与图块…'
+    case 'captioning':
+      return '识别图块内容…'
+    case 'indexing':
+      return '建立章节索引…'
     case 'processing':
       return '解析入库…'
+    case 'awaiting_client':
+      return '等待客户端采集…'
+    case 'capturing':
+      return '客户端采集中…'
     case 'queued':
     default:
       return '排队等待…'

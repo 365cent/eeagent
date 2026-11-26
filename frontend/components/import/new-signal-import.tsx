@@ -48,6 +48,7 @@ function useNewSignalImport(onNavigate: (key: string) => void) {
   const [uploadProcessing, setUploadProcessing] = useState(false)
   const [uploadFileName, setUploadFileName] = useState<string | null>(null)
   const [jobStageLabel, setJobStageLabel] = useState<string | null>(null)
+  const [jobProgress, setJobProgress] = useState<number | null>(null)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [lastDocument, setLastDocument] = useState<DocumentRawOut | null>(null)
   const [lastDocumentName, setLastDocumentName] = useState<string | null>(null)
@@ -68,6 +69,7 @@ function useNewSignalImport(onNavigate: (key: string) => void) {
     setUploadProcessing(false)
     setUploadFileName(null)
     setJobStageLabel(null)
+    setJobProgress(null)
     setActiveJobId(null)
   }
 
@@ -120,6 +122,7 @@ function useNewSignalImport(onNavigate: (key: string) => void) {
         signal: controller.signal,
         onUpdate: (job) => {
           setJobStageLabel(captureJobStageLabel(job.stage, job.status))
+          setJobProgress(typeof job.progress === 'number' ? job.progress : null)
         },
       })
       if (terminal.status === 'succeeded') {
@@ -345,6 +348,7 @@ function useNewSignalImport(onNavigate: (key: string) => void) {
         signal: controller.signal,
         onUpdate: (job) => {
           setJobStageLabel(captureJobStageLabel(job.stage, job.status))
+          setJobProgress(typeof job.progress === 'number' ? job.progress : null)
         },
       })
       if (terminal.status === 'succeeded') {
@@ -436,6 +440,7 @@ function useNewSignalImport(onNavigate: (key: string) => void) {
       uploadProcessing,
       uploadFileName,
       jobStageLabel,
+      jobProgress,
       jobError,
       activeJobId,
     },

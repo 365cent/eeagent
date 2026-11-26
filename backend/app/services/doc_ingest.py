@@ -30,6 +30,7 @@ import zipfile
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Awaitable, Callable
 
 from starlette.concurrency import run_in_threadpool
 
@@ -104,6 +105,9 @@ _PART_ORDER = {
 }
 
 _IMAGE_TAG = re.compile(r"!\[[^\]]*\]\(\s*(?:data:image/[^)]*|[^)\s]+)\s*\)")
+
+#: ``(stage, percent)`` hook awaited while a document is ingested.
+ProgressCallback = Callable[[str, int], Awaitable[None]]
 
 
 @dataclass(slots=True)
@@ -523,12 +527,25 @@ async def ingest_document(
     mime: str | None,
     *,
     vision_captions: bool = True,
+    on_progress: "ProgressCallback | None" = None,
 ) -> IngestResult:
+    """Convert, extract figures, caption them, and build the canonical Markdown.
+
+    ``on_progress(stage, percent)`` is awaited as the work advances so the
+    capture job can report "图块识别 3/16"-style progress to the import panel.
+    """
+
+    async def progress(stage: str, percent: int) -> None:
+        if on_progress is not None:
+            await on_progress(stage, max(0, min(100, percent)))
+
     settings = get_settings()
     suffix = suffix_for(filename, mime)
+    await progress("parsing", 20)
     markdown, md_version = await run_in_threadpool(_convert_sync, data, suffix)
     figures = await run_in_threadpool(extract_figures, data, suffix)
     figures = figures[: settings.max_figures]
+    await progress("parsing", 45)
 
     vision_chain: str = ""
     vision_model: str | None = None
@@ -544,14 +561,20 @@ async def ingest_document(
 
             async def caption_figures() -> None:
                 semaphore = asyncio.Semaphore(3)
+                done = 0
+                total = len(figures)
 
                 async def caption(figure: Figure) -> None:
+                    nonlocal done
                     async with semaphore:
                         figure.caption = await caption_figure(
                             figure,
                             model=vision_chain,
                             retries=settings.vision_caption_retry,
                         )
+                    done += 1
+                    # Captioning is the slow part of a document ingest: 45 -> 85.
+                    await progress("captioning", 45 + int(40 * done / total))
 
                 await asyncio.gather(*(caption(figure) for figure in figures))
                 for figure in figures:
@@ -584,6 +607,7 @@ async def ingest_document(
         markdown = f"# {filename or 'document'}\n\n（MarkItDown 未抽取到文本）"
     canonical = apply_captions(markdown, figures)
     assign_figure_locations(canonical, figures)
+    await progress("indexing", 92)
     return IngestResult(
         canonical_md=canonical,
         markitdown_version=md_version,

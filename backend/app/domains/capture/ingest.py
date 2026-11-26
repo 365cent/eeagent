@@ -27,6 +27,7 @@ async def ingest_capture_payload(
     capture_submission_sha256: str | None = None,
     figure_vision_captions: bool = True,
     document_vision_captions: bool = False,
+    on_progress: "ProgressCallback | None" = None,
 ) -> tuple[Signal, DocumentRawOut | None]:
     """HTML or document bytes through ``create_signal_record`` (stage, tags, theme)."""
     if _is_html(mime=mime, filename=filename):
@@ -60,6 +61,7 @@ async def ingest_capture_payload(
         capture_submission_id=capture_submission_id,
         capture_submission_sha256=capture_submission_sha256,
         vision_captions=document_vision_captions,
+        on_progress=on_progress,
     )
     return signal, document_out
 
