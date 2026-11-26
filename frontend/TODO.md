@@ -55,6 +55,7 @@
 - 入口：[topics-view.tsx](components/topics/topics-view.tsx)、[signal-theme-assign.tsx](components/evidence/signal-theme-assign.tsx)、[metrics-copy.ts](lib/metrics-copy.ts)。
 - 展示技术标签频次、价值链/信号类型筛选、主题成员和去重来源；口径 tooltip 与 BE-05 完全一致。
 - 支持主题创建/工作名编辑、人工指派/移出、重算候选与解释；不做主题合并/优先级排名。
+- 2026-11-26 单信号来源列表：证据详情右栏新增「来源链接」，主链接/补充标签区分并显示出处；未归档信号可添加补充 URL（POST /signals/{id}/sources），归档信号显示不可新增提示；pnpm typecheck、组件 antd lint 与 pnpm build 通过。浏览器走查与「直接 eFuse 2 条 / 主题 8/16 分开展示」仍待。
 - 2026-11-26 归集依据展示：证据详情主题抽屉在候选预览中展示 structured_basis 的技术对象/底层能力/变化方向，类型与 BE-05 新字段同步；pnpm typecheck 与组件 antd lint 通过。pnpm build 通过（D 盘隔离副本复用本地 pnpm store，未触碰运行中的 dev server）。
 - 候选聚类先预览成员/理由，确认后建主题/开放标签；“新分类”不得写封闭词表。
 - 来源列表区分主链接/补充链接及归档来源，直接 eFuse 2 条与主题 8/16 分开展示。

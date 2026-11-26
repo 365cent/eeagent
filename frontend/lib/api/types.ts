@@ -62,6 +62,14 @@ export type SignalRecaptionOut = {
   failed: number
 }
 
+export type SignalSourceOut = {
+  id: string
+  url: string
+  url_normalized: string
+  is_primary: boolean
+  provenance: string | null
+}
+
 export type DocumentIngestStatus = 'stored' | 'parsed' | 'failed' | 'skipped'
 
 export type DocumentRawOut = {

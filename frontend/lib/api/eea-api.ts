@@ -46,6 +46,7 @@ import type {
   SignalDetail,
   SignalFigureOut,
   SignalRecaptionOut,
+  SignalSourceOut,
   SignalOut,
   TagAssignmentPayload,
   TagSuggestion,
@@ -110,6 +111,22 @@ export function fetchSignals(params: ListSignalsParams = {}) {
 
 export function fetchSignal(signalId: string) {
   return eeaFetch<SignalDetail>(`/signals/${signalId}`)
+}
+
+export function fetchSignalSources(signalId: string) {
+  return eeaFetch<SignalSourceOut[]>(`/signals/${signalId}/sources`)
+}
+
+export function addSignalSource(
+  signalId: string,
+  url: string,
+  provenance?: string,
+) {
+  return eeaFetch<SignalSourceOut>(`/signals/${signalId}/sources`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url, provenance: provenance ?? null }),
+  })
 }
 
 export function fetchThemes() {

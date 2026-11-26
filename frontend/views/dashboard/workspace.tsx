@@ -118,6 +118,7 @@ import { SignalTagsEditor } from '@/components/evidence/signal-tags-editor'
 import { SignalClassificationEditor } from '@/components/evidence/signal-classification-editor'
 import { SignalCorrectionAudit } from '@/components/evidence/signal-correction-audit'
 import { SignalThemeAssign } from '@/components/evidence/signal-theme-assign'
+import { SignalSources } from '@/components/evidence/signal-sources'
 import { TopicsView } from '@/components/topics/topics-view'
 import { CreateTopicForm } from '@/components/topics/create-topic-form'
 import { DemandsView } from '@/components/topics/demands-view'
@@ -647,6 +648,11 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
                 themeName={detail?.theme?.working_name ?? null}
                 isDocumentSource={isDocumentSource}
                 updatedAt={detail?.updated_at ?? null}
+              />
+              <Divider />
+              <SignalSources
+                signalId={apiId}
+                archived={detail?.evidence_status_code === 'archived'}
               />
             </>
           ) : null}

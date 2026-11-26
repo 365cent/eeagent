@@ -140,6 +140,13 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence: pytest tests/test_signal_archive_ops.py -q -> 7 passed (18.0 s).
 - Not done: the two evolution-node transitions are owned by the capture/ingest paths and are not part of this PATCH matrix. The parent task stays open.
 
+### FE-04 per-signal source list
+
+- Problem: GET/POST /signals/{id}/sources existed and were tested, but the evidence drawer never showed them, so primary and supplementary URLs were indistinguishable in the UI.
+- What changed (frontend/lib/api/types.ts, frontend/lib/api/eea-api.ts, frontend/components/evidence/signal-sources.tsx, frontend/views/dashboard/workspace.tsx): the drawer gains a 来源链接 section with 主链接/补充 tags, provenance, and an add form that invalidates the query after POST; archived signals show the read-only hint.
+- Evidence: pnpm typecheck passed; component antd lint passed (0 issues); pnpm build passed in an isolated D: copy that reused the local pnpm store. No backend change.
+- Not done: browser walkthrough, and the direct eFuse 2-source versus theme 8/16 split display. The FE-04 parent stays open.
+
 ## 2026-11-24
 
 ### Duplicate-signal scan and cleanup on an article URL key (BE-02 slice)
