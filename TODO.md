@@ -67,7 +67,7 @@
 - **BE-01（2026-11-26，worker 并发/续跑）**：新增 tests/test_capture_job_concurrency.py——租约过期后另一 worker 续跑且不重复建信号；并发重复提交只落一行任务、执行后一个信号；旧 worker 的心跳/成功/失败写入被 ownership 守卫拒绝；超过重试上限的过期租约在领取时置 failed。证据：4 passed（探针确认并发路径登记了 1 个孤儿对象）。Linux/容器重启证据仍待 OPS。
 - **BE-01（2026-11-26，跨入口幂等）**：POST /capture 先规范化 MIME 再算 submission 指纹（与 /capture/jobs 一致），修复同一 .pptx 经同步/异步入口互相 409；新增 8 项跨入口用例（同步重放、异字节 409、双向复用、排队 409、歧义 MIME、并发只建一个信号）。证据：8 passed；capture 相关加 OpenAPI 快照 75 passed。
 - **BE-05（2026-11-26，多来源覆盖）**：补充 URL 溯源与主题来源口径测试（主来源自动生成、normalize 去重、归档 409、越权 403、共享 URL 去重、补充 URL 计入、归档来源仍计数）。证据：5 passed；主题/聚类/归档 34 passed。
-- **BE-05（2026-11-26，结构化归集依据）**：主题归集预览暴露 structured_basis（对象/能力/方向）与 basis_reason，接线此前未使用的判断函数；补 2 项预览用例。证据：test_aggregation.py 14 passed；OpenAPI 1 passed；前端 typecheck 与组件 antd lint 通过。
+- **BE-05（2026-11-26，结构化归集依据）**：主题归集预览暴露 structured_basis（对象/能力/方向）与 basis_reason，接线此前未使用的判断函数；补 2 项预览用例。证据：test_aggregation.py 14 passed；OpenAPI 1 passed；前端 typecheck、组件 antd lint 与 pnpm build 通过。
 - 上述均为组件切片；父任务验收、目标平台证据和真实业务样本仍按子清单保持开放。
 
 ## 下一项具体任务
