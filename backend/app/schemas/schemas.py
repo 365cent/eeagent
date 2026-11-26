@@ -476,6 +476,16 @@ class DocumentFigureOut(BaseModel):
     image_url: str | None = None
 
 
+class FigureRecaptionBatchOut(BaseModel):
+    """Result of re-running vision for every figure of one document."""
+
+    document_id: uuid.UUID
+    attempted: int
+    ready: int
+    needs_review: int
+    failed_indices: list[int] = []
+
+
 class DocumentChunkOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

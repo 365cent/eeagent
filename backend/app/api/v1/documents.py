@@ -28,6 +28,7 @@ from app.schemas.schemas import (
     DocumentFigureOut,
     DocumentKeywordOut,
     DocumentRawOut,
+    FigureRecaptionBatchOut,
 )
 from app.services.agent_rag import ensure_document_index
 from app.services.audit import record_correction
@@ -330,6 +331,66 @@ async def get_document_figure_image(
         content=payload,
         media_type=row.mime or "application/octet-stream",
         headers={"Cache-Control": "private, max-age=3600"},
+    )
+
+
+@router.post("/{document_id}/figures/recaption", response_model=FigureRecaptionBatchOut)
+async def recaption_document_figures(
+    document_id: uuid.UUID,
+    only_missing: bool = True,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_operator_identity),
+):
+    """Re-run vision for every figure of one document, in order.
+
+    A document parsed while the vision chain was unavailable keeps all of its
+    text but marks every figure needs_review; this repairs them in one call
+    instead of one request per figure. Failures stay needs_review.
+    """
+    if actor.role not in {"researcher", "taxonomy_admin", "platform_admin"}:
+        raise HTTPException(403, "当前角色不能重试图块识别")
+
+    rows = (
+        await db.execute(
+            select(DocumentFigure.figure_index, DocumentFigure.review_status)
+            .where(DocumentFigure.document_id == document_id)
+            .order_by(DocumentFigure.figure_index)
+        )
+    ).all()
+    if not rows:
+        raise HTTPException(404, "document has no figures")
+
+    targets = [
+        index
+        for index, status in rows
+        if not only_missing or status != "ready"
+    ]
+    ready = 0
+    failed: list[int] = []
+    for figure_index in targets:
+        updated = await recaption_figure(db, document_id, figure_index)
+        if updated is not None and updated.review_status == "ready":
+            ready += 1
+        else:
+            failed.append(figure_index)
+
+    await record_correction(
+        db,
+        entity_type="document",
+        entity_id=str(document_id),
+        field_name="figure_captions",
+        old_value=None,
+        new_value={"attempted": targets, "ready": ready, "failed": failed},
+        actor=actor,
+        reason="批量重新识别图块",
+    )
+    await db.commit()
+    return FigureRecaptionBatchOut(
+        document_id=document_id,
+        attempted=len(targets),
+        ready=ready,
+        needs_review=len(failed),
+        failed_indices=failed,
     )
 
 

@@ -67,7 +67,8 @@ def _review_state(figure) -> tuple[str, str | None]:
     caption = (figure.caption or "").strip()
     if not caption:
         return "needs_review", "视觉模型未返回描述"
-    if getattr(figure, "section_path", None) is None:
+    # PDF has no heading outline, so a page number is what locates its figures.
+    if getattr(figure, "section_path", None) is None and getattr(figure, "page", None) is None:
         return "needs_review", "未在正文中定位图块"
     return "ready", None
 

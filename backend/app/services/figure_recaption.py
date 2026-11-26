@@ -25,7 +25,13 @@ from app.services.objectstore import load_bytes, save_bytes, sha256_bytes
 
 
 def replace_figure_caption(markdown: str, figure_index: int, caption: str) -> str:
-    """Replace only figure N's caption marker; leave every other byte intact."""
+    """Replace only figure N's caption marker; leave every other byte intact.
+
+    Two shapes exist: an inline quote (`> 图 N：…`) when the converter emitted an
+    image tag, and a row of the `## 图块语义` table (`| N | 第 x 页 | … |`) when it
+    did not, which is the normal case for PDF. Missing both means the figure has
+    no place in the text yet.
+    """
     pattern = re.compile(r"(>\s*图\s+" + str(figure_index) + r"[：:]\s*)([^\n]*)")
     replaced = pattern.sub(
         lambda match: match.group(1) + caption,
@@ -35,13 +41,26 @@ def replace_figure_caption(markdown: str, figure_index: int, caption: str) -> st
     if replaced == markdown:
         pattern = re.compile(r"(>\s*图\s+" + str(figure_index) + r"\s+)([^\n]*)")
         replaced = pattern.sub(lambda match: match.group(1) + caption, markdown, count=1)
+    if replaced == markdown:
+        row = re.compile(
+            r"^(\|\s*" + str(figure_index) + r"\s*\|[^|\n]*\|)([^|\n]*)(\|)",
+            re.MULTILINE,
+        )
+        replaced = row.sub(
+            lambda match: f"{match.group(1)} {caption} {match.group(3)}",
+            markdown,
+            count=1,
+        )
     return replaced
 
 
-def figure_review_state(caption: str | None, section_path: list | None) -> tuple[str, str | None]:
+def figure_review_state(
+    caption: str | None, section_path: list | None, page: int | None = None
+) -> tuple[str, str | None]:
     if not (caption or "").strip():
         return "needs_review", "视觉模型未返回描述"
-    if section_path is None:
+    # PDF has no heading outline, so a page number is what locates its figures.
+    if section_path is None and page is None:
         return "needs_review", "未在正文中定位图块"
     return "ready", None
 
@@ -121,7 +140,7 @@ async def recaption_figure(
     )
     row.caption = figure.caption.strip() or None
     row.review_status, row.review_reason = figure_review_state(
-        row.caption, row.section_path
+        row.caption, row.section_path, row.page
     )
 
     canonical = None
