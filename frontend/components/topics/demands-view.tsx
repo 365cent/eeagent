@@ -5,6 +5,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { App as AntApp, Button, Card, Modal, Select, Space, Table, Tag, Typography } from 'antd'
 import { DeleteOutlined } from '@ant-design/icons'
 import { PlatformEmptyState } from '@/components/shared/empty-state'
+import { DemandPointWorkbenchDrawer } from '@/components/topics/demand-point-workbench-drawer'
 import { deleteDemand, fetchDemands, fetchLandingPoints, fetchVehicleFunctions, patchDemand } from '@/lib/api/eea-api'
 import { eeaErrorMessage } from '@/lib/api/client'
 import { eeaQueryKeys, useRefCodeMaps, useThemeRows } from '@/hooks/use-eea-queries'
@@ -159,6 +160,7 @@ export function DemandsView({
   const [moving, setMoving] = useState<DemandOut | null>(null)
   const [nextThemeId, setNextThemeId] = useState<string | undefined>()
   const [openDemandId, setOpenDemandId] = useState<string | null | undefined>(undefined)
+  const [workbenchDemandId, setWorkbenchDemandId] = useState<string | null>(null)
 
   const themeName = useMemo(() => {
     const names = new Map<string, string>()
@@ -332,9 +334,12 @@ export function DemandsView({
             },
             {
               title: '操作',
-              width: 180,
+              width: 230,
               render: (_value, record) => (
                 <Space className="theme-detail-actions" size={0}>
+                  <Button type="link" onClick={() => setWorkbenchDemandId(record.id)}>
+                    工作台
+                  </Button>
                   <Button
                     type="link"
                     onClick={() => {
@@ -373,6 +378,13 @@ export function DemandsView({
           onChange={(value) => setNextThemeId(value)}
         />
       </Modal>
+      <DemandPointWorkbenchDrawer
+        open={Boolean(workbenchDemandId)}
+        onOpenChange={(open) => {
+          if (!open) setWorkbenchDemandId(null)
+        }}
+        initialDemandId={workbenchDemandId ?? undefined}
+      />
     </>
   )
 }

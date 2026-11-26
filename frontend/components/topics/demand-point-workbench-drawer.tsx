@@ -1,17 +1,28 @@
 'use client'
 
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { App as AntApp, Drawer } from 'antd'
 import { DemandPointWorkbench } from '@/components/topics/demand-point-workbench'
 
 type DemandPointWorkbenchDrawerProps = {
   open: boolean
   onOpenChange: (open: boolean) => void
+  initialDemandId?: string
+  sourceThemeId?: string
 }
 
-export function DemandPointWorkbenchDrawer({ open, onOpenChange }: DemandPointWorkbenchDrawerProps) {
+export function DemandPointWorkbenchDrawer({
+  open,
+  onOpenChange,
+  initialDemandId,
+  sourceThemeId,
+}: DemandPointWorkbenchDrawerProps) {
   const { modal } = AntApp.useApp()
   const [dirty, setDirty] = useState(false)
+
+  useEffect(() => {
+    if (open) setDirty(false)
+  }, [open])
 
   const requestClose = useCallback(() => {
     if (dirty) {
@@ -36,13 +47,18 @@ export function DemandPointWorkbenchDrawer({ open, onOpenChange }: DemandPointWo
       className="demand-workbench-drawer"
       title="需求点工作台"
       placement="right"
-      size="min(1040px, 92vw)"
+      width="min(1040px, 92vw)"
       open={open}
-      destroyOnHidden={false}
+      destroyOnHidden
       onClose={requestClose}
       styles={{ body: { padding: '12px 16px 20px' } }}
     >
-      <DemandPointWorkbench showCard={false} onDirtyChange={setDirty} />
+      <DemandPointWorkbench
+        showCard={false}
+        onDirtyChange={setDirty}
+        initialDemandId={initialDemandId}
+        sourceThemeId={sourceThemeId}
+      />
     </Drawer>
   )
 }
