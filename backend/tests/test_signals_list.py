@@ -162,6 +162,46 @@ async def test_list_limit_and_offset_window(client):
     assert over.status_code == 422  # le=200
 
 
+async def test_list_pagination_rejects_out_of_range_values(client):
+    assert (await client.get("/api/v1/signals", params={"limit": 0})).status_code == 422
+    assert (await client.get("/api/v1/signals", params={"limit": 201})).status_code == 422
+    assert (await client.get("/api/v1/signals", params={"offset": -1})).status_code == 422
+    assert (await client.get("/api/v1/signals", params={"limit": 200})).status_code == 200
+
+
+async def test_list_offset_past_the_end_returns_empty_with_total_count(client):
+    await _seed_three(client)
+    response = await client.get("/api/v1/signals", params={"limit": 2, "offset": 99})
+    assert response.status_code == 200, response.text
+    assert response.json() == []
+    assert response.headers.get("X-Total-Count") == "3"
+
+
+async def test_total_count_matches_filters_and_archive_default(client):
+    await _seed_three(client)
+    await create_signal(
+        client,
+        title="已归档信号",
+        url="https://example.com/archived-total",
+        evidence_status_code="archived",
+    )
+    filtered = await client.get(
+        "/api/v1/signals",
+        params={"value_chain_stage": "creation_supply", "limit": 1},
+    )
+    assert filtered.status_code == 200, filtered.text
+    assert len(filtered.json()) == 1
+    assert filtered.headers.get("X-Total-Count") == "2"
+
+    default_window = await client.get("/api/v1/signals", params={"limit": 10})
+    assert default_window.headers.get("X-Total-Count") == "3"
+
+    archived = await client.get(
+        "/api/v1/signals", params={"evidence_status": "archived", "limit": 10}
+    )
+    assert archived.headers.get("X-Total-Count") == "1"
+
+
 async def test_list_exposes_total_count_for_cross_origin_clients(client):
     """Dashboard tables need X-Total-Count via CORS when the UI calls :8000 from :3000."""
     await _seed_three(client)

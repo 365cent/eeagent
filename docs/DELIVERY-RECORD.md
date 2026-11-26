@@ -92,6 +92,14 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Note: frontend fetchSignalFigureByIndex already catches figure errors and falls back to archive parsing, so the 404 does not surface as a user-facing error.
 - Not done: storage-fault injection on Linux/PostgreSQL. The parent task stays open.
 
+### Signal-list pagination boundaries (BE-02 slice)
+
+- Problem: the list endpoint pins limit 1..200 and offset >= 0, but only limit=500 was tested; an offset past the end and the interaction between filters, the archived default and X-Total-Count were unverified.
+- What changed: only backend/tests/test_signals_list.py; no production code.
+- Tests: limit 0 and 201 plus a negative offset return 422 while limit=200 succeeds; an offset past the end returns [] with the unchanged total; X-Total-Count follows the active filter (2 for creation_supply), the default window excludes archived signals (3), and the archived filter reports 1.
+- Evidence: pytest tests/test_signals_list.py -q -> 15 passed (17.7 s).
+- Not done: the plan itself states no formal pagination contract (CONV-API-UNSTATED); these tests pin the implemented behavior only. The parent task stays open.
+
 ## 2026-11-24
 
 ### Duplicate-signal scan and cleanup on an article URL key (BE-02 slice)
