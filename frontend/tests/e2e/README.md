@@ -11,6 +11,7 @@ host Edge/Chrome (no browser download is bundled for the intranet image); set
 | `pnpm pw:report` | chain report Markdown preview and PDF request | API :8000, web :3000, an eFuse landing point |
 | `pnpm pw:demands` | demand workbench drawer opens and loads the five-step record | API :8000, web :3000, a confirmed demand |
 | `pnpm pw:roles` | non-admin token issuance denied, body-supplied role rejected, spoofed identity header ignored | API :8000 |
+| `pnpm pw:persist` | classification edit persists after reload, stale revision is refused, audit shows old/new with actor and time | API :8000, web :3000 |
 
 ## Seeding the chain
 

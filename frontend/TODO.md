@@ -159,7 +159,7 @@
 - OpenAPI 对应类型检查纳入 CI；统一 API base 支持生产同源 /api/v1 和开发 :8000。
 - 对触及组件执行 antd 分文件 lint，类型检查与 pnpm build；无公网字体/分析脚本依赖。
 - 添加 Playwright 主流程测试：空库、真实七环节、持久修改、角色限制、模型失败、异步任务、历史版本、报告。
-- 2026-11-19 已补：追溯/七环节链条/角色越权三组 Playwright 用例（共 7 个），数据由 `scripts/seed_smoke_chain.py` 通过公开 API 预置；持久修改、模型失败、异步任务与历史版本用例仍待补。报告流程已由 2026-11-26 新增的 `pnpm pw:report` （`tests/e2e/report-smoke.spec.ts`，选择 eFuse 落脚点后生成 Markdown 预览并请求 PDF）覆盖，1 passed。
+- 2026-11-19 已补：追溯/七环节链条/角色越权三组 Playwright 用例（共 7 个），数据由 `scripts/seed_smoke_chain.py` 通过公开 API 预置。2026-11-26 补持久修改用例 `pnpm pw:persist`（`tests/e2e/persistent-edit.spec.ts`）：经公开 API 建临时信号 → 抽屉改环节/类型 → 服务端字段与 updated_at 变化 → 旧 revision 保存得 409 → 刷新后仍显示新值，修正记录含字段/原值/新值/服务端操作人和时间；用例结束归档并删除临时信号。1 passed，typecheck exit 0，antd lint 0 issue。模型失败、异步任务与历史版本用例仍待补。报告流程已由 2026-11-26 新增的 `pnpm pw:report` （`tests/e2e/report-smoke.spec.ts`，选择 eFuse 落脚点后生成 Markdown 预览并请求 PDF）覆盖，1 passed。
 - 基于固定 10,000 条测试数据验证服务端分页；记录详情首个可用内容时间，外链/大型原始归档加载单独说明。
 - 更新走查清单和截图证据；不把原先 checked checkbox 当此次验收。
 - 验收：构建/契约/浏览器测试记录齐全；Linux TLS 同源、SSE、深链接、空库/断网行为通过。

@@ -14,7 +14,8 @@
     "pw:chain": "playwright test tests/e2e/chain-smoke.spec.ts",
     "pw:report": "playwright test tests/e2e/report-smoke.spec.ts",
     "pw:demands": "playwright test tests/e2e/demand-workbench-smoke.spec.ts",
-    "pw:roles": "playwright test tests/e2e/role-restrictions.spec.ts"
+    "pw:roles": "playwright test tests/e2e/role-restrictions.spec.ts",
+    "pw:persist": "playwright test tests/e2e/persistent-edit.spec.ts"
   },
   "dependencies": {
     "@ant-design/cssinjs": "^1.24.0",
