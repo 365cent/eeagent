@@ -13,6 +13,7 @@ host Edge/Chrome (no browser download is bundled for the intranet image); set
 | `pnpm pw:roles` | non-admin token issuance denied, body-supplied role rejected, spoofed identity header ignored | API :8000 |
 | `pnpm pw:persist` | classification edit persists after reload, stale revision is refused, audit shows old/new with actor and time | API :8000, web :3000 |
 | `pnpm pw:degraded` | model-unavailable reason from the API is shown verbatim and a manual classification save still persists (skips when the gateway answers) | API :8000, web :3000 |
+| `pnpm pw:async` | document upload keeps its job across a reload and still reaches the result panel; needs `EEA_PW_DOC_ROWS=1` because it writes a document row (no delete route) | API :8000, web :3000 |
 
 ## Seeding the chain
 

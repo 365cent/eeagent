@@ -82,6 +82,13 @@ This record keeps evidence for implementation slices removed from the remaining-
 - The same script prints the per-REQ table to stdout, so the mapping can be regenerated whenever ids move. Regenerate with `uv run python scripts/report_req_coverage.py --write ../docs/acceptance-records/req-test-map.md` from `backend/`.
 - Remaining: DOC-05 still has to judge each uncovered REQ against its AT case, and the 20-signal / 10-source / real-gateway records stay open.
 
+### Async document import resumes after a reload (FE-12 slice)
+
+- Added `frontend/tests/e2e/async-task.spec.ts` (`pnpm pw:async`). It uploads a generated `.md` on `/newSignal`, waits until the page has written the pending job id into `sessionStorage`, reloads, and asserts the panel keeps the filename, the job keeps running to its terminal state, the result panel appears with 打开信号, and the pending entry is cleared so a later reload does not replay a finished job.
+- The case is opt-in (`EEA_PW_DOC_ROWS=1`) because the upload writes a `eea_document` row and the API has no document delete route; the signal it creates is archived and deleted at the end. Documented as disposable-database-only in the e2e README.
+- Evidence: `EEA_PW_DOC_ROWS=1 pnpm pw:async` -> 1 passed (26.3 s). The document row and its two object files created by that run were removed afterwards; the dev library is back to its previous 65 signals and no `pw-async-` document.
+- Remaining on FE-12: the history-version browser case; Linux intranet figures.
+
 ## Maintenance-run audit row (BE-01 slice)
 
 - Problem: `orphan_maintenance --apply` pruned orphan rows but left no durable record of who ran it, when, or how many rows it scanned/removed, so the BE-01 audit requirement stayed open.
