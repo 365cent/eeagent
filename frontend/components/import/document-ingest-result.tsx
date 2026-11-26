@@ -34,11 +34,12 @@ const { Text, Paragraph } = Typography
 type DocumentIngestResultProps = {
   doc: DocumentRawOut | DocumentDetail
   filename?: string
+  signalId?: string
   onUpdated?: (doc: DocumentDetail) => void
   onNavigate?: (key: string) => void
 }
 
-export function DocumentIngestResult({ doc, filename, onUpdated, onNavigate }: DocumentIngestResultProps) {
+export function DocumentIngestResult({ doc, filename, signalId, onUpdated, onNavigate }: DocumentIngestResultProps) {
   const { message: messageApi } = AntApp.useApp()
   const queryClient = useQueryClient()
   const [current, setCurrent] = useState(doc)
@@ -193,7 +194,12 @@ export function DocumentIngestResult({ doc, filename, onUpdated, onNavigate }: D
               <Button size="small" type="link" onClick={() => void refreshMeta()}>
                 刷新状态
               </Button>
-              {(current.ingest_status === 'parsed' || current.ingest_status === 'stored') && onNavigate ? (
+              {signalId && onNavigate ? (
+                <Button size="small" type="primary" onClick={() => onNavigate(`singal/${signalId}`)}>
+                  打开信号
+                </Button>
+              ) : null}
+              {(current.ingest_status === 'parsed' || current.ingest_status === 'stored') && onNavigate && !signalId ? (
                 <Button size="small" type="primary" loading={saveSignalBusy} onClick={() => void saveAsSignal()}>
                   保存为信号
                 </Button>

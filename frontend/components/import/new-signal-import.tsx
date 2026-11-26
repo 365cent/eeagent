@@ -52,6 +52,7 @@ function useNewSignalImport(onNavigate: (key: string) => void) {
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [lastDocument, setLastDocument] = useState<DocumentRawOut | null>(null)
   const [lastDocumentName, setLastDocumentName] = useState<string | null>(null)
+  const [lastDocumentSignalId, setLastDocumentSignalId] = useState<string | null>(null)
   const [jobError, setJobError] = useState<string | null>(null)
   const [panoramaBatch, setPanoramaBatch] = useState<PanoramaImportBatchOut | null>(null)
 
@@ -95,6 +96,7 @@ function useNewSignalImport(onNavigate: (key: string) => void) {
     if (job.result?.document) {
       setLastDocument(job.result.document)
       setLastDocumentName(job.result.document.filename ?? uploadFileName)
+      setLastDocumentSignalId(signal.id)
     }
     if (job.result?.document) {
       messageApi.success(`${uploadFileName ?? '文档'}：${documentSummaryLine(job.result.document)}`)
@@ -104,7 +106,9 @@ function useNewSignalImport(onNavigate: (key: string) => void) {
       messageApi.success(`网页证据已入库：${signal.title}`)
     }
     refreshSignals()
-    onNavigate(`singal/${signal.id}`)
+    if (!job.result?.document) {
+      onNavigate(`singal/${signal.id}`)
+    }
   }
 
   const resumePendingJob = async (jobId: string, filename: string) => {
@@ -295,6 +299,7 @@ function useNewSignalImport(onNavigate: (key: string) => void) {
     setJobError(null)
     setLastDocument(null)
     setLastDocumentName(null)
+    setLastDocumentSignalId(null)
     resumeAbort.current?.abort()
     const controller = new AbortController()
     resumeAbort.current = controller
@@ -433,6 +438,7 @@ function useNewSignalImport(onNavigate: (key: string) => void) {
     uploadInFlight,
     lastDocument,
     lastDocumentName,
+    lastDocumentSignalId,
     setLastDocument,
     panoramaBatch,
     fileJob: {
@@ -476,6 +482,7 @@ export function NewSignalImportPage({ onNavigate }: NewSignalImportProps) {
                 <DocumentIngestResult
                   doc={vm.lastDocument}
                   filename={vm.lastDocumentName ?? undefined}
+                  signalId={vm.lastDocumentSignalId ?? undefined}
                   onUpdated={(detail) => vm.setLastDocument(detail)}
                   onNavigate={onNavigate}
                 />
