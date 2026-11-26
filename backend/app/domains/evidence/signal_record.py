@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+import logging
 import uuid
 from datetime import datetime
 
@@ -23,11 +25,21 @@ from app.services.tagging import (
     get_or_create_vocab,
     normalize_url,
     sha256_text,
+    suggest_tags,
     suggest_tech_tags,
     text_for_tagging,
 )
 
 __all__ = ["create_signal_record"]
+
+logger = logging.getLogger(__name__)
+
+#: One shared budget for the model calls made while a signal is created. Each
+#: call has its own request timeout, but the client retries and the pipeline
+#: makes two calls (tag suggestion, then the candidate pick), so without this
+#: the create request stalls for ~25 s on a flapping gateway. A timeout keeps
+#: the deterministic skill/jieba result and leaves the model tags as candidates.
+INGEST_TAGGING_BUDGET_SECONDS = 12
 
 
 async def create_signal_record(
@@ -127,35 +139,55 @@ async def create_signal_record(
     if source_text:
         tagging_text_for_tags = text_for_tagging(title, source_text)
         llm_body = tagging_text_for_tags or (source_text or "")[:6000]
-        llm_suggestion = await suggest_tags_with_llm(title, llm_body)
-        if llm_suggestion is not None:
-            if (
-                stage_explicit is None
-                and not skill_decision.value_chain_stage
-                and llm_suggestion.value_chain_stage_code
-            ):
-                sig.value_chain_stage_code = value_chain_stage_code = llm_suggestion.value_chain_stage_code
-                stage_source = "llm"
-            if (
-                signal_type_explicit is None
-                and not skill_decision.signal_type
-                and llm_suggestion.signal_type_code
-            ):
-                sig.signal_type_code = signal_type_code = llm_suggestion.signal_type_code
-                signal_type_source = "llm"
         tag_names = list(skill_decision.tech_tags)
         tag_source = "skill" if tag_names else "none"
-        auto_tags, auto_source, auto_score = await suggest_tech_tags(title, source_text)
-        candidate_tags = list(auto_tags)
-        tag_confidence = auto_score
-        threshold = float(getattr(get_settings(), "auto_tag_min_confidence", 0.8))
-        # Only a confident suggestion is written; the rest wait for a human.
-        if auto_score is not None and auto_score > threshold:
-            for name in auto_tags:
-                if name not in tag_names and len(tag_names) < TAG_FINAL_MAX:
-                    tag_names.append(name)
-            if auto_tags:
-                tag_source = ("skill+" if skill_decision.tech_tags else "") + auto_source
+        try:
+            async with asyncio.timeout(INGEST_TAGGING_BUDGET_SECONDS):
+                llm_suggestion = await suggest_tags_with_llm(title, llm_body)
+                if llm_suggestion is not None:
+                    if (
+                        stage_explicit is None
+                        and not skill_decision.value_chain_stage
+                        and llm_suggestion.value_chain_stage_code
+                    ):
+                        sig.value_chain_stage_code = value_chain_stage_code = llm_suggestion.value_chain_stage_code
+                        stage_source = "llm"
+                    if (
+                        signal_type_explicit is None
+                        and not skill_decision.signal_type
+                        and llm_suggestion.signal_type_code
+                    ):
+                        sig.signal_type_code = signal_type_code = llm_suggestion.signal_type_code
+                        signal_type_source = "llm"
+                auto_tags, auto_source, auto_score = await suggest_tech_tags(title, source_text)
+                candidate_tags = list(auto_tags)
+                tag_confidence = auto_score
+                threshold = float(getattr(get_settings(), "auto_tag_min_confidence", 0.8))
+                # Only a confident suggestion is written; the rest wait for a human.
+                # Without a rerank service there is no confidence to compare: the
+                # jieba pre-tag (REQ-TAG-05) keeps its previous ingest behaviour.
+                if auto_score is None or auto_score > threshold:
+                    for name in auto_tags:
+                        if name not in tag_names and len(tag_names) < TAG_FINAL_MAX:
+                            tag_names.append(name)
+                    if auto_tags:
+                        tag_source = ("skill+" if skill_decision.tech_tags else "") + auto_source
+        except TimeoutError:
+            logger.warning(
+                "入库打标超过 %ss，保留 skill/jieba 结果: %s",
+                INGEST_TAGGING_BUDGET_SECONDS,
+                title,
+            )
+            # Never leave a signal without its deterministic tags just because
+            # the gateway is slow (REQ-TAG-05).
+            if not candidate_tags:
+                fallback = suggest_tags(tagging_text_for_tags or source_text, limit=TAG_FINAL_MAX)
+                candidate_tags = list(fallback)
+                for name in fallback:
+                    if name not in tag_names and len(tag_names) < TAG_FINAL_MAX:
+                        tag_names.append(name)
+                if fallback:
+                    tag_source = ("skill+" if skill_decision.tech_tags else "") + "jieba-frequency"
         for name in tag_names:
             v = await get_or_create_vocab(db, "tech_tag", name)
             db.add(SignalTag(signal_id=sig.id, vocab_id=v.id))
@@ -175,7 +207,7 @@ async def create_signal_record(
         "candidates": candidate_tags,
         "confidence": tag_confidence,
         "threshold": threshold,
-        "applied": bool(candidate_tags) and tag_confidence is not None and tag_confidence > threshold,
+        "applied": bool(candidate_tags) and (tag_confidence is None or tag_confidence > threshold),
         "reviewed_by_human": False,
     }
     extra_conflicts: list[dict] = []

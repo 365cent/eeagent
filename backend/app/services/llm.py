@@ -21,6 +21,7 @@ from __future__ import annotations
 import logging
 import re
 import time
+import asyncio
 
 from pydantic import BaseModel, field_validator
 
@@ -50,6 +51,10 @@ logger = logging.getLogger(__name__)
 #: Seconds-level budget: the suggestion path must degrade to jieba quickly
 #: rather than stall ingest or the tag-suggestions endpoint on a slow gateway.
 REQUEST_TIMEOUT_SECONDS = 8
+#: Hard ceiling for one agent run. The OpenAI-compatible client retries a
+#: timed-out request twice, so the per-request timeout alone can block ingest
+#: for ~24 s on a flapping gateway. This budget cancels the whole run instead.
+AGENT_BUDGET_SECONDS = 12
 
 
 class LLMTagSuggestion(BaseModel):
@@ -111,7 +116,8 @@ async def _run_logged(agent: Agent, text: str, task: str):
     requested = str(getattr(getattr(agent, "model", None), "model_name", None) or "")
     started = time.perf_counter()
     try:
-        result = await agent.run(text)
+        async with asyncio.timeout(AGENT_BUDGET_SECONDS):
+            result = await agent.run(text)
     except Exception as exc:
         log_llm_call(
             usage_without_result(

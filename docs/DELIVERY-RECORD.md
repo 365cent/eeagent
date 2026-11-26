@@ -35,7 +35,25 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence: `uv run python -m app.services.orphan_maintenance` on the portable dev PostgreSQL → `orphan_maintenance dry-run: pruned_orphans=0`, exit 0 (matches the walkthrough's cleanup-review baseline); `uv run pytest tests/test_signal_dedup.py tests/test_db_schema.py -q` → 27 passed; `uv run alembic heads` → `0025_capture_client_claim_worker (head)`.
 - Not done: Linux/container run of the command remains OPS-side evidence. BE-01 parent stays open (the audit row landed in the next slice).
 
-### Maintenance-run audit row (BE-01 slice)
+#### Persistent-edit browser case (FE-12 slice)
+
+- Added `frontend/tests/e2e/persistent-edit.spec.ts` (`pnpm pw:persist`). It creates a scratch signal through the public API, opens `/singal/{id}`, changes 价值链环节 and 信号类型 in the drawer, saves, and asserts the server row (not component state) changed: `value_chain_stage_code=delivery_oem`, `signal_type_code=technology`, and `updated_at` moved.
+- The same case pins the two rules that make the edit trustworthy: a PATCH carrying the pre-edit `expected_updated_at` returns 409 (stale saves are refused), and after a reload the drawer shows the stored values plus the 修正记录 table with field, old value, new value, `whoami` subject/role and time. The scratch signal is archived and deleted in `finally`, so the case leaves no rows.
+- Checks: `pnpm pw:persist` → 1 passed; `pnpm typecheck` exit 0; `pnpm antd:lint` 0 issues.
+- Two defects surfaced while writing it. (1) antd renders two-character primary buttons with an inserted space, so `getByRole('button', { name: '保存' })` never matches; the spec uses `/保\s*存/`. (2) Creating a signal with body text blocked ~26 s — see the ingest-budget slice below.
+- Remaining on FE-12: model-failure, async-task and history-version browser cases; 10k-row pagination and first-content timing; Linux same-origin checks.
+
+### Bounded ingest tagging + jieba fallback (BE-04 slice)
+
+- Problem: `POST /api/v1/signals` with body text took ~25.8 s whenever the model gateway was slow. The 8 s per-request timeout is multiplied by the OpenAI-compatible client's retries, and the ingest path makes two model calls (tag suggestion, then the candidate pick). Measured 25.8 s on this machine with `suggest_tags_with_llm` alone.
+- Two changes:
+  - `signal_record.INGEST_TAGGING_BUDGET_SECONDS = 12` wraps the whole ingest tagging step in one `asyncio.timeout`. On timeout the deterministic skill/jieba result is kept, `classification_basis.auto_tag` still records the candidates, and the jieba pre-tag is written locally so a slow gateway does not leave the signal untagged.
+  - `llm.AGENT_BUDGET_SECONDS = 12` additionally caps one agent run, so the suggestion and keyword paths cannot stack retries either.
+- Also fixed a regression from `2420ff2`: the confidence gate treated “no rerank service → confidence None” as “below threshold” and dropped the jieba pre-tag, breaking REQ-TAG-05. The gate now applies when confidence is unknown; only a measured, below-threshold score waits for a human.
+- Evidence: live `POST /signals` with body text 25.8 s → 14.0 s, tags `['eFuse']` still present; `pytest tests/test_auto_tag_confidence.py tests/test_signals_ingest.py tests/test_llm_tags.py tests/test_tech_tag_pipeline.py -q` → 41 passed (two new cases: a 30 s stub is cancelled and jieba tags still land; a no-rerank signal keeps its jieba pre-tag); document/capture path `pytest tests/test_document_ingest.py tests/test_document_signals.py tests/test_capture.py -q` → 47 passed; `uv run lint-imports` → 3 kept, 0 broken.
+- Remaining: BE-04 parent still needs the unified re-classification service, per-candidate explanations and real-gateway acceptance; the 12 s budget is a local measurement, not yet a Linux-intranet figure.
+
+## Maintenance-run audit row (BE-01 slice)
 
 - Problem: `orphan_maintenance --apply` pruned orphan rows but left no durable record of who ran it, when, or how many rows it scanned/removed, so the BE-01 audit requirement stayed open.
 - What changed (`models.py`, migration `0026_maintenance_run`, `orphan_objects.py`, `orphan_maintenance.py`, tests):

@@ -55,6 +55,44 @@ async def test_confident_tags_are_applied_without_review(client, monkeypatch):
     assert auto["reviewed_by_human"] is False
 
 
+async def test_no_rerank_keeps_the_jieba_pre_tag(client, monkeypatch):
+    """REQ-TAG-05: without a rerank service there is no confidence to compare,
+    so the jieba pre-tag is applied as before instead of silently dropped."""
+    monkeypatch.setattr(signal_record, "suggest_tags_with_llm", _no_llm)
+    monkeypatch.setattr(signal_record, "suggest_tech_tags", _tag_stub(["eFuse"], "jieba-frequency", None))
+
+    signal = await _post(client, "https://example.com/auto-tag-no-rerank", "eFuse baseline")
+
+    detail = (await client.get(f"/api/v1/signals/{signal['id']}")).json()
+    assert detail["tags"] == ["eFuse"]
+    auto = detail["classification_basis"]["auto_tag"]
+    assert auto["applied"] is True
+    assert auto["confidence"] is None
+
+
+async def test_slow_gateway_falls_back_to_jieba_within_budget(client, monkeypatch):
+    """A hanging model call must not hold the create request: the shared budget
+    cancels it and the deterministic jieba pre-tag still lands (REQ-TAG-05)."""
+    import asyncio
+    import time
+
+    async def hanging(*_args, **_kwargs):
+        await asyncio.sleep(30)
+        raise AssertionError("the ingest budget must cancel this call")
+
+    monkeypatch.setattr(signal_record, "suggest_tags_with_llm", hanging)
+    monkeypatch.setattr(signal_record, "suggest_tech_tags", hanging)
+    monkeypatch.setattr(signal_record, "INGEST_TAGGING_BUDGET_SECONDS", 0.3)
+
+    started = time.perf_counter()
+    signal = await _post(client, "https://example.com/auto-tag-budget", "eFuse 配电 智能配电")
+    elapsed = time.perf_counter() - started
+    assert elapsed < 5, f"create must not wait for the model, took {elapsed:.1f}s"
+    detail = (await client.get(f"/api/v1/signals/{signal['id']}")).json()
+    assert detail["tags"], "the jieba fallback must still produce tags"
+    assert detail["classification_basis"]["auto_tag"]["applied"] is True
+
+
 async def test_weak_tags_stay_candidates(client, monkeypatch):
     monkeypatch.setattr(signal_record, "suggest_tags_with_llm", _no_llm)
     monkeypatch.setattr(

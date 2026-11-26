@@ -79,6 +79,7 @@
 - 已交付独立语义网关与索引校验：chat、embedding、rerank 分别读取 `CHAT_*`、`EMBEDDING_*`、`RERANK_*` 的 URL/key/model，旧 `LLM_*`/`MAAS_*` 已移除；实际网关 embedding 返回 4096 维，rerank 正常；embedding 按 `data[].index` 排序后返回。
 - 2026-11-26 自动采用：入库时若标签建议的精排置信度 > `AUTO_TAG_MIN_CONFIDENCE`（默认 0.8），直接写入信号标签，`classification_basis.auto_tag` 记录候选/置信度/阈值/`reviewed_by_human=false`；低于阈值的仅作候选，人工可随时修改，人工已确认字段仍由纠正保护逻辑拦住自动覆盖。文档来源信号改用 MarkItDown 正文（含图注）打标，主题仍为人工指定。
 - 新增内容哈希+模型版本的 JSONB 向量缓存，numpy 余弦；词表/主题内容变化失效。直接声明所用依赖，不能依赖开发机偶然安装。
+- 2026-11-26 入库打标预算：单条创建的两次模型调用（标签建议 + 候选精选）此前在慢网关上会被 SDK 重试放大到约 26s（8s 超时 × 3 次），阻塞上传页。现在 `signal_record.INGEST_TAGGING_BUDGET_SECONDS=12` 给整个入库打标共享一个预算，超时保留 skill/jieba 结果并回退本地 jieba 预标，`classification_basis.auto_tag` 仍记录候选；`llm._run_logged` 另加 `AGENT_BUDGET_SECONDS=12` 的硬上限。实测创建 25.8s → 14.0s 且标签仍在；pytest tests/test_auto_tag_confidence.py tests/test_signals_ingest.py tests/test_llm_tags.py tests/test_tech_tag_pipeline.py 40 passed，文档路径 tests/test_document_ingest.py tests/test_document_signals.py tests/test_capture.py 47 passed。另修复 2420ff2 引入的回退缺口：无 rerank 服务时置信度为 None，此前会被阈值判为不采用而丢失 jieba 预标，现按 REQ-TAG-05 恢复写入。
 - 视觉识别链（2026-11-19）：`VISION_MODEL` 严格按配置顺序重试（当前 3.8 → 3.6），重试间隔默认 `config.py`（1.5s，内网慢网关）；文档元数据记录实际应答的视觉模型；`scripts/probe_model_speed.py` 只读测量对话模型 TTFT/TPS。
 - 阈值可配置，0.85 仅作旧方案初始实验值，生产阈值由黄金集确认。保留能力边界，不新增向量服务或 pgvector。
 - 入库、建议、auto-tag 共用同一服务。POST /signals/{id}/auto-tag 返回三维建议、分数/理由；已人工确认字段默认不写。

@@ -126,6 +126,29 @@ async def test_unreachable_or_failing_model_returns_none(monkeypatch):
     assert await suggest_tags_with_llm("标题", "正文") is None
 
 
+async def test_slow_model_is_cancelled_by_the_hard_budget(monkeypatch):
+    """A gateway that keeps retrying must not hold ingest: the whole agent run
+    is cancelled once AGENT_BUDGET_SECONDS elapses, not 3 x the request timeout."""
+
+    import asyncio
+    import time
+
+    async def slow(messages, info: AgentInfo) -> ModelResponse:
+        await asyncio.sleep(5)
+        raise AssertionError("the budget must cancel before the model answers")
+
+    async def build_agent():
+        return Agent(FunctionModel(slow), output_type=LLMTagSuggestion)
+
+    monkeypatch.setattr(llm, "get_settings", lambda: _settings())
+    monkeypatch.setattr(llm, "_build_agent", build_agent)
+    monkeypatch.setattr(llm, "AGENT_BUDGET_SECONDS", 0.2)
+    started = time.perf_counter()
+    assert await suggest_tags_with_llm("标题", "正文") is None
+    elapsed = time.perf_counter() - started
+    assert elapsed < 2, f"the budget must end the run early, took {elapsed:.1f}s"
+
+
 async def test_invalid_structured_output_returns_none(monkeypatch):
     """A value outside the closed vocabulary fails validation → the agent run
     raises and the service must swallow it (CONV-CLOSED-VOCAB)."""
