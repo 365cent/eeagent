@@ -1,6 +1,6 @@
 # 分层架构与契约校验 / Layered architecture & contracts
 
-更新：2026-11-20。与 [DOC-03](TODO.md#doc-03-架构数据和接口同步) 同步；实现任务见 [BE-17](../backend/TODO.md#be-17-领域分层与依赖边界)、[FE-13](../frontend/TODO.md#fe-13-领域特性与-workspace-拆分)、[CC-07](../client/TODO.md#cc-07-客户端分层与-http-复用)。运行时契约以 OpenAPI 与数据库 migration 为准，本文描述代码组织与回归门禁，不含凭据或环境秘密。
+更新：2026-11-26。与 [DOC-03](TODO.md#doc-03-架构数据和接口同步) 同步；实现任务见 [BE-17](../backend/TODO.md#be-17-领域分层与依赖边界)、[FE-13](../frontend/TODO.md#fe-13-领域特性与-workspace-拆分)、[CC-07](../client/TODO.md#cc-07-客户端分层与-http-复用)。运行时契约以 OpenAPI 与数据库 migration 为准，本文描述代码组织与回归门禁，不含凭据或环境秘密。
 
 ## 总览 / Overview
 
@@ -52,7 +52,7 @@ cd backend && uv run lint-imports
 
 违反即 CI/本地回归失败；新增契约前须先清现存违规导入（见 BE-17）。
 
-## 迁移与数据模型（2026-11-20）
+## 迁移与数据模型（2026-11-26）
 
 运行时 schema 以 Alembic 迁移为准，文档不手抄列类型。
 
@@ -64,12 +64,18 @@ cd backend && uv run lint-imports
 | 视图 | `eea_v_tech_theme_metrics`、`eea_v_tech_theme_display_tags` | 同上 |
 | 测试库 | 专用 `eea_test`，与开发库 `eea` 分离 | `backend/tests/conftest.py` 会话互斥锁 |
 
+对象存储：内容寻址写入在 Windows 并发 os.replace 冲突时，同尺寸目标视为成功或短暂重试；对象键包含检查使用词法 abspath/commonpath，避免 Path.resolve 的短名竞态，仍拒绝绝对路径与 ..。
+
 新增迁移只追加 revision；改表必须同时更新 `EXPECTED_TABLES`，否则 schema 清单用例失败。开发引导（Windows 便携 PostgreSQL）与生产初始化（OPS-01）分开，不复用 bootstrap 脚本。
 
 ## 近期接口契约变化
 
 | 日期 | 变化 | 影响方 |
 | --- | --- | --- |
+| 2026-11-26 | DELETE /landing-points/{id} 返回 204；删除前写 deleted 审计快照（功能、名称、域、角色、标准/评估数）并级联标准/评估；GET /audit 响应新增 reason、model_version、rule_version、skill_version、score_source | BE-08、BE-03、FE-07/08 |
+| 2026-11-26 | GET /signals/{id}/theme-aggregate-preview 新增可选 structured_basis（tech_object/underlying_capability/change_direction）与 basis_reason；一致性门控失败时清除推荐 | BE-05、FE-04 |
+| 2026-11-26 | 采集 submission 指纹统一使用规范化后的 MIME：POST /capture 与 POST /capture/jobs、client-submit 对同一 .pptx + octet-stream 互相重放而非 409 | BE-01、CC-02、FE-02 |
+| 2026-11-26 | 对象键存在但 blob 缺失时，/signals/{id}/body、/archive、/figures 与 /documents/{id}/canonical.md、/preview.pdf 返回 404 并带对象键；文档信号 figures 不再返回空数组 | BE-02、BE-12、FE-04 |
 | 2026-11-26 | 新增 `eea_maintenance_run`：orphan_maintenance `--apply` 与删除同一事务写入 scanned/pruned、操作者、起止时间和 resolved/missing_blob/object_keys；dry-run 不写审计；同一命令按 `CAPTURE_JOB_RETENTION_DAYS`（默认 30）删除过期终态任务，payload 仅在无引用且超过 1 小时未写入时删除 | BE-01、OPS-02 |
 | 2026-11-24 | 重复扫描分组改按 `article_url_key`（内容型 query 保留，追踪参数按 host 剔除，空值参数保留）；`DuplicateGroupOut.kind` 扩为 `url \| body \| url_suspect`，`url_suspect` 恒 `identical=false`；cleanup 服务端重算分组、不删空组、跳过 Agent 待确认或被已确认需求引用的信号并逐条审计；候选行由 SQL 预筛加载。路径快照仅存 path，无需更新 | BE-02、FE 证据清理入口 |
 | 2026-11-20 | `POST /api/v1/imports/capture-urls` 的任务写入调用者 `owner_subject`；研究者只能列出/领取自己的任务，`platform_admin` 可跨用户 | FE-02、CC-02、OPS-03 |

@@ -15,6 +15,15 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Verified: page renders the release row and the `/downloads/capture-v0.1.1-windows-amd64.zip` link; zip returns 200 `application/zip` with the expected hash; `SHA256SUMS` served alongside.
 - Not done: macOS client build. Its UI is Fyne-based and needs cgo plus the macOS SDK, so it must be built on a Mac; the page states this instead of offering a dead link. Screenshots of the deployed pages could not be captured (ego-browser stalls on `Page.captureScreenshot` for any page on this host); verification used DOM text plus HTTP responses.
 
+### PDF/document upload 401 on the deployed host (fixed)
+
+- Symptom: the import page sat at `上传 0%` and documents never entered the library.
+- Root cause, confirmed by replaying the request: `POST /api/v1/capture/jobs` returned **401 “身份代理未提供有效的操作者身份”**. With `APP_ENV=production` the API accepts an operator only from a trusted peer, and nginx was deliberately clearing `X-EEA-Authenticated-*` because OPS-03 has no identity provider yet — so every audited write was impossible on that host, not just PDFs.
+- Fix (interim, OPS-03 still open): nginx now stamps a configured pilot operator from `EEA_PILOT_OPERATOR`/`EEA_PILOT_ROLE` (empty = 401, fail closed), the compose file mounts the conf as an nginx template and passes those values, and `deploy/.env.example` documents them. A second bug surfaced during the fix: nginx drops inherited `proxy_set_header` once a `location` declares any, so the identity headers had to be repeated inside `location /api/`.
+- UI: the progress bar tracked only the HTTP upload and sat at `0%` while the worker parsed. It now moves to `100%` as soon as the job is accepted.
+- Verified on `10.215.35.10:8090`: PDF upload → `202 queued` → `succeeded` in <6 s → signal created (`3595eaf5…`, `120f1e31…`), both after a full rebuild.
+- Documented rule, not a bug: a PDF needs ≥120 characters of extractable text; a scanned PDF fails with “PDF 没有可提取的文本层（可能需要 OCR）；原始文件已保留” and the blob is kept.
+
 ## 2026-11-26
 
 ### Orphan-maintenance entry runnable on Windows + explicit dry-run/apply (BE-01 slice, walkthrough O-8)
@@ -115,6 +124,13 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Tests (backend/tests/test_objectstore_concurrency.py): 32 threads writing one key, a simulated concurrent winner, a transient PermissionError retry, and traversal rejection.
 - Evidence: pytest tests/test_objectstore_concurrency.py -q -> 4 passed; pytest tests/test_capture_job_concurrency.py -q -> 4 passed; full backend suite after both fixes -> 597 passed, 2 skipped (7:34).
 - Not done: cross-process writers on a shared object directory rely on the same content-addressed retry logic; S3 remains deployment scope. The parent task stays open.
+
+### DOC-03 contract sync for the 2026-11-26 slices
+
+- Problem: the architecture contract table still described the 2026-11-20 state; the cross-entry fingerprint, structured theme-preview fields, audit response fields, landing-point delete and missing-object 404s were absent.
+- What changed (docs/ARCHITECTURE-LAYERS.md, docs/TODO.md): four 2026-11-26 contract rows, the object-store concurrency note, the data-model heading date and the DOC-03 sync line.
+- Evidence: documentation-only change; the claims match the committed tests and implementations from 6763e60, 6bf9fb3, be78a98, 73c4a74, 3fc075e and cc3ec11.
+- Not done: deployment topology, identity/audit state machine and the real 8/16 baseline still depend on OPS-03 and DOC-02.
 
 ## 2026-11-24
 
