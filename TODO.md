@@ -72,6 +72,7 @@
 - **BE-02（2026-11-26，分页边界）**：limit 0/201 与负 offset 422、limit=200 通过；offset 越界返回空数组且总量不变；筛选总量与默认归档口径有断言。证据：test_signals_list.py 15 passed。
 - **BE-08（2026-11-26，落点删除审计）**：新增 DELETE /landing-points/{id}，删除前写 deleted 快照（标准/评估计数、操作者、理由），级联清理；AuditOut 补齐理由与模型/规则/skill/分数来源。证据：落点与审计 14 passed；相关 97 passed。
 - **BE-01（2026-11-26，对象存储并发）**：内容寻址写入容忍 Windows 并发 replace 冲突并重试；对象键包含检查改为词法（防短名竞态），路径穿越仍拒绝。证据：4 passed；capture 并发 4 passed。
+- **BE-02（2026-11-26，状态转换）**：五态逐一可达且每次转换写审计；无正文转 retained 422 且状态不变；重复写同一状态不重复审计。证据：test_signal_archive_ops.py 7 passed。
 - 上述均为组件切片；父任务验收、目标平台证据和真实业务样本仍按子清单保持开放。
 
 ## 下一项具体任务

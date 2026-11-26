@@ -47,6 +47,7 @@
 - 已交付正文修补审计切片：`PATCH /signals/{id}` 的 `body_text` 保存新对象，并在 `CorrectionAudit` 记录旧/新 object key 与 SHA-256；旧正文对象仍可读取。
 - 2026-11-24 重复信号扫描/清理切片：`GET /signals/duplicates` 改按 `article_url_key` 分组（保留内容型 query，追踪参数按 host 剔除：`utm_*`/`spm` 全局，微信/百度包装参数仅在对应 host，空值参数保留）；同一 `url_normalized` 且带 `(重复采集 #n)` 标题但 URL 键不同的对报告为 `url_suspect`（恒非 identical，人工裁决；若标题后缀被改掉则有意不合并——重命名是人工决定，错合不可恢复）；`POST /signals/duplicates/cleanup` 服务端重算分组，绝不删空一组、跳过存在 Agent 待确认变更或被已确认需求引用为证据的信号（REQ-DEM-03）并逐条审计。候选行由 SQL 预筛（仅重复 `url_normalized`/`body_sha256`）加载，万级信号实测见 `scripts/probe_dedup_scan_cost.py`。证据：[signal_dedup.py](app/services/signal_dedup.py)、[test_signal_dedup.py](tests/test_signal_dedup.py) 21 passed，提交 `e334993`+`83090a8`，见[交付记录](../docs/DELIVERY-RECORD.md#2026-11-24)。待验：真实库扫描结果核对。
 - 在服务端约束五种证据状态及两种演进节点；没有可读且已落盘的快照不能标已留存。待人工复核表示已有证据但分类/归集未确认。
+- 2026-11-26 状态转换切片：五种证据状态逐一可达（fetching → fetch_failed → pending_review → retained → archived → retained），每次转换写一条 evidence_status_code 审计；无正文转 retained 返回 422 且状态不变、不写审计；重复提交同一状态不重复审计。新增 3 项用例。证据：tests/test_signal_archive_ops.py 7 passed。
 - 完成检索标题、发布主体、摘要与技术标签，以及来源/渠道/环节/状态/主题筛选。保留列表兼容形状，通过响应总数头提供分页总量。
 - 归档后禁止新自动推导和自动覆盖，历史链路仍可读；恢复后需要重新复核。补正文后按规则更新状态，禁止仅修改状态制造成功。
 - archive 回放使用隔离 iframe 与受限响应策略；文件/图片缺失返回明确错误。

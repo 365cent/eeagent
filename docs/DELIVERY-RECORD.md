@@ -132,6 +132,14 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence: documentation-only change; the claims match the committed tests and implementations from 6763e60, 6bf9fb3, be78a98, 73c4a74, 3fc075e and cc3ec11.
 - Not done: deployment topology, identity/audit state machine and the real 8/16 baseline still depend on OPS-03 and DOC-02.
 
+### Evidence-status transition matrix (BE-02 slice)
+
+- Problem: individual status values were tested, but no test walked the five-state model end to end, and the rejected retained transition / no-op write behavior was unverified.
+- What changed: only backend/tests/test_signal_archive_ops.py; no production code.
+- Tests: fetching -> fetch_failed -> pending_review -> retained -> archived -> retained, each transition returning 200 and writing one evidence_status_code audit pair; retained without any stored body returns 422, keeps fetching and writes no audit; repeating the same status writes only one audit row.
+- Evidence: pytest tests/test_signal_archive_ops.py -q -> 7 passed (18.0 s).
+- Not done: the two evolution-node transitions are owned by the capture/ingest paths and are not part of this PATCH matrix. The parent task stays open.
+
 ## 2026-11-24
 
 ### Duplicate-signal scan and cleanup on an article URL key (BE-02 slice)
