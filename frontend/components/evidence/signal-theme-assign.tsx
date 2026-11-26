@@ -72,6 +72,11 @@ export function SignalThemeAssign({
   }
 
   const preview = previewQuery.data
+  const basis = preview?.structured_basis
+  const basisItems: Array<[string, string]> = []
+  if (basis?.tech_object) basisItems.push(['技术对象', basis.tech_object])
+  if (basis?.underlying_capability) basisItems.push(['底层能力', basis.underlying_capability])
+  if (basis?.change_direction) basisItems.push(['变化方向', basis.change_direction])
 
   return (
     <div className="signal-theme-assign">
@@ -105,6 +110,15 @@ export function SignalThemeAssign({
               ) : preview ? (
                 <Space orientation="vertical" size={6} style={{ width: '100%' }}>
                   <Text type="secondary">{preview.reason}</Text>
+                  {basisItems.length ? (
+                    <Space size={12} wrap>
+                      {basisItems.map(([label, value]) => (
+                        <Text key={label} type="secondary">
+                          {label}：<Text strong>{value}</Text>
+                        </Text>
+                      ))}
+                    </Space>
+                  ) : null}
                   {preview.candidates.length ? (
                     <Table
                       size="small"

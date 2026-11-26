@@ -92,7 +92,7 @@
 - 修正计数查询，防多 URL/多标签 join 放大。主题来源更新与失效要可复核；主题不提供需求合并或优先级排序。
 - 聚类仅输出候选名称、成员和解释；人工确认后创建主题/开放标签。离线脚本默认只出报告，显式 apply 才写；不创建封闭类目。
 - 2026-11-26 多来源覆盖切片：新增 tests/test_signal_sources.py 五项用例——新信号自动生成 1 条主来源（provenance=primary）；补充 URL 按 normalize_url 去重（大小写/尾斜杠/query 归一），重复提交返回同一行，主 URL 作为补充提交返回主来源；归档信号拒绝新增来源（409）；无权限角色 403；主题 source_count 计入补充 URL，跨信号共享主 URL 只计一次，归档成员的来源仍计入（signal_frequency 排除归档）。证据：5 passed；主题/聚类/归档相关 34 passed。真实 8/16 案例仍待 DOC-02。
-- 2026-11-26 结构化归集依据切片：GET /signals/{id}/theme-aggregate-preview 现在返回 structured_basis（tech_object/underlying_capability/change_direction，wave-1 按标签长度排序的启发式）与 basis_reason（一致性门控失败时给出原因）；复用此前未接线的 aggregation_structured_basis/structured_basis_consistent。前端类型同步为可选字段。证据：pytest tests/test_aggregation.py -q → 14 passed；OpenAPI 路径快照 1 passed；pnpm typecheck 通过。
+- 2026-11-26 结构化归集依据切片：GET /signals/{id}/theme-aggregate-preview 现在返回 structured_basis（tech_object/underlying_capability/change_direction，wave-1 按标签长度排序的启发式）与 basis_reason（一致性门控失败时给出原因）；复用此前未接线的 aggregation_structured_basis/structured_basis_consistent。前端类型同步为可选字段，主题抽屉在候选预览中展示非空的技术对象/底层能力/变化方向，组件 antd lint 通过。证据：pytest tests/test_aggregation.py -q → 14 passed；OpenAPI 路径快照 1 passed；pnpm typecheck 通过。
 - 验收：8 条信号/16 URL 的隔离测试 fixture、共享 URL、归档、重新归集、同词异义/异词同义；真实 8/16 复现等待 DOC-02 数据。
 
 ## BE-06 需求点推导与复核
