@@ -77,6 +77,7 @@
 - 采用已有计划的 TF-IDF + TextRank 召回、标题加权、embedding 近义合并、rerank 精排；保留离线规则/jieba 回退，标签数量随内容变化。
 - 网关批量最多 16、限制并发、超时和退避；校验空响应、索引、向量维度和有限数值。无配置时返回不可用状态和降级理由。
 - 已交付独立语义网关与索引校验：chat、embedding、rerank 分别读取 `CHAT_*`、`EMBEDDING_*`、`RERANK_*` 的 URL/key/model，旧 `LLM_*`/`MAAS_*` 已移除；实际网关 embedding 返回 4096 维，rerank 正常；embedding 按 `data[].index` 排序后返回。
+- 2026-11-26 自动采用：入库时若标签建议的精排置信度 > `AUTO_TAG_MIN_CONFIDENCE`（默认 0.8），直接写入信号标签，`classification_basis.auto_tag` 记录候选/置信度/阈值/`reviewed_by_human=false`；低于阈值的仅作候选，人工可随时修改，人工已确认字段仍由纠正保护逻辑拦住自动覆盖。文档来源信号改用 MarkItDown 正文（含图注）打标，主题仍为人工指定。
 - 新增内容哈希+模型版本的 JSONB 向量缓存，numpy 余弦；词表/主题内容变化失效。直接声明所用依赖，不能依赖开发机偶然安装。
 - 视觉识别链（2026-11-19）：`VISION_MODEL` 严格按配置顺序重试（当前 3.8 → 3.6），重试间隔默认 `config.py`（1.5s，内网慢网关）；文档元数据记录实际应答的视觉模型；`scripts/probe_model_speed.py` 只读测量对话模型 TTFT/TPS。
 - 阈值可配置，0.85 仅作旧方案初始实验值，生产阈值由黄金集确认。保留能力边界，不新增向量服务或 pgvector。
