@@ -145,7 +145,14 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Problem: GET/POST /signals/{id}/sources existed and were tested, but the evidence drawer never showed them, so primary and supplementary URLs were indistinguishable in the UI.
 - What changed (frontend/lib/api/types.ts, frontend/lib/api/eea-api.ts, frontend/components/evidence/signal-sources.tsx, frontend/views/dashboard/workspace.tsx): the drawer gains a 来源链接 section with 主链接/补充 tags, provenance, and an add form that invalidates the query after POST; archived signals show the read-only hint.
 - Evidence: pnpm typecheck passed; component antd lint passed (0 issues); pnpm build passed in an isolated D: copy that reused the local pnpm store. No backend change.
-- Not done: browser walkthrough, and the direct eFuse 2-source versus theme 8/16 split display. The FE-04 parent stays open.
+- Browser walkthrough (2026-11-26, ego-browser against the dev stack on :3000/:8000, signal fe665d36 on /singal/{id}):
+  - Empty state: 来源链接 renders 暂无补充来源 with the URL / 出处 inputs and a disabled 添加补充来源 button (checked in the DOM and in a rendered page image).
+  - Add flow: typing a URL enables the button; clicking it posts, shows the 已添加补充来源 toast, clears both inputs and lists the new row tagged 补充 with its provenance line.
+  - Populated state: a signal holding both rows shows 主链接 for the signal URL and 补充 with the provenance beneath it.
+  - Archived state: PATCHing the signal to archived replaces the form with 已归档信号不能新增来源。; no inputs and no add button remain.
+  - Defect found and fixed in the same pass: the primary row printed its internal provenance value (primary) under the URL; the drawer now hides provenance for the primary row (frontend/components/evidence/signal-sources.tsx).
+  - Checks: pnpm typecheck 0, component antd lint 0 issues, isolated pnpm build 0 (D:/dev/eea-fe04-build copy, offline install from the local store, running dev server untouched). Page images came from CDP Page.printToPDF because Page.captureScreenshot timed out in this ego session even on example.com.
+- Not done: the direct eFuse 2-source versus theme 8/16 split display. The FE-04 parent stays open.
 
 ## 2026-11-24
 

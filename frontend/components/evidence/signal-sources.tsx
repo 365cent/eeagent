@@ -72,7 +72,7 @@ export function SignalSources({ signalId, archived = false }: SignalSourcesProps
                 >
                   {source.url}
                 </Link>
-                {source.provenance ? (
+                {source.provenance && !source.is_primary ? (
                   <div>
                     <Text type="secondary" style={{ fontSize: 11 }}>
                       {source.provenance}
