@@ -1,5 +1,6 @@
 """Document ingest: MarkItDown text, figure extraction, vision captions."""
 
+import asyncio
 import io
 import zipfile
 from pathlib import Path
@@ -571,6 +572,53 @@ async def test_document_figures_chunks_and_keywords_api(client, monkeypatch):
     assert keywords[0]["chunk_id"] == 2
     assert keywords[0]["section_path"] == ["总览", "结构"]
     assert (await client.get(f"/api/v1/documents/{document_id}/figures/99/image")).status_code == 404
+
+
+async def test_document_keywords_timeout_falls_back_and_caches(client, monkeypatch):
+    canonical = "# 总览\n\neFuse 智能配电\n"
+
+    async def fake_ingest(data, filename, mime, **kwargs):
+        return doc_ingest.IngestResult(
+            canonical_md=canonical,
+            markitdown_version="test",
+            figures=[],
+            vision_model="fake-vision",
+        )
+
+    monkeypatch.setattr(
+        "app.domains.evidence.document_pipeline.ingest_document", fake_ingest
+    )
+    from app.api.v1 import documents as documents_api
+
+    documents_api._keyword_cache.clear()
+    calls = {"slow": 0}
+
+    async def slow_tags(filename, text):
+        calls["slow"] += 1
+        await asyncio.sleep(0.2)
+        return ["slow-model"], "llm", 0.9
+
+    monkeypatch.setattr("app.api.v1.documents.suggest_tech_tags", slow_tags)
+    monkeypatch.setattr("app.api.v1.documents._KEYWORD_LLM_TIMEOUT_SECONDS", 0.05)
+
+    response = await client.post(
+        "/api/v1/documents/raw",
+        files={"file": ("timeout.md", b"# x", "text/markdown")},
+    )
+    assert response.status_code == 201, response.text
+    document_id = response.json()["id"]
+
+    first = await client.get(f"/api/v1/documents/{document_id}/keywords")
+    assert first.status_code == 200, first.text
+    rows = first.json()
+    assert "eFuse" in [row["term"] for row in rows]
+    assert all(any(ch.isalnum() for ch in row["term"]) for row in rows)
+    assert rows[0]["source"] == "jieba-frequency"
+
+    calls_after_first = calls["slow"]
+    second = await client.get(f"/api/v1/documents/{document_id}/keywords")
+    assert second.json() == rows
+    assert calls["slow"] == calls_after_first
 
 
 async def test_failed_reingest_keeps_previous_figure_and_chunk_index(client, monkeypatch):

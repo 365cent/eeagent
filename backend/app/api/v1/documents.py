@@ -9,7 +9,9 @@ POST /documents/{id}/ingest.
 """
 from __future__ import annotations
 
+import asyncio
 import mimetypes
+import time
 import uuid
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
@@ -34,7 +36,7 @@ from app.services.agent_rag import ensure_document_index
 from app.services.audit import record_correction
 from app.services.figure_recaption import recaption_figure
 from app.services.objectstore import load_body
-from app.services.tagging import suggest_tech_tags, text_for_tagging
+from app.services.tagging import suggest_tags, suggest_tech_tags, text_for_tagging
 from app.domains.evidence.document_pipeline import (
     doc_limits,
     document_raw_out,
@@ -449,6 +451,11 @@ async def list_document_chunks(document_id: uuid.UUID, db: AsyncSession = Depend
     return rows
 
 
+_KEYWORD_LLM_TIMEOUT_SECONDS = 12.0
+_KEYWORD_CACHE_TTL_SECONDS = 600.0
+_keyword_cache: dict[uuid.UUID, tuple[str, float, list[DocumentKeywordOut]]] = {}
+
+
 @router.get("/{document_id}/keywords", response_model=list[DocumentKeywordOut])
 async def list_document_keywords(document_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
     doc = await _load(db, document_id)
@@ -459,6 +466,10 @@ async def list_document_keywords(document_id: uuid.UUID, db: AsyncSession = Depe
         text = load_body(doc.canonical_md_object_key) or ""
     if not text:
         raise HTTPException(409, "document has no canonical text; ingest or retry first")
+    cache_key = doc.canonical_md_object_key or ""
+    cached = _keyword_cache.get(document_id)
+    if cached and cached[0] == cache_key and time.monotonic() - cached[1] < _KEYWORD_CACHE_TTL_SECONDS:
+        return cached[2]
     chunks = (
         await db.execute(
             select(DocumentChunk)
@@ -466,7 +477,14 @@ async def list_document_keywords(document_id: uuid.UUID, db: AsyncSession = Depe
             .order_by(DocumentChunk.chunk_id)
         )
     ).scalars().all()
-    tags, source, top_score = await suggest_tech_tags(doc.filename or "", text)
+    try:
+        tags, source, top_score = await asyncio.wait_for(
+            suggest_tech_tags(doc.filename or "", text),
+            timeout=_KEYWORD_LLM_TIMEOUT_SECONDS,
+        )
+    except TimeoutError:
+        tags = [tag for tag in suggest_tags(text) if any(ch.isalnum() for ch in tag)]
+        source, top_score = "jieba-frequency", None
 
     def locate(term: str) -> DocumentChunk | None:
         needle = term.lower()
@@ -488,6 +506,10 @@ async def list_document_keywords(document_id: uuid.UUID, db: AsyncSession = Depe
                 source=source,
             )
         )
+    if len(_keyword_cache) >= 64:
+        oldest = min(_keyword_cache, key=lambda key: _keyword_cache[key][1])
+        _keyword_cache.pop(oldest, None)
+    _keyword_cache[document_id] = (cache_key, time.monotonic(), out)
     return out
 
 
