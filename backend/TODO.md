@@ -27,6 +27,7 @@
 - `GET /capture/jobs/{id}` 返回当前状态和成功结果；`POST .../retry` 重排失败任务，`POST .../cancel` 仅取消尚未领取的任务。自动重试有次数上限和退避；同一 submission ID 不会重复创建信号。
 - 失败保留 URL、时间和原因；恢复后复用任务关联。重复文档复用 blob，信号创建的幂等范围须单独按 submission_id 控制。
 - 对象写入采用临时文件加原子替换；阻止对象键路径越界；数据库提交失败后保留可清理孤立对象记录，不能误报成功。
+- 2026-11-26 对象存储并发修复：_atomic_write 在 Windows 上并发写同一内容寻址路径时 os.replace 可能抛 PermissionError；现在若目标已存在且大小一致视为成功，否则最多重试 5 次。_object_path 改用词法 abspath/commonpath 包含检查，避免 Path.resolve 在并发建目录时返回 8.3 短名误拒合法键；仍拒绝绝对路径与 .. 越界。新增 tests/test_objectstore_concurrency.py 四项。证据：4 passed；capture job 并发 4 passed。
 - 2026-11-20 修复：URL 批量粘贴创建的采集任务现在写入调用者 owner_subject，否则研究者客户端按 subject 过滤后看不到自己的任务（新增回归用例）。
 - 剩余：任务暂未绑定可信用户，跨用户查询/操作须等 OPS-03；Linux 数据库迁移、worker 重启及端到端证据未验证。孤立对象清理与终态任务保留已由 Compose `maintenance`（`--profile ops`）覆盖；运行中任务协作式取消已实现（`cancel_requested_at` + worker 检查）。
 - 2026-11-25 走查发现：`python -m app.services.orphan_maintenance` 在 Windows 默认 Proactor 事件循环下报 psycopg `InterfaceError`（O-8，见[走查记录](../docs/acceptance-records/2026-11-25-seven-step-walkthrough.md#缺陷与观察)）。

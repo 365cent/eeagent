@@ -108,6 +108,14 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence: pytest tests/test_landing_points.py tests/test_audit_out.py -q -> 14 passed; related demand/trace/standards/strategy/panorama files -> 97 passed (89.2 s).
 - Not done: the pre-deletion audit rows still reference the deleted entity by design (the deletion snapshot explains them); a soft-delete/history view is not added. Linux/identity evidence remains OPS-side, and the parent task stays open.
 
+### Concurrent content-addressed writes (BE-01 slice)
+
+- Problem: the full backend suite surfaced a Windows race in the object store. Two identical capture uploads both publish the same content-addressed key; one os.replace raised PermissionError (sharing violation). A second race: Path.resolve during concurrent directory creation returned a Windows short-name path, so a valid key failed the containment check.
+- What changed (backend/app/services/objectstore.py): _publish treats an existing same-size destination as a successful concurrent publish, otherwise retries up to five times; _object_path checks containment lexically with abspath/commonpath and rejects absolute or parent-traversal keys without touching the filesystem.
+- Tests (backend/tests/test_objectstore_concurrency.py): 32 threads writing one key, a simulated concurrent winner, a transient PermissionError retry, and traversal rejection.
+- Evidence: pytest tests/test_objectstore_concurrency.py -q -> 4 passed; pytest tests/test_capture_job_concurrency.py -q -> 4 passed; full backend suite after both fixes -> 597 passed, 2 skipped (7:34).
+- Not done: cross-process writers on a shared object directory rely on the same content-addressed retry logic; S3 remains deployment scope. The parent task stays open.
+
 ## 2026-11-24
 
 ### Duplicate-signal scan and cleanup on an article URL key (BE-02 slice)

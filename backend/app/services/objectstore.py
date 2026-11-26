@@ -10,17 +10,53 @@ from __future__ import annotations
 import hashlib
 import os
 import tempfile
+import time
 from pathlib import Path
 
 from app.core.config import get_settings
 
 
 def _object_path(key: str) -> Path:
-    root = Path(get_settings().object_dir).resolve()
-    path = (root / key).resolve()
-    if not path.is_relative_to(root):
+    # Lexical containment only: Path.resolve() races with concurrent directory
+    # creation on Windows and can return a short-name form that is not
+    # is_relative_to() the long-name root. Keys are server-generated
+    # (content-addressed), so traversal rejection is the security boundary.
+    root = os.path.abspath(get_settings().object_dir)
+    candidate = Path(key)
+    if candidate.is_absolute():
         raise ValueError("object key must stay inside OBJECT_DIR")
-    return path
+    try:
+        path = os.path.abspath(os.path.join(root, key))
+        if os.path.commonpath([root, path]) != root:
+            raise ValueError("object key must stay inside OBJECT_DIR")
+    except ValueError as exc:
+        if "must stay inside" in str(exc):
+            raise
+        raise ValueError("object key must stay inside OBJECT_DIR") from exc
+    return Path(path)
+
+
+def _publish(temporary: str, path: Path, data: bytes) -> None:
+    """Publish a temp file at a content-addressed path.
+
+    On Windows two writers of identical bytes can race on os.replace and one
+    gets a sharing violation. The destination is content-addressed, so a
+    same-size file already published by the other writer is success.
+    """
+    for attempt in range(5):
+        try:
+            os.replace(temporary, path)
+            return
+        except PermissionError:
+            try:
+                if path.stat().st_size == len(data):
+                    os.unlink(temporary)
+                    return
+            except FileNotFoundError:
+                pass
+            if attempt == 4:
+                raise
+            time.sleep(0.01 * (attempt + 1))
 
 
 def _atomic_write(path: Path, data: bytes) -> None:
@@ -32,7 +68,7 @@ def _atomic_write(path: Path, data: bytes) -> None:
             stream.write(data)
             stream.flush()
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        _publish(temporary, path, data)
     finally:
         try:
             os.unlink(temporary)
