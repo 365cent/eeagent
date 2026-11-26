@@ -36,6 +36,7 @@
   "/api/v1/documents/{document_id}/deck-preview/{asset_path}",
   "/api/v1/documents/{document_id}/extract-keywords",
   "/api/v1/documents/{document_id}/figures",
+  "/api/v1/documents/{document_id}/figures/recaption",
   "/api/v1/documents/{document_id}/figures/{figure_index}/image",
   "/api/v1/documents/{document_id}/figures/{figure_index}/recaption",
   "/api/v1/documents/{document_id}/ingest",
