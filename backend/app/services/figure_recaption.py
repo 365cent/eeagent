@@ -24,13 +24,30 @@ from app.services.llm_gateway import resolve_vision_model
 from app.services.objectstore import load_bytes, save_bytes, sha256_bytes
 
 
+def _figure_patterns(figure_index: int) -> tuple[re.Pattern[str], re.Pattern[str], re.Pattern[str]]:
+    """The three places a figure's caption can live, in preference order."""
+    colon = re.compile(r">\s*图\s+" + str(figure_index) + r"[：:]\s*[^\n]*")
+    space = re.compile(r">\s*图\s+" + str(figure_index) + r"\s+[^\n]*")
+    row = re.compile(
+        r"^\|\s*" + str(figure_index) + r"\s*\|[^|\n]*\|[^|\n]*\|",
+        re.MULTILINE,
+    )
+    return colon, space, row
+
+
+def figure_marker_present(markdown: str, figure_index: int) -> bool:
+    """Whether this figure has a caption slot at all (quote or 图块语义 row)."""
+    return any(pattern.search(markdown) for pattern in _figure_patterns(figure_index))
+
+
 def replace_figure_caption(markdown: str, figure_index: int, caption: str) -> str:
     """Replace only figure N's caption marker; leave every other byte intact.
 
     Two shapes exist: an inline quote (`> 图 N：…`) when the converter emitted an
     image tag, and a row of the `## 图块语义` table (`| N | 第 x 页 | … |`) when it
-    did not, which is the normal case for PDF. Missing both means the figure has
-    no place in the text yet.
+    did not, which is the normal case for PDF. Callers must use
+    :func:`figure_marker_present` to detect a missing slot: an unchanged string
+    can also mean the caption was already correct.
     """
     pattern = re.compile(r"(>\s*图\s+" + str(figure_index) + r"[：:]\s*)([^\n]*)")
     replaced = pattern.sub(
@@ -149,21 +166,22 @@ async def recaption_figure(
         if raw is not None:
             canonical = raw.decode("utf-8", errors="replace")
     if canonical is not None and row.caption:
-        updated = replace_figure_caption(canonical, row.figure_index, row.caption)
-        if updated == canonical:
-            # No caption marker in canonical text: do not claim a ready figure.
+        if not figure_marker_present(canonical, row.figure_index):
+            # No caption slot in canonical text: do not claim a ready figure.
             row.review_status = "needs_review"
             row.review_reason = "未在正文中定位图块"
             await db.commit()
             await db.refresh(row)
             return row
-        payload = updated.encode("utf-8")
-        doc.canonical_md_object_key = save_bytes(payload, folder="documents", ext="md")
-        doc.canonical_md_sha256 = sha256_bytes(payload)
-        await db.execute(
-            delete(DocumentChunk).where(DocumentChunk.document_id == document_id)
-        )
-        _rebuild_chunks(db, document_id, updated)
+        updated = replace_figure_caption(canonical, row.figure_index, row.caption)
+        if updated != canonical:
+            payload = updated.encode("utf-8")
+            doc.canonical_md_object_key = save_bytes(payload, folder="documents", ext="md")
+            doc.canonical_md_sha256 = sha256_bytes(payload)
+            await db.execute(
+                delete(DocumentChunk).where(DocumentChunk.document_id == document_id)
+            )
+            _rebuild_chunks(db, document_id, updated)
 
     await db.commit()
     await db.refresh(row)
