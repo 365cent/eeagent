@@ -49,6 +49,7 @@ export const utilityPages: Record<string, UtilityPageConfig> = {
   reminders: { eyebrow: '14 · 研究节奏', title: '本周研究提醒', description: '按优先级查看本周需要复核、补录和发布的任务。', action: '完成本周计划', icon: <BulbOutlined /> },
   knowledge: { eyebrow: '15 · 研究方法', title: '方法论映射', description: '维护研究方法、标签词表与机器预标规则。', action: '新增词条', icon: <BookOutlined /> },
   workflow: { eyebrow: '16 · 研究交付', title: '交付工作流', description: '把选型、采集、标注、推导、研判与交接串成可验证闭环。', action: '确认阶段', icon: <CheckCircleFilled /> },
+  downloads: { eyebrow: '17 · 终端工具', title: '下载采集客户端', description: '在研究者电脑上采集网页与微信文章，原始证据随链接一起提交。', action: '下载', icon: <CloudDownloadOutlined /> },
 }
 
 export function utilityPageTitle(key: string): string | undefined {

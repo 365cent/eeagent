@@ -131,6 +131,7 @@ import { querySurfaceState } from '@/hooks/use-query-surface'
 import { NewSignalImportPage } from '@/components/import/new-signal-import'
 import { WorkflowStudio } from '@/components/workflow-studio'
 import { ChainReportView } from '@/views/utility/chain-report-view'
+import { DownloadsView } from '@/views/utility/downloads-view'
 import { PlatformSearchPage } from '@/components/search/platform-search-page'
 import { ResearchRemindersPage } from '@/components/reminders/research-reminders-page'
 import { PlatformSettingsPage } from '@/views/utility/platform-settings-page'
@@ -946,6 +947,14 @@ export function UtilityView({
     )
   }
   if (page === 'settings') return <PlatformSettingsPage config={config} />
+  if (page === 'downloads') {
+    return (
+      <>
+        <PageHeader eyebrow={config.eyebrow} title={config.title} description={config.description} />
+        <DownloadsView />
+      </>
+    )
+  }
   if (page === 'notifications') {
     return (
       <>

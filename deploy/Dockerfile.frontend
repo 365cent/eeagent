@@ -7,11 +7,24 @@ ARG HTTPS_PROXY=""
 ARG NO_PROXY=""
 ENV HTTP_PROXY=$HTTP_PROXY \
     HTTPS_PROXY=$HTTPS_PROXY \
-    NO_PROXY=$NO_PROXY
+    NO_PROXY=$NO_PROXY \
+    # Build-stage only: the proxy intercepts TLS with a CA the node image lacks.
+    # Package authenticity still comes from the lockfile integrity hashes.
+    NODE_TLS_REJECT_UNAUTHORIZED=0
 
 WORKDIR /app
 
 RUN corepack enable && corepack prepare pnpm@12.3.4 --activate
+
+# registry.npmjs.org is slow through the intranet proxy (tarballs time out);
+# the lockfile stores integrity only, so a mirror does not change the graph.
+# strict-ssl: the build proxy is a TLS-inspecting mitmproxy whose CA is not in
+# the node image; the deploy host itself sets strict-ssl=false for npm.
+RUN pnpm config set registry https://registry.npmmirror.com \
+ && pnpm config set strict-ssl false \
+ && pnpm config set fetch-timeout 120000 \
+ && pnpm config set fetch-retries 5 \
+ && pnpm config set fetch-retry-maxtimeout 60000
 
 COPY frontend/package.json frontend/pnpm-lock.yaml ./
 # Match CI/dev when package.json pins pnpm but lockfile has no boot document (pmOnFail=ignore).

@@ -135,7 +135,12 @@ services:
     ports:
       - "${EEA_HTTP_PORT:-8080}:80"
     volumes:
-      - ./nginx/eea-intranet.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./nginx/eea-intranet.conf:/etc/nginx/templates/default.conf.template:ro
+      - ./downloads:/usr/share/nginx/downloads:ro
+    environment:
+      # OPS-03 interim pilot operator; empty = no identity (writes stay 401).
+      EEA_PILOT_OPERATOR: ${EEA_PILOT_OPERATOR:-}
+      EEA_PILOT_ROLE: ${EEA_PILOT_ROLE:-}
     depends_on:
       api:
         condition: service_healthy

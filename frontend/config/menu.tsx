@@ -8,6 +8,7 @@ import {
   BookOutlined,
   BranchesOutlined,
   CheckCircleFilled,
+  CloudDownloadOutlined,
   FundProjectionScreenOutlined,
   HomeOutlined,
   RadarChartOutlined,
@@ -58,6 +59,7 @@ export const mainMenuItems: MenuProps['items'] = mainMenuTree.map((node) => ({
 }))
 
 export const siderUtilityMenuItems: MenuProps['items'] = [
+  { key: 'downloads', icon: <CloudDownloadOutlined />, label: '下载采集客户端' },
   { key: 'knowledge', icon: <BookOutlined />, label: '方法论映射' },
   { key: 'settings', icon: <SettingOutlined />, label: '平台设置' },
 ]

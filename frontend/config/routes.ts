@@ -25,6 +25,7 @@ export const UTILITY_VIEW_KEYS = [
   'reminders',
   'knowledge',
   'workflow',
+  'downloads',
 ] as const
 
 export type PrimaryViewKey = (typeof PRIMARY_VIEW_KEYS)[number]

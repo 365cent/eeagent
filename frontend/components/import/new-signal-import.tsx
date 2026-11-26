@@ -335,6 +335,9 @@ function useNewSignalImport(onNavigate: (key: string) => void) {
         filename: file.name,
         startedAt: new Date().toISOString(),
       })
+      // The bytes are in; keep the bar honest while the worker parses instead of
+      // showing 0% until the job finishes.
+      onUploadProgress(100)
       setActiveJobId(accepted.id)
       setUploadProcessing(true)
       const terminal = await pollCaptureJob(accepted.id, {
