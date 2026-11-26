@@ -9,13 +9,14 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.models.agent_models import AgentPatch, AgentSession
-from app.models.models import Signal, SignalTag, TechTheme
+from app.models.agent_models import AgentPatch, AgentSession, DocumentChunk
+from app.models.models import Document, Signal, SignalTag, TechTheme
 from app.services.agent_citations import make_signal_citation
 from app.services.agent_contract import (
     AgentDeps,
     ApplyPatchRequest,
     ApplyPatchResult,
+    CitationLedger,
     DraftTraceReportRequest,
     DraftTraceReportResult,
     ProposePatchRequest,
@@ -30,7 +31,7 @@ from app.services.agent_contract import (
     ThemeSuggestionToolResult,
 )
 from app.services.agent_patches import apply_confirmed_patch, propose_signal_patch
-from app.services.agent_rag import search_document_chunks
+from app.services.agent_rag import _chunk_citation, search_document_chunks
 from app.services.body_excerpt import text_for_tagging
 from app.services.judgment import judge_signal_type, judge_stage, rank_theme_overlaps
 from app.services.llm import suggest_tags_with_llm
@@ -42,25 +43,71 @@ from app.services.tagging_guard import human_corrected_fields
 async def search_evidence_tool(
     ctx: RunContext[AgentDeps], payload: SearchEvidenceRequest
 ) -> SearchEvidenceResult:
-    like = f"%{payload.keyword.strip()}%"
+    hits = await find_evidence_hits(
+        ctx.deps.db,
+        ctx.deps.ledger,
+        keyword=payload.keyword,
+        limit=payload.limit,
+        value_chain_stage=payload.value_chain_stage,
+    )
+    return SearchEvidenceResult(hits=hits)
+
+
+async def find_evidence_hits(
+    db: AsyncSession,
+    ledger: CitationLedger,
+    *,
+    keyword: str,
+    limit: int,
+    value_chain_stage: str | None = None,
+) -> list[SearchEvidenceHit]:
+    """Signals by their own fields, plus the converted text of their documents.
+
+    A document-derived signal only carries a summary in ``excerpt``/``body``, so
+    the MarkItDown text and the figure captions live in the document chunks.
+    Searching those and citing the chunk keeps the assistant able to quote what
+    the document actually says.
+    """
+    like = f"%{keyword.strip()}%"
     q = (
         select(Signal)
         .options(selectinload(Signal.tags).selectinload(SignalTag.vocab))
         .where(or_(Signal.title.ilike(like), Signal.excerpt.ilike(like), Signal.publisher.ilike(like)))
         .order_by(Signal.created_at.desc())
-        .limit(payload.limit)
+        .limit(limit)
     )
-    if payload.value_chain_stage:
-        q = q.where(Signal.value_chain_stage_code == payload.value_chain_stage)
-    rows = (await ctx.deps.db.execute(q)).scalars().all()
+    if value_chain_stage:
+        q = q.where(Signal.value_chain_stage_code == value_chain_stage)
+    rows = (await db.execute(q)).scalars().all()
     hits: list[SearchEvidenceHit] = []
+    seen: set[str] = {""}
     for signal in rows:
         summary = signal.excerpt or signal.title
-        citation = ctx.deps.ledger.register(
+        citation = ledger.register(
             make_signal_citation(signal_id=signal.id, title=signal.title, summary=summary)
         )
         hits.append(SearchEvidenceHit(citation=citation, signal_id=signal.id))
-    return SearchEvidenceResult(hits=hits)
+        seen.add(citation.ref_id)
+
+    if len(hits) < limit:
+        chunk_rows = (
+            await db.execute(
+                select(DocumentChunk, Document, Signal)
+                .join(Document, Document.id == DocumentChunk.document_id)
+                .join(Signal, Signal.document_id == Document.id)
+                .where(DocumentChunk.text.ilike(like))
+                .order_by(Document.created_at.desc())
+                .limit(limit - len(hits))
+            )
+        ).all()
+        for chunk, document, signal in chunk_rows:
+            citation = ledger.register(_chunk_citation(chunk, document))
+            if citation.ref_id in seen:
+                continue
+            seen.add(citation.ref_id)
+            hits.append(SearchEvidenceHit(citation=citation, signal_id=signal.id))
+
+    return hits
 
 
 async def search_rag_tool(ctx: RunContext[AgentDeps], payload: SearchRagRequest) -> SearchRagResult:

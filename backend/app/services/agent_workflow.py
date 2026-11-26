@@ -65,7 +65,14 @@ async def build_eea_agent(*, model: Model | None = None) -> Agent[AgentDeps, Age
         retries=2,
     )
 
-    agent.tool(search_evidence_tool, name="search_evidence")
+    agent.tool(
+        search_evidence_tool,
+        name="search_evidence",
+        description=(
+            "按关键词检索证据：先匹配信号标题/摘要/发布主体，再匹配文档转换正文与图块图注"
+            "（MarkItDown 结果，含视觉模型生成的图注）。文档命中的引用类型为 document_chunk。"
+        ),
+    )
     agent.tool(search_rag_tool, name="search_rag")
     agent.tool(suggest_signal_tags_tool, name="suggest_signal_tags")
     agent.tool(suggest_theme_membership_tool, name="suggest_theme_membership")

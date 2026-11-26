@@ -92,7 +92,7 @@ export function SignalRowActions({
       case 'archive':
         modalApi.confirm({
           title: '归档停用该信号？',
-          content: '信号将从主证据库移出并写入数据库（evidence_status=archived）。可在「归档证据库」恢复或永久删除。',
+          content: '信号将从主证据库移出，可在「归档证据库」恢复或永久删除。',
           okText: '归档',
           cancelText: '取消',
           onOk: async () => {
