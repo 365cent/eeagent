@@ -61,6 +61,14 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence: pytest tests/test_signal_sources.py -q -> 5 passed (10.4 s); related theme/clustering/archive files -> 34 passed (21.7 s); full backend suite after the slice -> 580 passed, 2 skipped (4:55).
 - Not done: the real 8-signal/16-source case still needs DOC-02 data, and automatic aggregation consistency explanations remain in BE-05. The parent task stays open.
 
+### Structured aggregation basis in the theme preview (BE-05 slice)
+
+- Problem: judgment.py already had aggregation_structured_basis (object / underlying capability / change direction) and structured_basis_consistent, but neither was reachable from the API. The theme-aggregate preview only returned tag overlap and a reason string, so the BE-05 "structured aggregation rationale" item was unmet and the helper was dead code.
+- What changed (backend/app/schemas/schemas.py, backend/app/api/v1/signals.py, frontend/lib/api/types.ts): ThemeAggregatePreview gains optional structured_basis and basis_reason. The preview fills structured_basis from the signal's tags and runs the consistency gate for the recommended theme; when the gate fails it clears the recommendation and reports the gate reason. The frontend type mirrors the optional fields; no UI behavior changes.
+- Tests (backend/tests/test_aggregation.py): the preview carries all three basis keys with values drawn from the signal's tags and no basis_reason when consistent; a single-tag signal is not auto-assignable, its reason reports the 1-tag overlap, and the basis reports the one available dimension.
+- Evidence: pytest tests/test_aggregation.py -q -> 14 passed; OpenAPI path snapshot -> 1 passed; pnpm typecheck -> passed; full backend suite after the slice -> 582 passed, 2 skipped (5:14).
+- Not done: the ordering inside structured_basis is a wave-1 heuristic (longest tag first), not a semantic classifier; real 8/16 data and business sign-off remain with DOC-02. The parent task stays open.
+
 ## 2026-11-24
 
 ### Duplicate-signal scan and cleanup on an article URL key (BE-02 slice)

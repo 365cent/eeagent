@@ -162,6 +162,32 @@ async def test_theme_aggregate_preview_lists_candidates(client):
     assert preview["recommended_theme_id"] == theme_a["id"]
 
 
+async def test_theme_aggregate_preview_exposes_structured_basis(client):
+    """BE-05 wave-1: the preview carries the object/capability/direction rationale."""
+    await _theme_with_tags(client, "主题甲", ["智能配电", "eFuse", "区域控制"])
+    sig = await create_signal(client, url="https://example.com/basis")
+    await set_signal_tags(client, sig["id"], ["智能配电", "eFuse"])
+
+    preview = (await client.get(f"/api/v1/signals/{sig['id']}/theme-aggregate-preview")).json()
+    assert preview["can_auto_assign"] is True
+    basis = preview["structured_basis"]
+    assert set(basis) == {"tech_object", "underlying_capability", "change_direction"}
+    assert {value for value in basis.values() if value} == {"智能配电", "eFuse"}
+    assert preview["basis_reason"] is None
+
+
+async def test_theme_aggregate_preview_reports_insufficient_basis(client):
+    await _theme_with_tags(client, "主题甲", ["智能配电", "eFuse"])
+    sig = await create_signal(client, url="https://example.com/basis-low")
+    await set_signal_tags(client, sig["id"], ["智能配电"])
+
+    preview = (await client.get(f"/api/v1/signals/{sig['id']}/theme-aggregate-preview")).json()
+    assert preview["can_auto_assign"] is False
+    assert "仅重合 1" in preview["reason"]
+    assert preview["structured_basis"]["tech_object"] == "智能配电"
+    assert preview["structured_basis"]["underlying_capability"] is None
+
+
 async def test_auto_aggregate_refuses_when_theme_already_set(client):
     theme = await create_theme(client)
     sig = await create_signal(client, body_text=SUPPLY_CHAIN_BODY)
