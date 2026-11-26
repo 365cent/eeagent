@@ -50,11 +50,13 @@ bash deploy/build.sh
 
 ## 配置
 
-所有配置在 `deploy/.env`（不要提交）：数据库口令、对外端口 `EEA_HTTP_PORT`、`TRUSTED_PROXY_IPS`（只有这些地址可以带身份头）、`CORS_*`、模型网关 `CHAT_*`/`EMBEDDING_*`/`RERANK_*`。生产默认关闭服务端公网抓取（`CAPTURE_SERVER_FETCH_ENABLED=false`），网页由用户侧 EEA Capture 客户端采集后上传。
+所有配置在 `deploy/.env`（不要提交）：数据库口令、对外端口 `EEA_HTTP_PORT`、`TRUSTED_PROXY_IPS`（只有这些地址可以带身份头）、`CORS_*`、模型网关 `CHAT_*`/`EMBEDDING_*`/`RERANK_*`/`VISION_*`。生产默认关闭服务端公网抓取（`CAPTURE_SERVER_FETCH_ENABLED=false`），网页由用户侧 EEA Capture 客户端采集后上传。
+
+模型网关这几组键与开发机 `backend/.env` 共用同一份取值：容器只读 `deploy/.env`，把键放错文件会出现 `/readyz` 的 `semantic_gateway: degraded`，标签建议与助手全部不可用。改完 `deploy/.env` 后 `docker compose up -d --no-deps --force-recreate api worker` 并重启 nginx（重建后 upstream IP 会变）。
 
 ## TLS 与身份
 
-Nginx 已剥离客户端自带的身份头；TLS 与可信身份由更外层的企业代理终止，并把 `TRUSTED_PROXY_IPS` 设为该代理地址。证书挂载点见 `nginx/eea-intranet.conf` 注释。未接身份代理前，审计写入只能是开发身份，不能作为生产验收。
+Nginx 不再透传客户端自带的身份头，而是在模板里按 `EEA_PILOT_OPERATOR`/`EEA_PILOT_ROLE` 注入一个固定操作者（两项为空即不注入，写入仍返回 401）；这只是接入真实身份代理前的过渡，使同一操作者共享化，需在 OPS-03 完成后删除并重新验收越权用例。TLS 与账号体系仍由更外层的企业代理终止，并把 `TRUSTED_PROXY_IPS` 设为该代理地址。证书挂载点见 `nginx/eea-intranet.conf` 注释。
 
 ## 常见故障
 
