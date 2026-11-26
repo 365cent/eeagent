@@ -56,6 +56,29 @@ def save_bytes(data: bytes, *, folder: str, ext: str) -> str:
     return key
 
 
+def object_mtime(key: str) -> float | None:
+    """Epoch seconds for one stored object, or None when it is absent."""
+    if not key:
+        return None
+    path = _object_path(key)
+    try:
+        return path.stat().st_mtime
+    except FileNotFoundError:
+        return None
+
+
+def delete_object(key: str) -> bool:
+    """Remove one stored object; False when it was already absent."""
+    if not key:
+        return False
+    path = _object_path(key)
+    try:
+        path.unlink()
+        return True
+    except FileNotFoundError:
+        return False
+
+
 def load_bytes(key: str) -> bytes | None:
     """Read a raw byte object back verbatim (archive replay); None when missing."""
     path = _object_path(key)

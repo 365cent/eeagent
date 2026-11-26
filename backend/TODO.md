@@ -1,6 +1,6 @@
 # Backend 实施清单
 
-更新：2026-11-17。范围：原始 Word 七环节、已决 REQ、文档与 Agent 扩展，直至 Linux 内网生产验收。项目顺序见 [总清单](../TODO.md)，逐条来源与验收见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。
+更新：2026-11-26。范围：原始 Word 七环节、已决 REQ、文档与 Agent 扩展，直至 Linux 内网生产验收。项目顺序见 [总清单](../TODO.md)，逐条来源与验收见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。
 
 ## 执行约定与现状
 
@@ -28,8 +28,14 @@
 - 失败保留 URL、时间和原因；恢复后复用任务关联。重复文档复用 blob，信号创建的幂等范围须单独按 submission_id 控制。
 - 对象写入采用临时文件加原子替换；阻止对象键路径越界；数据库提交失败后保留可清理孤立对象记录，不能误报成功。
 - 2026-11-20 修复：URL 批量粘贴创建的采集任务现在写入调用者 owner_subject，否则研究者客户端按 subject 过滤后看不到自己的任务（新增回归用例）。
-- 剩余：孤立对象清理已提供 Compose `maintenance`（`--profile ops`）；终态采集任务的历史保留/清理策略仍待定；任务暂未绑定可信用户，跨用户查询/操作须等 OPS-03；Linux 数据库迁移、worker 重启及端到端证据未验证。运行中任务协作式取消已实现（`cancel_requested_at` + worker 检查）。
-- 剩余验收：URL/HTML/文档/粘贴统一留存；空、超限、错误 MIME、幂等冲突/并发、进程中断和重试；前端与 Go 客户端必须显示真实任务状态和最终结果。生产公网页面必须由用户侧浏览器采集上传，生产环境不调用服务端 `fetch_url()`。
+- 剩余：任务暂未绑定可信用户，跨用户查询/操作须等 OPS-03；Linux 数据库迁移、worker 重启及端到端证据未验证。孤立对象清理与终态任务保留已由 Compose `maintenance`（`--profile ops`）覆盖；运行中任务协作式取消已实现（`cancel_requested_at` + worker 检查）。
+- 2026-11-25 走查发现：`python -m app.services.orphan_maintenance` 在 Windows 默认 Proactor 事件循环下报 psycopg `InterfaceError`（O-8，见[走查记录](../docs/acceptance-records/2026-11-25-seven-step-walkthrough.md#缺陷与观察)）。
+- 2026-11-26 修复并交付维护命令切片：入口在 win32 自行设置 `WindowsSelectorEventLoopPolicy`（与 `dev.py`/`worker.py` 同一模式），Windows 直接运行不再报 Proactor 错误；命令改为显式 dry-run/apply 两模式——默认只计数不删除，`--apply` 才删除并提交，`--limit` 控制单次扫描行数；Compose `maintenance`（`--profile ops`）已显式传 `--apply` 保持生产语义不变。证据：便携库实测 `orphan_maintenance dry-run: pruned_orphans=0`（exit 0）；`uv run pytest tests/test_signal_dedup.py tests/test_db_schema.py -q` 27 passed。Linux 端运行证据仍待。
+- 2026-11-26 维护审计切片：新增加法迁移 0026_maintenance_run（command、scan_limit、scanned、pruned、operator_subject/role、details（orphans/capture_jobs 分组；orphans 含 resolved/missing_blob/object_keys）、started_at/finished_at）；`--apply` 与删除同一事务写入一行，dry-run 不写并保持只读；prune_resolved_orphans 返回 scanned/pruned/resolved/missing_blob/object_keys。证据：`pytest tests/test_orphan_maintenance.py tests/test_db_schema.py -q` → 9 passed；eea_test 上 `--apply --limit 5` 写入 1 行、随后 dry-run 仍为 1 行；alembic `downgrade -1` → 0025 且表消失，`upgrade head` → 0026 且表恢复。Linux/容器运行仍待 OPS。
+- 2026-11-26 终态任务保留切片：新增 `CAPTURE_JOB_RETENTION_DAYS`（默认 30，最小 1）与 `prune_terminal_capture_jobs`；`--apply` 删除 succeeded/failed/cancelled 且 `finished_at`/`updated_at` 早于 cutoff 的任务，`--limit` 分页；内容寻址 payload 仅在无剩余任务引用且文件超过 1 小时未写入时删除；`panorama_import_url.capture_job_id` 先置空避免 FK 阻塞；审计 details 增加 capture_jobs（scanned/pruned/payloads_deleted/payloads_kept/retention_days/cutoff）。证据：`pytest tests/test_capture_job_retention.py tests/test_orphan_maintenance.py tests/test_db_schema.py -q` → 13 passed；全量后端 562 passed / 2 skipped；eea_test 上 `--apply` 写入嵌套审计行、dry-run 不增行。Linux/容器运行仍待 OPS。
+- 2026-11-26 worker 并发切片：新增 tests/test_capture_job_concurrency.py 覆盖四类边界——(1) 领取后进程中断（租约过期）由另一 worker 续跑，同一 submission 只产生一个信号；(2) 两个并发 POST /capture/jobs 使用同一 submission_id 与同一字节时都返回 202 且任务 ID 相同，唯一约束回退路径只留一行任务（探针确认失败方登记了 1 个孤儿对象），执行后仅一个信号；(3) 租约被接管后旧 worker 的 heartbeat/_mark_succeeded/_mark_failed 均为无操作，任务仍归新 worker；(4) 超过 CAPTURE_WORKER_MAX_ATTEMPTS 的过期租约在领取时被标记 failed 并写入原因。证据：pytest tests/test_capture_job_concurrency.py -q → 4 passed。Linux 容器内进程重启与真实 worker 端到端证据仍待 OPS。
+- 2026-11-26 跨入口幂等切片：POST /capture 在计算 submission 指纹前先规范化 MIME，与 /capture/jobs、client-submit 一致；修复同一 .pptx 以 application/octet-stream 上传时同步入口已建信号、异步入口却因指纹里的原始 MIME 不同而误报 409 的缺陷。新增 tests/test_capture_entry_idempotency.py 八项用例：同步重放同信号、异字节 409、同步→异步复用既有信号、异步→同步复用、任务排队中同步 409 且不建信号、双向歧义 MIME、并发同步只建一个信号。证据：pytest tests/test_capture_entry_idempotency.py -q → 8 passed；capture 相关九文件加 OpenAPI 快照 75 passed。真实客户端与 Linux 端到端仍待。
+- 剩余验收：URL/HTML/文档/粘贴统一留存；空、超限、错误 MIME；全入口一致的幂等/并发行为（并发与租约续跑的服务级用例已交付，目标平台的进程重启仍待）；前端与 Go 客户端必须显示真实任务状态和最终结果。生产公网页面必须由用户侧浏览器采集上传，生产环境不调用服务端 `fetch_url()`。
 
 ## BE-02 证据生命周期与查询
 
@@ -38,6 +44,7 @@
 - 入口：[signals.py](app/api/v1/signals.py)、[schemas.py](app/schemas/schemas.py)、[html_snapshot.py](app/services/html_snapshot.py)。
 - 统一 metadata、采集时间、实际事件时间与发布时间语义；未知日期不补成当天（`event_date_text`/`event_date_precision` 已在共享 `create_signal_record` 写入）。保留原文、原链接与派生正文；正文修补留版本/审计。
 - 已交付正文修补审计切片：`PATCH /signals/{id}` 的 `body_text` 保存新对象，并在 `CorrectionAudit` 记录旧/新 object key 与 SHA-256；旧正文对象仍可读取。
+- 2026-11-24 重复信号扫描/清理切片：`GET /signals/duplicates` 改按 `article_url_key` 分组（保留内容型 query，追踪参数按 host 剔除：`utm_*`/`spm` 全局，微信/百度包装参数仅在对应 host，空值参数保留）；同一 `url_normalized` 且带 `(重复采集 #n)` 标题但 URL 键不同的对报告为 `url_suspect`（恒非 identical，人工裁决；若标题后缀被改掉则有意不合并——重命名是人工决定，错合不可恢复）；`POST /signals/duplicates/cleanup` 服务端重算分组，绝不删空一组、跳过存在 Agent 待确认变更或被已确认需求引用为证据的信号（REQ-DEM-03）并逐条审计。候选行由 SQL 预筛（仅重复 `url_normalized`/`body_sha256`）加载，万级信号实测见 `scripts/probe_dedup_scan_cost.py`。证据：[signal_dedup.py](app/services/signal_dedup.py)、[test_signal_dedup.py](tests/test_signal_dedup.py) 21 passed，提交 `e334993`+`83090a8`，见[交付记录](../docs/DELIVERY-RECORD.md#2026-11-24)。待验：真实库扫描结果核对。
 - 在服务端约束五种证据状态及两种演进节点；没有可读且已落盘的快照不能标已留存。待人工复核表示已有证据但分类/归集未确认。
 - 完成检索标题、发布主体、摘要与技术标签，以及来源/渠道/环节/状态/主题筛选。保留列表兼容形状，通过响应总数头提供分页总量。
 - 归档后禁止新自动推导和自动覆盖，历史链路仍可读；恢复后需要重新复核。补正文后按规则更新状态，禁止仅修改状态制造成功。
@@ -84,6 +91,7 @@
 - 信号频次统计未归档主题成员；来源数统计主题历史关联成员的全部去重 URL（含归档来源，延续现有 source_count 行为），UI 明示两者口径。活动推导始终排除归档信号。
 - 修正计数查询，防多 URL/多标签 join 放大。主题来源更新与失效要可复核；主题不提供需求合并或优先级排序。
 - 聚类仅输出候选名称、成员和解释；人工确认后创建主题/开放标签。离线脚本默认只出报告，显式 apply 才写；不创建封闭类目。
+- 2026-11-26 多来源覆盖切片：新增 tests/test_signal_sources.py 五项用例——新信号自动生成 1 条主来源（provenance=primary）；补充 URL 按 normalize_url 去重（大小写/尾斜杠/query 归一），重复提交返回同一行，主 URL 作为补充提交返回主来源；归档信号拒绝新增来源（409）；无权限角色 403；主题 source_count 计入补充 URL，跨信号共享主 URL 只计一次，归档成员的来源仍计入（signal_frequency 排除归档）。证据：5 passed；主题/聚类/归档相关 34 passed。真实 8/16 案例仍待 DOC-02。
 - 验收：8 条信号/16 URL 的隔离测试 fixture、共享 URL、归档、重新归集、同词异义/异词同义；真实 8/16 复现等待 DOC-02 数据。
 
 ## BE-06 需求点推导与复核
@@ -126,6 +134,7 @@
 - 来源：Word §2.5、图2-5；REQ-TECH-01…04；WBS 1.3.6、1.4.2。
 - 入口：[landing_points.py](app/api/v1/landing_points.py)、[panorama.py](app/api/v1/panorama.py)。
 - 创建/编辑落脚点时检查所属功能仍已发布且需求证据仍有效；PATCH 已支持名称、域、角色更新并写入前后值审计。
+- 2026-11-25 走查发现：落脚点没有删除接口；临时的/样例落点只能 SQL 删除，且 `eea_correction_audit` 无外键，删后会留下指向已删实体的历史行（见[走查记录](../docs/acceptance-records/2026-11-25-seven-step-walkthrough.md#缺陷与观察) O-7）。
 - 一功能可关联五域多落脚点；2026-11-09 流程图确认软件、硬件、通信、电源与能源管理、工具。通过迁移 0010 初始化五个域词项；域词表继续开放复用，不能封闭为五值。
 - 全景完整展开所有需求/功能/落脚点及真实计数，不截取前两个节点；标准数只计实质条款。
 - 验收：未发布功能拒绝创建、开放域去重复用、角色修改审计、多分支追溯、空库真实为零。
@@ -245,7 +254,7 @@
 - [ ] P0 · 未验证 · 依赖代码任务的组件实现、迁移与验证；集成部署/离线包/恢复验收由 OPS-06 在 BE-16 后完成。
 - 来源：WBS 1.2.6、1.5.1…1.5.5、1.6、1.7。
 - [tests/](tests/) 按需求补负面/并发/持久性测试；pytest 单进程，隔离 eea_test 与临时对象目录，不接真实生产数据。
-- 新迁移覆盖来源、review、funnel、缓存、图块、会话等；以当前 0022_demand_review_baseline 为 head 按实施顺序分配后续 revision，旧方案中 embedding/document keyword 的编号不可复用为既有迁移证据。
+- 新迁移覆盖来源、review、funnel、缓存、图块、会话等；以当前 0026_maintenance_run 为 head 按实施顺序分配后续 revision，旧方案中 embedding/document keyword 的编号不可复用为既有迁移证据。
 - 完成需求对应的组件级回归、OpenAPI 与前端类型契约检查、迁移升级/降级检查；未知旧 JSON 不自动批准，历史快照与评分保持可读。
 - 交付代码仓库层面的依赖锁定、启动/配置契约与组件验证证据；不把 macOS 检查描述为 Linux worker 或生产存储验收。
 - Linux 集成、离线 wheel 包、生产升级、备份/恢复及 10,000 条性能报告由 OPS-06 在 BE-16 后统一验收，避免 BE-16 ↔ OPS-02/05 循环依赖。

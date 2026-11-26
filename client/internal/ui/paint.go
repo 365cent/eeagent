@@ -127,8 +127,7 @@ func (a *appState) paintHeader(hdc win.HDC, f frame) {
 		Right: f.header.l + int32(winScale.x(28)), Bottom: int32(winScale.y(25)),
 	}, 0, true)
 	textAt(hdc, a.fonts.title, int(f.header.l)+winScale.x(36), winScale.y(10), rgb(inkR, inkG, inkB), "EEA 采集")
-	a.paintNav(hdc, f.linkNav, "链接", !a.showJobs && !a.manualMode)
-	a.paintNav(hdc, f.manualNav, "微信补录", !a.showJobs && a.manualMode)
+	a.paintNav(hdc, f.linkNav, "链接", !a.showJobs)
 	a.paintNav(hdc, f.jobsNav, "任务", a.showJobs)
 	textAt(hdc, a.fonts.small, int(f.settings.l), winScale.y(14), rgb(muteR, muteG, muteB), "设置")
 	textRight(hdc, a.fonts.body, int(f.min.r), winScale.y(12), rgb(muteR, muteG, muteB), "—")
@@ -138,11 +137,6 @@ func (a *appState) paintHeader(hdc win.HDC, f frame) {
 func (a *appState) paintCard(hdc win.HDC, f frame) {
 	a.fillAA(hdc, [3]byte{lineR, lineG, lineB}, f.card.rect(), winScale.x(12), false)
 	a.fillAA(hdc, [3]byte{255, 255, 255}, inset(f.card, 1).rect(), winScale.x(11), false)
-	if a.manualMode {
-		a.paintManualFallbackForm(hdc, f)
-		return
-	}
-
 	hint := "粘贴链接，或把文件拖进来"
 	if n := a.pendingLines(); n > 0 {
 		hint = "Ctrl+Enter 上传"
@@ -164,27 +158,13 @@ func (a *appState) paintNav(hdc win.HDC, b box, label string, active bool) {
 	textAt(hdc, a.fonts.small, x, y, color, label)
 }
 
-func (a *appState) paintManualFallbackForm(hdc win.HDC, f frame) {
-	labelColor := rgb(muteR, muteG, muteB)
-	textAt(hdc, a.fonts.small, int(f.manualURLLabel.l), int(f.manualURLLabel.t), labelColor, "原始微信 URL")
-	textAt(hdc, a.fonts.small, int(f.manualTitleLabel.l), int(f.manualTitleLabel.t), labelColor, "标题")
-	textAt(hdc, a.fonts.small, int(f.manualBodyLabel.l), int(f.manualBodyLabel.t), labelColor, "粘贴正文 · 手工补录，非浏览器采集成功")
-	for _, b := range []box{f.manualURL, f.manualTitle, f.manualBody} {
-		a.fillAA(hdc, [3]byte{lineR, lineG, lineB}, b.rect(), winScale.x(6), false)
-		a.fillAA(hdc, [3]byte{255, 255, 255}, inset(b, 1).rect(), winScale.x(5), false)
-	}
-	textAt(hdc, a.fonts.small, int(f.hint.l), int(f.hint.t), labelColor,
-		fit(hdc, a.fonts.small, "提交后保存为待人工复核的手工证据", int(f.hint.dx())))
-	a.paintPill(hdc, f.send, "提交补录", a.canSend())
-}
-
 func (a *appState) paintJobs(hdc win.HDC, f frame) {
 	a.fillAA(hdc, [3]byte{lineR, lineG, lineB}, f.card.rect(), winScale.x(12), false)
 	a.fillAA(hdc, [3]byte{255, 255, 255}, inset(f.card, 1).rect(), winScale.x(11), false)
 	jobs := a.orderedJobs()
 	start := a.jobPage * len(f.jobRows)
 	if len(jobs) == 0 {
-		textAt(hdc, a.fonts.small, int(f.card.l)+winScale.x(18), int(f.card.t)+winScale.y(26), rgb(muteR, muteG, muteB), "暂无任务。链接采集和微信手工补录会显示在这里。")
+		textAt(hdc, a.fonts.small, int(f.card.l)+winScale.x(18), int(f.card.t)+winScale.y(26), rgb(muteR, muteG, muteB), "暂无任务。链接采集和文件上传会显示在这里。")
 	} else {
 		for row, b := range f.jobRows {
 			idx := start + row

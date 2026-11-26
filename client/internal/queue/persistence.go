@@ -86,7 +86,6 @@ func (q *Queue) Restore() error {
 	}
 
 	jobs := make([]*Job, 0, len(state.Jobs))
-	active := make([]*Job, 0, len(state.Jobs))
 	seen := make(map[int]struct{}, len(state.Jobs))
 	maxID := 0
 	for _, entry := range state.Jobs {
@@ -97,7 +96,7 @@ func (q *Queue) Restore() error {
 			return fmt.Errorf("queue state contains duplicate job id %d", entry.ID)
 		}
 		seen[entry.ID] = struct{}{}
-		if entry.Kind < KindURL || entry.Kind > KindManualFallback {
+		if entry.Kind < KindURL || entry.Kind > KindArchive {
 			return fmt.Errorf("queue job %d has invalid kind %d", entry.ID, entry.Kind)
 		}
 		switch entry.Status {
@@ -133,38 +132,59 @@ func (q *Queue) Restore() error {
 			(job.Kind == KindURL || job.Kind == KindArchive) && job.SubmissionID == "" {
 			return fmt.Errorf("queue job %d has no stable submission id", job.ID)
 		}
-		if job.hasPayload && job.Kind != KindURL && job.Kind != KindArchive && job.Kind != KindManualFallback {
+		if job.hasPayload && job.Kind != KindURL && job.Kind != KindArchive {
 			return fmt.Errorf("queue job %d has an unexpected payload", job.ID)
 		}
 		if job.Status == StatusRunning {
 			job.Status = StatusQueued
 			job.StartedAt = time.Time{}
 		}
-		if job.Status == StatusQueued {
-			if job.hasPayload && job.CaptureJobID == "" {
-				payloadPath := q.payloadPath(job.ID)
-				payload, readErr := os.ReadFile(payloadPath)
-				if readErr != nil {
-					return fmt.Errorf("restore payload for queue job %d: %w", job.ID, readErr)
-				}
-				if err := os.Chmod(payloadPath, 0o600); err != nil {
-					return fmt.Errorf("restrict payload permissions for queue job %d: %w", job.ID, err)
-				}
-				if entry.PayloadBytes != int64(len(payload)) {
-					return fmt.Errorf("queue job %d payload size mismatch: state says %d bytes, file has %d", job.ID, entry.PayloadBytes, len(payload))
-				}
-				if job.Kind == KindManualFallback {
-					job.manualBody = payload
-				} else {
-					job.archive = payload
-				}
-			}
-			active = append(active, job)
-		}
 		jobs = append(jobs, job)
 		if job.ID > maxID {
 			maxID = job.ID
 		}
+	}
+	if q.opts.HistoryRetention > 0 && !q.opts.DisableAutoPruneOnRestore {
+		var pruneErr error
+		jobs, _, pruneErr = pruneJobs(q.opts.StateDir, jobs, q.opts.HistoryRetention, time.Now(), false)
+		if pruneErr != nil {
+			return fmt.Errorf("prune queue history: %w", pruneErr)
+		}
+	}
+	active := make([]*Job, 0, len(jobs))
+	for _, job := range jobs {
+		if job.Status == StatusRunning {
+			job.Status = StatusQueued
+			job.StartedAt = time.Time{}
+		}
+		if job.Status != StatusQueued {
+			continue
+		}
+		if (job.Kind == KindURL || job.Kind == KindArchive) && job.SubmissionID == "" {
+			return fmt.Errorf("queue job %d has no stable submission id", job.ID)
+		}
+		if job.hasPayload && job.CaptureJobID == "" {
+			payloadPath := q.payloadPath(job.ID)
+			payload, readErr := os.ReadFile(payloadPath)
+			if readErr != nil {
+				return fmt.Errorf("restore payload for queue job %d: %w", job.ID, readErr)
+			}
+			if err := os.Chmod(payloadPath, 0o600); err != nil {
+				return fmt.Errorf("restrict payload permissions for queue job %d: %w", job.ID, err)
+			}
+			var payloadBytes int64
+			for _, entry := range state.Jobs {
+				if entry.ID == job.ID {
+					payloadBytes = entry.PayloadBytes
+					break
+				}
+			}
+			if payloadBytes != int64(len(payload)) {
+				return fmt.Errorf("queue job %d payload size mismatch: state says %d bytes, file has %d", job.ID, payloadBytes, len(payload))
+			}
+			job.archive = payload
+		}
+		active = append(active, job)
 	}
 	if state.NextID < maxID {
 		state.NextID = maxID
@@ -268,8 +288,12 @@ func (q *Queue) statePath() string {
 	return filepath.Join(q.opts.StateDir, "queue-state.json")
 }
 
+func payloadFileName(id int) string {
+	return fmt.Sprintf("job-%d.bin", id)
+}
+
 func (q *Queue) payloadPath(id int) string {
-	return filepath.Join(q.opts.StateDir, "payloads", fmt.Sprintf("job-%d.bin", id))
+	return filepath.Join(q.opts.StateDir, "payloads", payloadFileName(id))
 }
 
 func encodeQueueState(nextID int, jobs []*Job) ([]byte, error) {

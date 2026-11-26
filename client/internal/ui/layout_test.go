@@ -27,7 +27,7 @@ func TestLayoutFitsWindow(t *testing.T) {
 	if !contains(f.panel, f.save) || !contains(f.panel, f.cancel) {
 		t.Fatalf("panel buttons outside panel")
 	}
-	for _, b := range []box{f.linkNav, f.manualNav, f.jobsNav, f.manualURL, f.manualTitle, f.manualBody, f.jobPrev, f.jobNext} {
+	for _, b := range []box{f.linkNav, f.jobsNav, f.jobPrev, f.jobNext} {
 		if b.empty() {
 			t.Fatalf("interactive area is empty: %+v", b)
 		}

@@ -5,6 +5,7 @@
   "browser_path": "",
   "user_data_dir": "data/browser-profile",
   "queue_dir": "data/capture-queue",
+  "queue_history_retention_days": 7,
   "max_parallel": 2,
   "max_upload_mb": 120,
   "timeout_sec": 90,

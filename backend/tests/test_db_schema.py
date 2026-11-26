@@ -57,6 +57,7 @@ EXPECTED_TABLES = {
     "eea_embedding_cache",
     "eea_signal_source",
     "eea_stored_object_orphan",
+    "eea_maintenance_run",
     "eea_signal_studio_artifact",
 }
 

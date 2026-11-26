@@ -2,7 +2,6 @@ package queue
 
 import (
 	"context"
-	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -331,31 +330,6 @@ func TestRetryFailedPreservesSubmissionIdentity(t *testing.T) {
 	q.Close()
 }
 
-func TestRetryFailedRefusesUnsafeFailure(t *testing.T) {
-	dir := t.TempDir()
-	seed := New(nil, nil, Options{StateDir: dir})
-	seed.mu.Lock()
-	seed.jobs = []*Job{{
-		ID: 1, Kind: KindManualFallback, URL: "https://mp.weixin.qq.com/s/a",
-		Status: StatusFailed, RetrySafe: false, QueuedAt: time.Now(), FinishedAt: time.Now(),
-	}}
-	seed.nextID = 1
-	if err := seed.persistLocked(); err != nil {
-		seed.mu.Unlock()
-		t.Fatal(err)
-	}
-	seed.mu.Unlock()
-
-	q := New(nil, nil, Options{StateDir: dir})
-	if err := q.Restore(); err != nil {
-		t.Fatal(err)
-	}
-	if err := q.RetryFailed(1); err == nil {
-		t.Fatal("unsafe manual fallback must not be retried")
-	}
-	q.Close()
-}
-
 func TestRetryFailedCaptureUsesBackendRetryAction(t *testing.T) {
 	var retryCalls atomic.Int32
 	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -497,60 +471,6 @@ func TestCancelQueuedRefusesRecoveredInFlightJob(t *testing.T) {
 		t.Fatal("restored in-flight job may already have been accepted by the server")
 	}
 	q.Close()
-}
-
-func TestManualFallbackPayloadRestoresAndStaysPendingReview(t *testing.T) {
-	dir := t.TempDir()
-	api := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost || r.URL.Path != "/api/v1/signals" {
-			t.Errorf("request = %s %s", r.Method, r.URL.Path)
-		}
-		var body map[string]any
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Errorf("decode body: %v", err)
-		}
-		if body["url"] != "https://mp.weixin.qq.com/s/manual" || body["body_text"] != "pasted article" {
-			t.Errorf("fallback payload = %#v", body)
-		}
-		if body["evidence_status_code"] != "pending_review" {
-			t.Errorf("status = %#v", body["evidence_status_code"])
-		}
-		w.Header().Set("Content-Type", "application/json")
-		w.Write([]byte(`{"id":"sig-manual","title":"Manual title","url":"https://mp.weixin.qq.com/s/manual","channel_code":"wechat_mp","evidence_status_code":"pending_review"}`))
-	}))
-	defer api.Close()
-
-	first := New(nil, platform.New(api.URL, 8), Options{StateDir: dir})
-	if err := first.Restore(); err != nil {
-		t.Fatal(err)
-	}
-	id := first.SubmitManualFallback("https://mp.weixin.qq.com/s/manual", "Manual title", "pasted article")
-	stateBytes, err := os.ReadFile(filepath.Join(dir, "queue-state.json"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(string(stateBytes), "pasted article") {
-		t.Fatal("manual body should be stored in the private payload file, not queue metadata")
-	}
-
-	recovered := New(nil, platform.New(api.URL, 8), Options{Workers: 1, StateDir: dir})
-	if err := recovered.Restore(); err != nil {
-		t.Fatal(err)
-	}
-	recovered.Start()
-	recovered.Wait()
-	recovered.Close()
-
-	job := findSnapshot(recovered.Snapshot(), id)
-	if job.Status != StatusDone || job.Kind != KindManualFallback || job.SignalID != "sig-manual" || job.EvidenceState != "pending_review" {
-		t.Fatalf("manual fallback job = %+v", job)
-	}
-	if job.RetrySafe {
-		t.Fatal("manual fallback with a non-idempotent POST must not be marked retry-safe")
-	}
-	if _, err := os.Stat(filepath.Join(dir, "payloads", "job-1.bin")); !os.IsNotExist(err) {
-		t.Fatalf("completed private payload should be removed, stat err = %v", err)
-	}
 }
 
 func findSnapshot(jobs []Job, id int) Job {

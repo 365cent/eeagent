@@ -59,9 +59,11 @@ func (r *Runtime) NewQueue(maxWorkers int, onUpdate func(queue.Job)) *queue.Queu
 	}
 	return queue.New(r.Browser, r.API, queue.Options{
 		Workers: workers, Retries: 2,
-		Timeout:       time.Duration(r.config.TimeoutSec) * time.Second,
-		UploadTimeout: time.Duration(r.config.UploadTimeout) * time.Second,
-		StateDir:      config.QueueStateDir(r.dir, r.config), OnUpdate: onUpdate,
+		Timeout:          time.Duration(r.config.TimeoutSec) * time.Second,
+		UploadTimeout:    time.Duration(r.config.UploadTimeout) * time.Second,
+		StateDir:         config.QueueStateDir(r.dir, r.config),
+		HistoryRetention: r.config.QueueHistoryRetention(),
+		OnUpdate:         onUpdate,
 	})
 }
 

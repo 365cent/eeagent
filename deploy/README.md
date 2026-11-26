@@ -8,7 +8,7 @@
 | migrate | 一次性：`alembic upgrade head`，每次启动自动执行 |
 | api | FastAPI，仅内网监听 |
 | worker | 采集任务后台处理（与 api 同一镜像） |
-| maintenance | 孤儿对象清理，按需 `--profile ops` 运行 |
+| maintenance | 孤儿对象清理 + 过期终态采集任务清理，按需 `--profile ops` 运行 |
 | web | Next.js（standalone），仅内网监听 |
 | nginx | 唯一对外入口：页面与 `/api` 同源（卷 `objectstore` 存原始证据） |
 
@@ -44,7 +44,7 @@ bash deploy/build.sh
 | 手动迁移 | `bash deploy/migrate.sh` |
 | 备份 | `bash deploy/backup.sh` → `deploy/backups/eea-<时间>.{dump,tar.gz,manifest.txt}` |
 | 恢复 | `bash deploy/restore.sh <备份时间戳>` |
-| 清理孤立对象 | `cd deploy && docker compose --profile ops run --rm maintenance` |
+| 清理孤立对象与过期终态任务 | `cd deploy && docker compose --profile ops run --rm maintenance`（终态任务默认保留 `CAPTURE_JOB_RETENTION_DAYS=30` 天） |
 | 回退版本 | `EEA_VERSION=<旧版本> bash deploy/build.sh`（镜像按 `EEA_VERSION` 打标签） |
 
 ## 配置

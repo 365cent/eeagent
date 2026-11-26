@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"eea/capture/internal/credential"
 	"eea/capture/internal/netinfo"
@@ -22,7 +23,8 @@ type Config struct {
 	CaptureEngine      string `json:"capture_engine"`
 	BrowserPath        string `json:"browser_path"`
 	UserDataDir        string `json:"user_data_dir"`
-	QueueDir           string `json:"queue_dir"`
+	QueueDir                   string `json:"queue_dir"`
+	QueueHistoryRetentionDays  int    `json:"queue_history_retention_days"`
 	MaxParallel        int    `json:"max_parallel"`
 	MaxUploadMB        int    `json:"max_upload_mb"`
 	TimeoutSec         int    `json:"timeout_sec"`
@@ -47,7 +49,8 @@ func Default() Config {
 		AutoAPI:            true,
 		CaptureEngine:      "edge",
 		UserDataDir:        filepath.Join("data", "browser-profile"),
-		QueueDir:           filepath.Join("data", "capture-queue"),
+		QueueDir:                  filepath.Join("data", "capture-queue"),
+		QueueHistoryRetentionDays: 7,
 		MaxParallel:        2,
 		MaxUploadMB:        120,
 		TimeoutSec:         150,
@@ -211,6 +214,15 @@ func isLoopbackURL(raw string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// QueueHistoryRetention is how long finished queue jobs stay on disk before
+// automatic cleanup on restore. Zero disables pruning (set queue_history_retention_days to 0).
+func (c Config) QueueHistoryRetention() time.Duration {
+	if c.QueueHistoryRetentionDays <= 0 {
+		return 0
+	}
+	return time.Duration(c.QueueHistoryRetentionDays) * 24 * time.Hour
 }
 
 // QueueStateDir resolves queue_dir relative to the directory containing

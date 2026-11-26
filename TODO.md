@@ -1,6 +1,6 @@
 # EEA 全项目实施清单
 
-更新：2026-11-18。目标：落实原始 Word 七环节及已决文档/Agent 扩展，交付可在 **Linux 内网**运行、可验收、可恢复的生产版本。这里只保留剩余工作；已经完成的计划替换和索引整理不再列为待办。
+更新：2026-11-26。目标：落实原始 Word 七环节及已决文档/Agent 扩展，交付可在 **Linux 内网**运行、可验收、可恢复的生产版本。这里只保留剩余工作；已经完成的计划替换和索引整理不再列为待办。
 
 ## 执行规则
 
@@ -29,6 +29,8 @@
 
 五份子清单仍有 53 个父任务待验收，追溯表 75 条需求仍为“待验”。2026-11-18 完成 BE-12 文档图块与章节检索代码切片：加法迁移 0019_document_structure、图块资产/来源/位置/章节路径、OOXML 7 图/8 次插入计数、chunks 与图块图片 API；全量后端 430 passed、2 skipped，lint-imports、迁移升降级、前端 typecheck/build 通过。BE-12 父任务仍开放，真实 Word 七图/八插入、PDF 缺 OCR、Linux 与 Windows 证据仍未执行，不能据此关闭父任务。[交付记录](docs/DELIVERY-RECORD.md)
 
+2026-11-24 复核：逐项清点五个子清单仍为 53 个父任务（BE 17、FE 13、CC 7、DOC 8、OPS 8），75 条 REQ 保持待验；另于 2026-11-23 在 10.215.35.10:8090 完成 Docker Compose 生产部署并运行（见 [OPS-02](deploy/TODO.md) 与[交付记录](docs/DELIVERY-RECORD.md#2026-11-23)），TLS/身份/网关凭据/备份演练仍未验收。
+
 下表是阶段 A–E 的执行顺序。先交付第 1 项。客户端、部署准备和业务材料可同时推进。每一批把版本、输入、实际结果和未通过项写入 DOC-05，按对应子清单的完整验收条件关闭父任务。
 
 | 顺序 | 主责与任务 | 下一份可交付结果 | 本批验收 |
@@ -42,7 +44,7 @@
 
 并行输入由 DOC-02 登记：业务方提供标注信号、主题来源、功能卡词项、Tier1 依据和业务规则包；基础设施方提供 Linux 主机、身份映射、TLS、内网模型网关及恢复目标；客户端方提供 Windows 测试环境与扩展源码。[输入登记表](docs/INPUT-REGISTER.md)
 
-## 最近交付切片（2026-11-19）
+## 最近交付切片（截至 2026-11-26）
 
 - **BE-12（2026-11-18）**：文档图块资产与元数据、7 图/8 次插入计数、标题路径章节分块、图块图片端点、chunks API 与关键词章节引用；证据见[交付记录](docs/DELIVERY-RECORD.md#2026-11-18)。父任务仍待真实 Word/PDF 验收。
 - **BE-12（2026-11-19）**：单图 `POST /documents/{id}/figures/{n}/recaption`；复用已存图片对象，成功改写 canonical 图注并重建 chunks，失败保留正文并标 needs_review。
@@ -54,6 +56,17 @@
 - **BE-03**：主题创建/修改/删除接入服务端 operator 身份与审计。
 - **BE-04/BE-14**：chat/embedding/rerank 分离环境变量；embedding 按 API index 排序；`search_rag` 接入 chunk embedding + cosine + rerank。
 - **BE-06**：低频强信号标记与理由 API、校验和审计。
+- **BE-06…BE-11（2026-11-20 W1）**：两条真实来源（佐思汽研微信 + EDN 博客）走通七环节全链：单证据/缺项/越权被拒（422/403），战略 4/4/3/4/5=20 落版本，追溯 complete、basis_freshness=fresh。业务签字仍待。
+- **BE-12/BE-14/BE-15（2026-11-20 W2）**：真实 eFuse Word 7 图/8 插入全部成注；真实网关 Agent 回答成功（一次 504 如实记 turn.failed），引用可核验、记忆隔离、重复确认 409；报告新增原始证据段与 created/finished 字段。
+- **CC-01/CC-02（2026-11-20）**：真机队列采集 10 网页 + 5 微信标题正文准确，验证壳/错误页拒绝入库；单任务超时不再阻塞队列。
+- **OPS-02（2026-11-23）**：`deploy/build.sh` 在 10.215.35.10:8090 完成 Compose 生产部署并运行；网关凭据/TLS/备份演练待验收。
+- **BE-02（2026-11-24）**：重复信号扫描改按 `article_url_key` 分组（追踪参数按 host 剔除、空值参数保留），`url_suspect` 组恒非 identical；cleanup 重算分组、不删空组、跳过 Agent 待确认或被已确认需求引用的信号并逐条审计；候选行 SQL 预筛后万级库扫描 0.32s（提交 `e334993`+`83090a8`，21 项测试）。
+- **项目报告（2026-11-26）**：[docs/FINAL-REPORT.md](docs/FINAL-REPORT.md) 汇总设计、快速开始、带截图的七环节走查与 WBS 工作簿同步（26 完成 / 8 进行中 / 7 未开始，1.5.8 签字未开始）；配套[走查记录](docs/acceptance-records/2026-11-25-seven-step-walkthrough.md)。
+- **BE-01（2026-11-26）**：`orphan_maintenance` 修复走查缺陷 O-8（win32 入口自行设置 `WindowsSelectorEventLoopPolicy`，与 `dev.py` 同模式，Windows 直接运行不再报 psycopg Proactor 错误）并改为显式 dry-run/apply（默认干跑计数、`--apply` 才删除提交并写 `eea_maintenance_run` 审计，dry-run 不写）；Compose `maintenance` 显式 `--apply` 保持生产语义。证据：便携库干跑 `pruned_orphans=0` exit 0；`0026_maintenance_run` 升降级通过；`pytest tests/test_orphan_maintenance.py tests/test_db_schema.py` 9 passed。Linux/容器运行仍待，见 [BE-01](backend/TODO.md#be-01-统一采集与可靠任务)。
+- **BE-01（2026-11-26，终态任务保留）**：`succeeded`/`failed`/`cancelled` 任务按 `CAPTURE_JOB_RETENTION_DAYS`（默认 30 天）清理；`--apply` 仅删除无剩余任务引用、且超过 1 小时未写入的内容寻址 payload，并把任务/载荷计数写入 `eea_maintenance_run`。证据：目标测试 13 passed；eea_test CLI apply 写入嵌套审计、dry-run 不写。
+- **BE-01（2026-11-26，worker 并发/续跑）**：新增 tests/test_capture_job_concurrency.py——租约过期后另一 worker 续跑且不重复建信号；并发重复提交只落一行任务、执行后一个信号；旧 worker 的心跳/成功/失败写入被 ownership 守卫拒绝；超过重试上限的过期租约在领取时置 failed。证据：4 passed（探针确认并发路径登记了 1 个孤儿对象）。Linux/容器重启证据仍待 OPS。
+- **BE-01（2026-11-26，跨入口幂等）**：POST /capture 先规范化 MIME 再算 submission 指纹（与 /capture/jobs 一致），修复同一 .pptx 经同步/异步入口互相 409；新增 8 项跨入口用例（同步重放、异字节 409、双向复用、排队 409、歧义 MIME、并发只建一个信号）。证据：8 passed；capture 相关加 OpenAPI 快照 75 passed。
+- **BE-05（2026-11-26，多来源覆盖）**：补充 URL 溯源与主题来源口径测试（主来源自动生成、normalize 去重、归档 409、越权 403、共享 URL 去重、补充 URL 计入、归档来源仍计数）。证据：5 passed；主题/聚类/归档 34 passed。
 - 上述均为组件切片；父任务验收、目标平台证据和真实业务样本仍按子清单保持开放。
 
 ## 下一项具体任务
@@ -61,14 +74,14 @@
 - **BE-01 worker/orphan 维护 + Linux 迁移与重启证据**（P0）
   - 已交付（2026-11-19）：图块重试授权与审计、追溯页 Playwright 冒烟；证据见[交付记录](docs/DELIVERY-RECORD.md#2026-11-19)。
   - 目标：把 import-linter 之外仍耦合的 evidence 写入路径收敛到共享摄取服务，并给孤立对象/终态任务一个可运行的维护命令，而不是只报告。
-  - 先做：实现 `orphan_maintenance` 的显式 dry-run/apply 两种模式并加审计；补 worker 租约过期续跑与重复 submission 的并发用例。
+  - 先做：`orphan_maintenance` 显式 dry-run/apply 两模式与 O-8 事件循环修复已交付（2026-11-26，见上方交付切片）；worker 租约续跑、重复 submission 并发用例与跨入口指纹一致性已交付（2026-11-26）；剩余为 Linux/容器内 worker 重启与端到端证据。
   - 测试：隔离 `eea_test` 中模拟进程中断、重叠领取、对象缺失与清理重跑；Linux 侧仍由 OPS-06 统一验收。
   - 验收：清理绝不删除仍被任务或信号引用的对象；重复执行幂等；进程中断后另一 worker 能续跑且不重复创建信号。
 
 ## 生产实现基线
 
 - 保留仓库实际栈：FastAPI / SQLAlchemy / Alembic / PostgreSQL；Next.js 16 / React 19 / antd 6 / React Query；Go Windows 终端通过 Edge/Chrome CDP + SingleFile 采集；Agent 编排使用 Pydantic AI。
-- 生产默认单台 Linux 内网主机：Nginx TLS 同源入口、前台运行的 API/Next/worker systemd 服务、PostgreSQL 与持久对象目录。存储仍通过对象存储接口隔离；S3 兼容迁移留作扩容选项。
+- 生产默认单台 Linux 内网主机：Docker Compose（postgres/migrate/api/worker/web/nginx，Nginx 同源入口）与持久对象目录；systemd 方案已移除。存储仍通过对象存储接口隔离；S3 兼容迁移留作扩容选项。
 - 服务端不访问公网采集。业务电脑的采集工具提交原始证据，微信失败可保留 URL 粘贴正文。内网模型网关失效必须有可见降级。
 - 生产身份采用受信反向代理认证及角色映射；采集端用按用户签发的受限凭据。IP 访问记录不能代表可审计用户身份。具体接入由 OPS-03 验证，不增加本期 SSO 项目。
 - 生产库仅初始化基础词表，eFuse 示例和负面样例放隔离验收库。既有便携 PostgreSQL/Windows 启动脚本不充当 Linux 安装方案。

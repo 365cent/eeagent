@@ -1,6 +1,6 @@
 # Frontend 实施清单
 
-更新：2026-11-11。交付目标：研究者可以使用真实证据走完 Word 七环节并保留每一次人工判断。总顺序见 [项目清单](../TODO.md)，来源见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。
+更新：2026-11-24。交付目标：研究者可以使用真实证据走完 Word 七环节并保留每一次人工判断。总顺序见 [项目清单](../TODO.md)，来源见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。
 
 ## 当前基础和编辑规则
 

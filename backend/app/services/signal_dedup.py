@@ -16,7 +16,9 @@ with ``(重复采集 #n)`` keyed on ``url_normalized``, while this module groups
 query-aware URL key. When an unknown tracking parameter makes those two keys
 differ, the re-capture would disappear from the scan, so it is reported as
 ``url_suspect``: the titles already prove the platform treated them as the same
-article, but a human still picks the survivor.
+article, but a human still picks the survivor. If that suffix is edited away the
+pair is missed on purpose — a rename is a human statement, and merging two
+different articles is not recoverable.
 
 The suggested survivor follows one fixed order (documented in
 :func:`keep_priority`): HTML archive, then extracted body, then the most
@@ -32,7 +34,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit
 from dataclasses import dataclass, field
 from typing import Iterable, Sequence
 
-from sqlalchemy import select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -147,11 +149,35 @@ class DuplicateGroup:
 
 
 async def _load_candidates(db: AsyncSession) -> list[Signal]:
+    """Only the signals that can be in a duplicate group.
+
+    Two signals share an article URL key only if they share
+    ``url_normalized`` (the key is that URL plus the kept query parameters),
+    and a body group needs a repeated ``body_sha256``. Both duplicate keys
+    are found in SQL, so a 10k library loads only its candidate rows instead
+    of every signal and every tag.
+    """
+    repeated_url = (
+        select(Signal.url_normalized)
+        .group_by(Signal.url_normalized)
+        .having(func.count() > 1)
+    )
+    repeated_body = (
+        select(Signal.body_sha256)
+        .where(Signal.body_sha256.is_not(None))
+        .group_by(Signal.body_sha256)
+        .having(func.count() > 1)
+    )
     rows = (
         await db.execute(
-            select(Signal).options(
-                selectinload(Signal.tags).selectinload(SignalTag.vocab)
+            select(Signal)
+            .where(
+                or_(
+                    Signal.url_normalized.in_(repeated_url),
+                    Signal.body_sha256.in_(repeated_body),
+                )
             )
+            .options(selectinload(Signal.tags).selectinload(SignalTag.vocab))
         )
     ).scalars().unique().all()
     return list(rows)

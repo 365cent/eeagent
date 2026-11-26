@@ -2,6 +2,79 @@
 
 This record keeps evidence for implementation slices removed from the remaining-work TODOs. A slice does not close its parent task; acceptance stays open until the subsystem TODO criteria and required platform evidence pass.
 
+## 2026-11-26
+
+### Orphan-maintenance entry runnable on Windows + explicit dry-run/apply (BE-01 slice, walkthrough O-8)
+
+- Problem: the 2026-11-25 seven-step walkthrough (O-8) found `python -m app.services.orphan_maintenance` fails on Windows with psycopg `InterfaceError: Psycopg cannot use the 'ProactorEventLoop'`, because the module entry called `asyncio.run` under the Windows default proactor loop — unlike `dev.py`/`worker.py`, which already install a selector policy. Reproduced before the fix on this machine with the same traceback.
+- What changed (`orphan_maintenance.py`, `orphan_objects.py`, `deploy/docker-compose.yml`):
+  - The module entry sets `asyncio.WindowsSelectorEventLoopPolicy()` on `win32` before the app imports, the same pattern as `scripts/purge_singleton_tags.py` and `app/worker.py`.
+  - The command is now explicit dry-run/apply: default counts only (`prune_resolved_orphans(..., apply=False)`), `--apply` deletes and commits, `--limit` bounds the scan; the Compose `maintenance` ops-profile service passes `--apply` so production semantics are unchanged.
+- Evidence: `uv run python -m app.services.orphan_maintenance` on the portable dev PostgreSQL → `orphan_maintenance dry-run: pruned_orphans=0`, exit 0 (matches the walkthrough's cleanup-review baseline); `uv run pytest tests/test_signal_dedup.py tests/test_db_schema.py -q` → 27 passed; `uv run alembic heads` → `0025_capture_client_claim_worker (head)`.
+- Not done: Linux/container run of the command remains OPS-side evidence. BE-01 parent stays open (the audit row landed in the next slice).
+
+### Maintenance-run audit row (BE-01 slice)
+
+- Problem: `orphan_maintenance --apply` pruned orphan rows but left no durable record of who ran it, when, or how many rows it scanned/removed, so the BE-01 audit requirement stayed open.
+- What changed (`models.py`, migration `0026_maintenance_run`, `orphan_objects.py`, `orphan_maintenance.py`, tests):
+  - Added `eea_maintenance_run` (command, scan_limit, scanned, pruned, operator_subject/role, details, started_at/finished_at) as an additive `if_not_exists` migration; the schema inventory and per-test truncate list include it.
+  - `--apply` inserts one run row in the same transaction as the deletes; dry-run remains read-only and writes nothing. `prune_resolved_orphans` now returns scanned/pruned plus resolved/missing-blob counts, so the audit details (including the pruned object keys) are measured rather than guessed.
+  - Tests cover the counts, the audit row content, dry-run no-write, and the schema inventory.
+- Evidence: `pytest tests/test_orphan_maintenance.py tests/test_db_schema.py -q` → 9 passed; `alembic downgrade -1` on `eea_test` → `0025_capture_client_claim_worker` with the table absent, `upgrade head` → `0026_maintenance_run` with the table present; CLI `--apply --limit 5` wrote `orphan_maintenance | system | 5 | 0 | 0 | {"resolved":0,"object_keys":[],"missing_blob":0}` and a following dry-run left the row count at 1.
+- Not done: Linux/container run remains OPS-side evidence. BE-01 parent stays open (the retention policy landed in the next slice).
+
+### Terminal capture-job retention (BE-01 slice)
+
+- Problem: terminal capture jobs accumulated forever, and their content-addressed payload blobs were never reclaimed; the plan required a retention window, a cleanup path in the maintenance task, and terminal-cleanup tests.
+- What changed (`config.py`, `objectstore.py`, `capture_job_retention.py`, `orphan_maintenance.py`, tests):
+  - Added `CAPTURE_JOB_RETENTION_DAYS` (default 30, minimum 1) and `--job-retention-days`; `--limit` bounds each category. `succeeded`/`failed`/`cancelled` jobs older than the cutoff are selected with `FOR UPDATE SKIP LOCKED` using `coalesce(finished_at, updated_at)`.
+  - `panorama_import_url.capture_job_id` is nulled before deletion (the live FK is NO ACTION), then the jobs are deleted. A payload blob is unlinked only when no remaining job references the key and the file was not written in the last hour, so a concurrent upload that reused the content-addressed key is not broken.
+  - The maintenance audit row now nests `orphans` and `capture_jobs` details (scanned/pruned, payloads deleted/kept, retention days, cutoff); dry-run still writes nothing.
+  - Tests cover dry-run, expired-vs-recent/queued selection, shared payload protection, unreferenced payload deletion, panorama URL nulling, and the scan limit.
+- Evidence: `pytest tests/test_capture_job_retention.py tests/test_orphan_maintenance.py tests/test_db_schema.py -q` → 13 passed; full backend suite 562 passed, 2 skipped (12:07); CLI `--apply --limit 5 --job-retention-days 30` on `eea_test` wrote one nested audit row (`capture_jobs.scanned=0, pruned=0`), and a following dry-run left the row count at 1.
+- Not done: Linux/container run remains OPS-side evidence. BE-01 parent stays open (worker lease-expiry and duplicate-submission concurrency landed in the next slice).
+
+### Worker lease recovery, duplicate-submission race and stale-worker fencing (BE-01 slice)
+
+- Problem: the durable capture queue had no test proving that a crashed worker's job is recovered by another worker without duplicating its signal, that two identical submissions racing on POST /capture/jobs collapse to one job, or that the worker ownership guards actually reject a stale process. The BE-01 acceptance list still counted process interruption and retry as open.
+- What changed (backend/tests/test_capture_job_concurrency.py, no production code):
+  - Lease recovery: claim with worker A, force the lease into the past (crash simulation), claim with worker B -> the same job is re-claimed (attempt_count 2, owner B) and running it produces exactly one signal.
+  - Duplicate submission race: two concurrent posts with one submission_id and identical bytes both return 202 with the same job id; the unique constraint leaves one job row. A throwaway probe confirmed the losing request took the IntegrityError fallback and recorded one orphan object, so the race path is exercised rather than merely serialized.
+  - Stale-worker fencing: after B reclaims the lease, A's heartbeat returns false and _mark_succeeded/_mark_failed are no-ops (job stays running, owned by B, no signal_id); B can still complete it.
+  - Retry ceiling: a lease that expires at CAPTURE_WORKER_MAX_ATTEMPTS is marked failed with the retry-limit reason at the next claim, which then finds nothing to run.
+- Evidence: pytest tests/test_capture_job_concurrency.py -q -> 4 passed (30.7 s); full backend suite after the slice -> 567 passed, 2 skipped (12:03). A temporary probe run printed statuses=202,202 same_id=True jobs=1 orphans=1; the probe file was removed afterwards.
+- Not done: BE-01 still needs worker restart/end-to-end evidence on Linux/containers (OPS-side), and the same guarantees across every ingest entry point. The parent task stays open.
+
+### Cross-entry submission idempotency (BE-01 slice)
+
+- Problem: POST /capture computed its submission fingerprint from the raw upload content_type, while POST /capture/jobs and client-submit fingerprinted the normalized MIME. The same .pptx sent as application/octet-stream therefore produced two different fingerprints for one submission_id: the sync entry stored the signal, then the async entry answered 409 "already used for a different capture" (and the reverse order failed the same way). The acceptance item "consistent idempotency across the ingest entries" was not met.
+- What changed (backend/app/api/v1/capture.py): normalize filename/mime once before fingerprinting and reuse them for _is_html and ingest, so all capture entries hash the same canonical request. The duplicate normalize block after the fetch branch was removed.
+- Tests (backend/tests/test_capture_entry_idempotency.py): sync replay returns the same signal; different bytes on the same id return 409; sync-then-async and async-then-sync reuse the signal; sync while a job is queued returns 409 without creating a signal; .pptx + application/octet-stream works in both directions; two concurrent sync captures leave one signal.
+- Evidence: with the old code, test_sync_then_async_document_with_ambiguous_mime_reuses_the_signal failed with 409; after the fix pytest tests/test_capture_entry_idempotency.py -q -> 8 passed. Capture-related nine files (capture, unified, jobs, concurrency, entry idempotency, extension upload, URL list, panorama import, raw documents) plus the OpenAPI snapshot -> 75 passed (53.7 s); full backend suite after the change -> 575 passed, 2 skipped (5:10).
+- Not done: the same guarantees on a real Windows client against a deployed API (OPS-side), and the document-upload / URL-paste entries keep their own content-hash and per-URL dedupe contracts rather than a shared submission id. BE-01 parent stays open.
+
+### Multi-URL provenance and theme source counts (BE-05 slice)
+
+- Problem: the signal_sources routes and the theme source_count semantics had no interface tests, so the BE-05 acceptance item (primary plus supplementary URLs, shared-URL dedupe, archived members) was unverified even though the implementation existed.
+- What changed: only backend/tests/test_signal_sources.py; no production code.
+- Tests: a new signal gets exactly one primary source with provenance=primary; a supplementary URL is deduped on normalize_url (case, trailing slash, query), repeats return the same row, and the primary URL posted as supplementary returns the primary row; an archived signal rejects a new source with 409; a role without permission gets 403; a theme's source_count includes a supplementary URL, counts a URL shared by two member signals once, and still counts sources of archived members while signal_frequency excludes them.
+- Evidence: pytest tests/test_signal_sources.py -q -> 5 passed (10.4 s); related theme/clustering/archive files -> 34 passed (21.7 s); full backend suite after the slice -> 580 passed, 2 skipped (4:55).
+- Not done: the real 8-signal/16-source case still needs DOC-02 data, and automatic aggregation consistency explanations remain in BE-05. The parent task stays open.
+
+## 2026-11-24
+
+### Duplicate-signal scan and cleanup on an article URL key (BE-02 slice)
+
+- Problem: grouping duplicates on `url_normalized` drops the whole query string, so two different Baidu/CSDN articles (`/s?id=111` vs `/s?id=222`) were offered as copies of each other — and because the fingerprint's `url` is also query-free, thin rows could be marked `identical` and auto-deleted. The mirror-image bug hid true re-captures: an unknown tracking parameter split one article into two keys while `url_normalized` and the `(重复采集 #n)` title still said "same page".
+- What changed (`signal_dedup.py`, commits `e334993` + `83090a8`):
+  - `article_url_key` groups on the raw URL, keeping content-bearing query params. Campaign keys (`utm_*`, `spm`) are stripped everywhere; share-wrapper keys (`from`, `scene`, `share*`, …) only on `weixin.qq.com`/`baidu.com`, where they are not content-bearing — a global denylist had `?from=phone` vs `?from=laptop` merging as identical on other hosts. Blank values are kept (`?id=` ≠ the bare URL).
+  - Unpairable re-captures (same `url_normalized`, duplicate-marked title, different URL keys) are reported as `kind=url_suspect`, forced `identical=false`, with the raw URLs shown as the difference — a human picks the survivor, never the auto-delete path.
+  - Cleanup recomputes groups server-side, refuses to empty a group, skips signals with pending agent patches, skips signals a confirmed demand cites as evidence (`0eff600` fixed the same failure class for tag purge and re-theming; deleting a cited row makes the demand fail `REQ-DEM-03` with no UI way back), and audits every deletion (field `signal_record`, with duplicate group and kept id).
+- Honesty note: the first draft of this slice had the global denylist and a regression test whose fake kept the query inside `url_normalized` (so it passed against the old buggy grouping too). Both were caught in review and corrected before commit; the rewritten test asserts both rows share `url_normalized` and then expects no group.
+- Evidence: `uv run pytest tests/test_signal_dedup.py tests/test_demands.py tests/test_functions.py -q` → 70 passed (dedup rules, host scoping, suspect fallback, blank values, demand-citation and agent-patch skips, endpoint serialization and cleanup guards); `uv run lint-imports` → 3 kept, 0 broken; `tests/test_openapi_snapshot.py` → 1 passed (path set unchanged, consistent with the kind-only contract change); live dev API `GET /api/v1/signals/duplicates` → 200.
+- Scale measured, not estimated (`scripts/probe_dedup_scan_cost.py`, scratch `eea_bench` on the local PostgreSQL, dropped afterwards; 10,400 signals + 10,400 tags, 700 expected groups): before the candidate prefilter `_load_candidates` 1.06 s and `scan_duplicates` 1.66 s loading every row; after prefiltering to duplicate `url_normalized`/`body_sha256` values, 0.15 s / 0.32 s with the same 700 groups (500 url + 200 body). The script refuses to run against a non-local host.
+- Known limits (deliberate): `url_suspect` depends on the `(重复采集 #n)` title marker — if a re-capture is renamed, the pair is missed on purpose rather than risk merging different articles; the tracking denylist is name-based, so unknown keys still split re-captures (that is the suspect tier's job). Not yet done: review of real-library scan output (`eea_bench` is synthetic; the dev library has one known group).
+
 ## 2026-11-23
 
 ### Production Docker deploy on 10.215.35.10 (2026-11-23)

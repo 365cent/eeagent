@@ -58,9 +58,9 @@ cd backend && uv run lint-imports
 
 | 项 | 当前值 | 校验方式 |
 | --- | --- | --- |
-| 迁移头 | `0022_demand_review_baseline` | `uv run alembic heads` |
-| 修订链 | `0001_init` … `0022`，全部为加法修订，不改已发布迁移 | 发布前 `alembic downgrade -1` + `upgrade head` |
-| 业务表 | 31 张 `eea_*` 表（含 `eea_signal_studio_artifact`、`eea_signal_source`、`eea_stored_object_orphan`） | [test_db_schema.py](../backend/tests/test_db_schema.py) 精确集合断言 |
+| 迁移头 | `0026_maintenance_run` | `uv run alembic heads` |
+| 修订链 | `0001_init` … `0026`，全部为加法修订，不改已发布迁移 | 发布前 `alembic downgrade -1` + `upgrade head` |
+| 业务表 | 32 张 `eea_*` 表（含 `eea_signal_studio_artifact`、`eea_signal_source`、`eea_stored_object_orphan`、`eea_maintenance_run`） | [test_db_schema.py](../backend/tests/test_db_schema.py) 精确集合断言 |
 | 视图 | `eea_v_tech_theme_metrics`、`eea_v_tech_theme_display_tags` | 同上 |
 | 测试库 | 专用 `eea_test`，与开发库 `eea` 分离 | `backend/tests/conftest.py` 会话互斥锁 |
 
@@ -70,6 +70,8 @@ cd backend && uv run lint-imports
 
 | 日期 | 变化 | 影响方 |
 | --- | --- | --- |
+| 2026-11-26 | 新增 `eea_maintenance_run`：orphan_maintenance `--apply` 与删除同一事务写入 scanned/pruned、操作者、起止时间和 resolved/missing_blob/object_keys；dry-run 不写审计；同一命令按 `CAPTURE_JOB_RETENTION_DAYS`（默认 30）删除过期终态任务，payload 仅在无引用且超过 1 小时未写入时删除 | BE-01、OPS-02 |
+| 2026-11-24 | 重复扫描分组改按 `article_url_key`（内容型 query 保留，追踪参数按 host 剔除，空值参数保留）；`DuplicateGroupOut.kind` 扩为 `url \| body \| url_suspect`，`url_suspect` 恒 `identical=false`；cleanup 服务端重算分组、不删空组、跳过 Agent 待确认或被已确认需求引用的信号并逐条审计；候选行由 SQL 预筛加载。路径快照仅存 path，无需更新 | BE-02、FE 证据清理入口 |
 | 2026-11-20 | `POST /api/v1/imports/capture-urls` 的任务写入调用者 `owner_subject`；研究者只能列出/领取自己的任务，`platform_admin` 可跨用户 | FE-02、CC-02、OPS-03 |
 | 2026-11-20 | 文档解析失败（如扫描 PDF）不再生成信号：`POST /signals` 返回 422，原始 blob 保留 | BE-01/BE-12、FE-02 |
 | 2026-11-20 | PDF 需 ≥120 字符可读文本，否则 `ingest_status=failed` 并给出 OCR 指引 | BE-12、FE-11 |

@@ -13,6 +13,7 @@
 7. [Docs TODO](TODO.md)：业务输入、文档维护、验收证据、安装手册、发布包和交接。
 8. [业务与环境输入登记表](INPUT-REGISTER.md)：已收到与仍待提供的材料、责任方、版本/许可和受影响验收项。
 9. 本地开发：仓库根 [README.md](../README.md)；Linux 生产见 [deploy/README.md](../deploy/README.md)。
+10. [项目报告](FINAL-REPORT.md)（2026-11-26）：设计文档、快速开始、带截图的全流程走查与 WBS 进度；事实快照与未证明清单在同一文件。
 
 ## 来源与参考材料
 

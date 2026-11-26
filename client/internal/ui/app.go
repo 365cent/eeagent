@@ -28,7 +28,6 @@ import (
 	"eea/capture/internal/capture"
 	"eea/capture/internal/config"
 	"eea/capture/internal/importdrain"
-	"eea/capture/internal/platform"
 	"eea/capture/internal/queue"
 )
 
@@ -69,18 +68,14 @@ type appState struct {
 	lay     frame
 	rt      *application.Runtime
 
-	edt            *ui.Edit
-	edtManualURL   *ui.Edit
-	edtManualTitle *ui.Edit
-	edtManualBody  *ui.Edit
-	edtAPI         *ui.Edit
-	edtPar         *ui.Edit
-	edtMax         *ui.Edit
-	edtTime        *ui.Edit
-	panelOpen      bool
-	panelNote      string
-	showJobs       bool
-	manualMode     bool
+	edt       *ui.Edit
+	edtAPI    *ui.Edit
+	edtPar    *ui.Edit
+	edtMax    *ui.Edit
+	edtTime   *ui.Edit
+	panelOpen bool
+	panelNote string
+	showJobs  bool
 
 	cfg config.Config
 	dir string
@@ -152,32 +147,14 @@ func newApp(cfg config.Config, dir string) *appState {
 		CtrlStyle(co.ES_MULTILINE|co.ES_AUTOVSCROLL|co.ES_WANTRETURN).
 		WndStyle(co.WS_CHILD|co.WS_VISIBLE|co.WS_TABSTOP).
 		WndExStyle(co.WS_EX_LEFT))
-	app.edtManualURL = manualField(wnd, f.manualURL, false)
-	app.edtManualTitle = manualField(wnd, f.manualTitle, false)
-	app.edtManualBody = manualField(wnd, f.manualBody, true)
 
 	app.edtAPI = panelField(wnd, f.apiField)
 	app.edtPar = panelField(wnd, f.parallelField)
 	app.edtMax = panelField(wnd, f.maxField)
 	app.edtTime = panelField(wnd, f.timeField)
-	app.hideManualFields(true)
 
 	app.events()
 	return app
-}
-
-func manualField(parent ui.Parent, b box, multiline bool) *ui.Edit {
-	ctrlStyle := co.ES_AUTOHSCROLL
-	if multiline {
-		ctrlStyle = co.ES_MULTILINE | co.ES_AUTOVSCROLL | co.ES_WANTRETURN
-	}
-	return ui.NewEdit(parent, ui.OptsEdit().
-		Position(int(b.l)+winScale.x(7), int(b.t)+winScale.y(3)).
-		Width(b.dx()-winScale.x(14)).
-		Height(b.dy()-winScale.y(6)).
-		CtrlStyle(ctrlStyle).
-		WndStyle(co.WS_CHILD|co.WS_TABSTOP).
-		WndExStyle(co.WS_EX_LEFT))
 }
 
 func panelField(parent ui.Parent, b box) *ui.Edit {
@@ -202,9 +179,6 @@ func (a *appState) events() {
 			small: segoeFont(ui.DpiY(11), co.FW_NORMAL),
 		}
 		a.applyEditFont(a.edt)
-		a.applyEditFont(a.edtManualURL)
-		a.applyEditFont(a.edtManualTitle)
-		a.applyEditFont(a.edtManualBody)
 		a.applyEditFont(a.edtAPI)
 		a.applyEditFont(a.edtPar)
 		a.applyEditFont(a.edtMax)
@@ -226,7 +200,7 @@ func (a *appState) events() {
 		_ = a.hwnd.ScreenToClientPt(&pt)
 		if a.lay.header.contains(pt.X, pt.Y) {
 			if a.lay.settings.contains(pt.X, pt.Y) || a.lay.min.contains(pt.X, pt.Y) || a.lay.close.contains(pt.X, pt.Y) ||
-				a.lay.linkNav.contains(pt.X, pt.Y) || a.lay.manualNav.contains(pt.X, pt.Y) || a.lay.jobsNav.contains(pt.X, pt.Y) {
+				a.lay.linkNav.contains(pt.X, pt.Y) || a.lay.jobsNav.contains(pt.X, pt.Y) {
 				return co.HT_CLIENT
 			}
 			return co.HT_CAPTION
@@ -317,17 +291,9 @@ func (a *appState) click(pt win.POINT) {
 		a.invalidate()
 	case !a.panelOpen && f.linkNav.contains(pt.X, pt.Y):
 		a.showJobs = false
-		a.manualMode = false
 		a.notice = ""
 		a.showInputControls()
 		_, _ = a.edt.Hwnd().SetFocus()
-		a.invalidate()
-	case !a.panelOpen && f.manualNav.contains(pt.X, pt.Y):
-		a.showJobs = false
-		a.manualMode = true
-		a.notice = "手工补录 · 保留原 URL 并粘贴正文，提交后标记待复核"
-		a.showInputControls()
-		_, _ = a.edtManualURL.Hwnd().SetFocus()
 		a.invalidate()
 	case !a.panelOpen && f.jobsNav.contains(pt.X, pt.Y):
 		a.showJobs = true
@@ -347,11 +313,7 @@ func (a *appState) click(pt win.POINT) {
 	case !a.panelOpen && a.showJobs && a.clickJobAction(pt, f):
 		return
 	case !a.panelOpen && !a.showJobs && f.send.contains(pt.X, pt.Y):
-		if a.manualMode {
-			a.submitManualFallback()
-		} else {
-			a.submitText()
-		}
+		a.submitText()
 	}
 }
 
@@ -364,7 +326,7 @@ func (a *appState) hitButton(pt win.POINT) bool {
 		return f.save.contains(pt.X, pt.Y) || f.cancel.contains(pt.X, pt.Y) ||
 			f.engineRow.contains(pt.X, pt.Y) || f.headlessRow.contains(pt.X, pt.Y)
 	}
-	if f.linkNav.contains(pt.X, pt.Y) || f.manualNav.contains(pt.X, pt.Y) || f.jobsNav.contains(pt.X, pt.Y) {
+	if f.linkNav.contains(pt.X, pt.Y) || f.jobsNav.contains(pt.X, pt.Y) {
 		return true
 	}
 	if a.showJobs {
@@ -401,32 +363,14 @@ func (a *appState) closePanel() {
 	a.panelOpen = false
 	a.hidePanel(true)
 	a.showInputControls()
-	if a.showJobs {
-		_, _ = a.edt.Hwnd().SetFocus()
-	} else if a.manualMode {
-		_, _ = a.edtManualURL.Hwnd().SetFocus()
-	} else {
-		_, _ = a.edt.Hwnd().SetFocus()
-	}
+	_, _ = a.edt.Hwnd().SetFocus()
 	a.invalidate()
 }
 
 func (a *appState) hideInputControls() {
-	for _, e := range []*ui.Edit{a.edt, a.edtManualURL, a.edtManualTitle, a.edtManualBody} {
+	for _, e := range []*ui.Edit{a.edt} {
 		if e != nil {
 			_ = e.Hwnd().ShowWindow(co.SW_HIDE)
-		}
-	}
-}
-
-func (a *appState) hideManualFields(hide bool) {
-	cmd := co.SW_SHOW
-	if hide {
-		cmd = co.SW_HIDE
-	}
-	for _, e := range []*ui.Edit{a.edtManualURL, a.edtManualTitle, a.edtManualBody} {
-		if e != nil {
-			_ = e.Hwnd().ShowWindow(cmd)
 		}
 	}
 }
@@ -440,12 +384,6 @@ func (a *appState) showInputControls() {
 		a.hideInputControls()
 		return
 	}
-	if a.manualMode {
-		_ = a.edt.Hwnd().ShowWindow(co.SW_HIDE)
-		a.hideManualFields(false)
-		return
-	}
-	a.hideManualFields(true)
 	_ = a.edt.Hwnd().ShowWindow(co.SW_SHOW)
 }
 
@@ -510,10 +448,6 @@ func (a *appState) savePanel() {
 }
 
 func (a *appState) submitText() {
-	if a.manualMode {
-		a.submitManualFallback()
-		return
-	}
 	if a.busy > 0 || a.captureQueued() {
 		a.notice = "当前任务尚未结束，请等待后再提交"
 		a.invalidate()
@@ -587,56 +521,6 @@ func (a *appState) submitDropped(files []string) {
 			}
 		}
 	})
-}
-
-func (a *appState) submitManualFallback() {
-	if a.busy > 0 || a.captureQueued() {
-		a.notice = "当前队列仍有任务，请完成或取消排队项目后再补录"
-		a.invalidate()
-		return
-	}
-	rawURL := strings.TrimSpace(a.edtManualURL.Text())
-	title := strings.TrimSpace(a.edtManualTitle.Text())
-	body := strings.TrimSpace(a.edtManualBody.Text())
-	parsed, err := url.Parse(rawURL)
-	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
-		a.notice = "请输入有效的原始 http(s) URL"
-		a.invalidate()
-		return
-	}
-	if title == "" || body == "" {
-		a.notice = "手工补录需要标题和正文"
-		a.invalidate()
-		return
-	}
-	if channel := platform.InferChannel(rawURL); channel != "wechat_mp" {
-		a.notice = "此补录入口用于微信正文；其他来源请使用链接或文件采集"
-		a.invalidate()
-		return
-	}
-	a.notice = "手工补录 · 保留原 URL 并粘贴正文，提交后标记待复核"
-	a.showJobs = true
-	a.showInputControls()
-	a.startBatch(func(q *queue.Queue) {
-		q.SubmitManualFallback(rawURL, title, body)
-	})
-}
-
-func (a *appState) reopenManualFallback(job queue.Job) {
-	if a.busy > 0 || a.captureQueued() {
-		a.notice = "当前队列仍有任务，请稍后补录"
-		a.invalidate()
-		return
-	}
-	a.manualMode = true
-	a.showJobs = false
-	a.notice = "手工补录 · 粘贴正文后提交；这不是浏览器采集成功"
-	a.edtManualURL.SetText(job.URL)
-	a.edtManualTitle.SetText(job.Title)
-	a.edtManualBody.SetText("")
-	a.showInputControls()
-	_, _ = a.edtManualURL.Hwnd().SetFocus()
-	a.invalidate()
 }
 
 func (a *appState) startBatch(submit func(*queue.Queue)) bool {
@@ -850,10 +734,6 @@ func (a *appState) clickJobAction(pt win.POINT, f frame) bool {
 			}
 			return true
 		}
-		if f.jobSecondary[row].contains(pt.X, pt.Y) && jobSecondaryAction(job) != "" {
-			a.reopenManualFallback(job)
-			return true
-		}
 	}
 	return false
 }
@@ -879,7 +759,7 @@ func (a *appState) retryJob(id int) {
 	if err := q.RetryFailed(id); err != nil {
 		q.Close()
 		a.endLocalCapture()
-		a.notice = "此项目无法安全重试；可改用手工补录或检查服务端任务"
+		a.notice = "此项目无法安全重试；请检查服务端任务后改用链接或文件重新采集"
 		a.invalidate()
 		return
 	}
@@ -941,11 +821,7 @@ func (a *appState) canSend() bool {
 	if a.busy > 0 || a.captureQueued() {
 		return false
 	}
-	if !a.manualMode {
-		return a.pendingLines() > 0
-	}
-	return platform.InferChannel(a.edtManualURL.Text()) == "wechat_mp" &&
-		strings.TrimSpace(a.edtManualTitle.Text()) != "" && strings.TrimSpace(a.edtManualBody.Text()) != ""
+	return a.pendingLines() > 0
 }
 
 func (a *appState) statusText() string {
@@ -1010,9 +886,6 @@ func jobStatusLabel(job queue.Job) string {
 		}
 		return label
 	case queue.StatusDone:
-		if job.Kind == queue.KindManualFallback {
-			return "手工补录·待复核"
-		}
 		if job.Kind == queue.KindFile {
 			return "已上传"
 		}
@@ -1021,9 +894,6 @@ func jobStatusLabel(job queue.Job) string {
 		}
 		return "成功"
 	case queue.StatusFailed:
-		if job.Kind == queue.KindManualFallback {
-			return "待核对"
-		}
 		return "失败"
 	case queue.StatusCanceled:
 		return "已取消"
@@ -1065,10 +935,6 @@ func jobPrimaryAction(job queue.Job) string {
 }
 
 func jobSecondaryAction(job queue.Job) string {
-	if job.Status == queue.StatusFailed && (job.Kind == queue.KindURL || job.Kind == queue.KindArchive) &&
-		platform.InferChannel(job.URL) == "wechat_mp" {
-		return "微信补录"
-	}
 	return ""
 }
 

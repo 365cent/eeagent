@@ -26,12 +26,14 @@ import (
 // Run dispatches a subcommand; it returns a process exit code.
 func Run(args []string, out io.Writer, version string) int {
 	if len(args) == 0 {
-		fmt.Fprintln(out, "usage: capture [upload|auth|doctor|version]")
+		fmt.Fprintln(out, "usage: capture [upload|queue|auth|doctor|version]")
 		return 2
 	}
 	switch args[0] {
 	case "upload":
 		return runUpload(args[1:], out)
+	case "queue":
+		return runQueue(args[1:], out)
 	case "doctor":
 		return runDoctor(args[1:], out)
 	case "auth":
@@ -58,6 +60,7 @@ func usage(out io.Writer) {
   capture upload --file F       upload raw documents
   capture upload --resume       resume persisted unfinished jobs
   capture upload --drain-server   process server URL batches (awaiting_client)
+  capture queue prune [--dry-run] [--days N]  drop old finished jobs and stray snapshots
   capture doctor                check browser and API
   capture auth set              store capture token in Windows Credential Manager
   capture auth status           show token source
@@ -73,6 +76,70 @@ func (s *stringList) String() string { return strings.Join(*s, ",") }
 func (s *stringList) Set(v string) error {
 	*s = append(*s, v)
 	return nil
+}
+
+func runQueue(args []string, out io.Writer) int {
+	if len(args) == 0 {
+		fmt.Fprintln(out, "usage: capture queue prune [--dry-run] [--days N] [--config-dir dir]")
+		return 2
+	}
+	switch args[0] {
+	case "prune":
+		return runQueuePrune(args[1:], out)
+	default:
+		fmt.Fprintf(out, "unknown queue command %q\n", args[0])
+		return 2
+	}
+}
+
+func runQueuePrune(args []string, out io.Writer) int {
+	fs := flag.NewFlagSet("queue prune", flag.ContinueOnError)
+	fs.SetOutput(out)
+	dryRun := fs.Bool("dry-run", false, "report removable jobs and payloads without deleting them")
+	days := fs.Int("days", 0, "override queue_history_retention_days for this run")
+	configDir := fs.String("config-dir", "", "directory holding config.json")
+	if err := fs.Parse(args); err != nil {
+		return 2
+	}
+	dir := *configDir
+	if dir == "" {
+		dir, _ = os.Getwd()
+	}
+	cfg, err := config.Load(dir)
+	if err != nil {
+		fmt.Fprintf(out, "config: %v\n", err)
+		return 1
+	}
+	retain := cfg.QueueHistoryRetention()
+	if *days > 0 {
+		retain = time.Duration(*days) * 24 * time.Hour
+	}
+	if retain <= 0 {
+		fmt.Fprintln(out, "retention is disabled (set --days or queue_history_retention_days in config)")
+		return 2
+	}
+	stateDir := config.QueueStateDir(dir, cfg)
+	q := queue.New(nil, nil, queue.Options{
+		StateDir:                  stateDir,
+		HistoryRetention:          retain,
+		DisableAutoPruneOnRestore: true,
+	})
+	if err := q.Restore(); err != nil {
+		fmt.Fprintf(out, "queue restore: %v\n", err)
+		return 1
+	}
+	report, err := q.PruneHistory(*dryRun)
+	if err != nil {
+		fmt.Fprintf(out, "queue prune: %v\n", err)
+		return 1
+	}
+	mode := "applied"
+	if *dryRun {
+		mode = "dry-run"
+	}
+	fmt.Fprintf(out, "queue %s: removed_jobs=%d removed_payloads=%d orphan_payloads=%d freed_bytes=%d\n",
+		mode, report.RemovedJobs, report.RemovedPayloads, report.OrphanPayloads, report.RemovedPayloadBytes)
+	return 0
 }
 
 func runUpload(args []string, out io.Writer) int {

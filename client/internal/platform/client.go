@@ -105,16 +105,6 @@ type Signal struct {
 	Channel       string `json:"channel_code"`
 }
 
-// ManualFallbackInput is a researcher-pasted body for a source that could not
-// be captured in the browser. It is explicitly submitted as pending review and
-// must not be presented as a browser capture.
-type ManualFallbackInput struct {
-	URL     string
-	Title   string
-	Channel string
-	Body    string
-}
-
 // CaptureResult is the unified POST /capture response. The client only needs
 // the nested signal for its existing job display.
 type CaptureResult struct {

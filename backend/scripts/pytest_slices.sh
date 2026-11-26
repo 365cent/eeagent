@@ -51,6 +51,8 @@ case "$slice" in
       tests/test_capture.py \
       tests/test_capture_unified.py \
       tests/test_capture_jobs.py \
+      tests/test_capture_job_concurrency.py \
+      tests/test_capture_entry_idempotency.py \
       tests/test_capture_extension_upload.py \
       tests/test_url_list_capture.py \
       "$@"

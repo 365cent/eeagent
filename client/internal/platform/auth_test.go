@@ -20,9 +20,7 @@ func TestBearerAuthorizationHeader(t *testing.T) {
 	defer srv.Close()
 
 	client := NewWithOptions(srv.URL, 8, httpx.ClientOptions{}, "upload-token-abc")
-	_, err := client.CreateManualFallback(context.Background(), ManualFallbackInput{
-		URL: "https://example.com/a", Title: "t", Channel: "web", Body: "body",
-	})
+	_, err := client.Capture(context.Background(), CaptureInput{URL: "https://example.com/a", Archive: []byte("<html>a</html>"), Filename: "archive.html", SubmissionID: "sub-1"})
 	if err != nil {
 		t.Fatal(err)
 	}

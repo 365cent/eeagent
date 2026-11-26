@@ -63,7 +63,14 @@ from app.services.html_snapshot import (
     parse_html_snapshot,
     prepare_archive_replay_html,
 )
-from app.services.judgment import judge_signal_type, judge_stage, rank_theme_overlaps, select_best_theme
+from app.services.judgment import (
+    aggregation_structured_basis,
+    judge_signal_type,
+    judge_stage,
+    rank_theme_overlaps,
+    select_best_theme,
+    structured_basis_consistent,
+)
 from app.services.signal_sources import add_supplementary_url, list_sources
 from app.services.signal_recaption import recaption_signal_article
 from app.services.tagging_guard import assert_expected_signal_revision, human_corrected_fields
@@ -408,6 +415,15 @@ async def cleanup_duplicate_signals(
             skipped.append(
                 DuplicateCleanupSkipOut(
                     id=signal_id, reason="该信号存在研究助手的待确认变更，请先在助手中处理"
+                )
+            )
+            continue
+        citing_demand = await confirmed_demand_citing(db, signal_id, signal.tech_theme_id)
+        if citing_demand:
+            skipped.append(
+                DuplicateCleanupSkipOut(
+                    id=signal_id,
+                    reason=f"该信号被已确认需求「{citing_demand}」引用为证据，请先调整需求引用（REQ-DEM-03）",
                 )
             )
             continue
@@ -814,11 +830,22 @@ async def theme_aggregate_preview(signal_id: uuid.UUID, db: AsyncSession = Depen
         for theme_id, overlap in ranked
     ]
     recommended, reason = select_best_theme(theme_tags, tag_names)
+    basis_reason = None
+    if recommended is not None:
+        consistent, basis_text = structured_basis_consistent(
+            theme_tags.get(recommended, set()), tag_names
+        )
+        if not consistent:
+            recommended = None
+            reason = basis_text
+            basis_reason = basis_text
     return ThemeAggregatePreview(
         candidates=candidates,
         recommended_theme_id=recommended,
         can_auto_assign=recommended is not None,
         reason=reason,
+        structured_basis=aggregation_structured_basis(tag_names),
+        basis_reason=basis_reason,
     )
 
 

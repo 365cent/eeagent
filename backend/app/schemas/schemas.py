@@ -644,6 +644,8 @@ class ThemeAggregatePreview(BaseModel):
     recommended_theme_id: uuid.UUID | None = None
     can_auto_assign: bool
     reason: str
+    structured_basis: dict[str, str | None] | None = None
+    basis_reason: str | None = None
 
 
 class DemandCreate(RefCodeValidated):

@@ -1,8 +1,8 @@
 # Linux 内网生产实施清单
 
-更新：2026-11-17。本目录承载部署实施及后续实际配置；已有 API/Next 前台服务单元模板与配置说明，但**尚未交付经 Linux 验证的安装脚本或上线产物**。项目顺序见 [总清单](../TODO.md)，业务验收见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。模板入口：[部署说明](README.md)。
+更新：2026-11-26。本目录承载部署实施及后续实际配置。**2026-11-23 已在 10.215.35.10:8090 完成 Docker Compose 生产部署并运行**（健康检查全绿、迁移至 0022，证据见[交付记录](../docs/DELIVERY-RECORD.md#2026-11-23)）；TLS/可信身份、模型网关凭据与备份恢复演练仍属未验收状态。项目顺序见 [总清单](../TODO.md)，业务验收见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。模板入口：[部署说明](README.md)。
 
-默认单主机方案：**Docker Compose**（`deploy/docker-compose.yml`）— PostgreSQL、迁移任务、API、worker、Next、Nginx；持久卷 `pgdata` 与 `objectstore`。systemd 单元仍作非容器备选；Compose 为 README 主路径。Worker 与 API 共享对象目录；Linux 客户环境验收仍属 OPS-06。
+默认单主机方案：**Docker Compose**（`deploy/docker-compose.yml`）— PostgreSQL、迁移任务、API、worker、Next、Nginx；持久卷 `pgdata` 与 `objectstore`。systemd 单元已移除（2026-11-20 决策，生产仅用 Compose）。Worker 与 API 共享对象目录；Linux 客户环境验收仍属 OPS-06。
 
 ## OPS-01 环境与数据库初始化
 
@@ -16,9 +16,12 @@
 
 ## OPS-02 可重现离线交付
 
-- 2026-11-20 生产方式定为 Docker Compose：新增单一入口 `deploy/build.sh`（可选代理、自动生成 .env、`up -d --build --wait`）、`migrate.sh` / `backup.sh` / `restore.sh`；compose 增加 healthcheck、migrate 一次性服务、maintenance 的 ops profile 与 PIP_INDEX_URL 构建参数；Dockerfile 后端镜像按 `PIP_INDEX_URL` 走内网镜像源。离线站点包与 systemd 单元已移除（git 历史保留）。主机到位后仍需断网构建、空库迁移、备份恢复与 10k 性能实装验证。
+- 2026-11-23 已执行生产部署：`bash deploy/build.sh 10.215.8.87` 在 Ubuntu 22.04 主机 `10.215.35.10`（外部端口 8090，`EEA_HTTP_PORT`）构建并启动 postgres/migrate/api/worker/web/nginx，健康检查全绿、`alembic_version=0022`，内网可访问 `/`、`/docs`、`/openapi.json`、`/healthz`；`/readyz` 报告 `semantic_gateway: degraded`（网关凭据未配）。证据见[交付记录](../docs/DELIVERY-RECORD.md#2026-11-23)。
+- 2026-11-20 生产方式定为 Docker Compose：新增单一入口 `deploy/build.sh`（可选代理、自动生成 .env、`up -d --build --wait`）、`migrate.sh` / `backup.sh` / `restore.sh`；compose 增加 healthcheck、migrate 一次性服务、maintenance 的 ops profile 与 PIP_INDEX_URL 构建参数；Dockerfile 后端镜像按 `PIP_INDEX_URL` 走内网镜像源。离线站点包与 systemd 单元已移除（git 历史保留）。仍需断网重建、干净空库迁移、备份恢复与 10k 性能实装验证。
+- 2026-11-26 维护命令语义：`python -m app.services.orphan_maintenance` 默认改为 dry-run（只计数不删除），ops profile 的 `maintenance` 服务显式传 `--apply` 保持原有实际清理行为；Windows 开发机直接运行该命令的 Proactor 事件循环错误（走查 O-8）已在入口修复，Linux 容器路径不受影响。
+- 2026-11-26 维护审计：迁移 `0026_maintenance_run` 记录每次 `--apply` 的计数、操作者与起止时间，dry-run 不写；下次生产升级需应用到 0026，升级后可在该表核对维护运行；`--apply` 同时按 `CAPTURE_JOB_RETENTION_DAYS`（默认 30）清理终态任务，payload 仅在无引用且超过 1 小时未写入时删除。
 
-- [ ] P0 · 未开始 · 依赖 OPS-01、BE-16、FE-12 的构建结果（可逐次集成）。
+- [ ] P0 · 部分实现（单主机 Compose 已于 2026-11-23 上线运行）· 依赖 OPS-01、BE-16、FE-12 的构建结果（可逐次集成）。
 - 来源：WBS 1.6.1/1.6.4。
 - 固定 Python 依赖及 Linux 对应 wheel、Node/pnpm 与 lockfile、Go Windows 工具链和第三方资源；不得把 macOS/Windows wheel 混作 Linux 包。
 - 在受控有源环境生成 Linux 发布目录：后端运行依赖、迁移、Next 生产输出/静态资源、worker、服务模板、版本/校验和/依赖清单。

@@ -186,6 +186,8 @@ export type ThemeAggregatePreview = {
   recommended_theme_id: string | null
   can_auto_assign: boolean
   reason: string
+  structured_basis?: Record<string, string | null> | null
+  basis_reason?: string | null
 }
 
 export type TagCandidateDetail = {

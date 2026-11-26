@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     capture_client_claim_window_seconds: int = Field(default=600, ge=60)
     capture_client_max_claims_per_window: int = Field(default=60, ge=1)
     capture_client_dist_dir: str = ""
+    capture_job_retention_days: int = Field(default=30, ge=1)
     db_host: str = "127.0.0.1"
     db_port: int = 54329
     db_user: str = "eea"

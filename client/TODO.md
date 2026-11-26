@@ -1,6 +1,6 @@
 # Capture Client 实施清单
 
-更新：2026-11-17。生产服务端已选 Linux 内网；本目录仍是研究者 Windows 电脑上的 Go 采集程序。公网与登录浏览器留在用户终端。总顺序见 [项目清单](../TODO.md)，原文映射见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。
+更新：2026-11-26。生产服务端已选 Linux 内网；本目录仍是研究者 Windows 电脑上的 Go 采集程序。公网与登录浏览器留在用户终端。总顺序见 [项目清单](../TODO.md)，原文映射见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。
 
 ## 现状和边界
 
@@ -32,7 +32,7 @@
 - 入口：[client.go](internal/platform/client.go)、[queue.go](internal/queue/queue.go)、[cli.go](internal/cli/cli.go)。
 - 网页异步上传、幂等重试、本地持久队列和 Retry-After 切片已交付；具体实现与检查证据见[交付记录](../docs/DELIVERY-RECORD.md#cc-02--asynchronous-capture-and-durable-client-queue-slice)。CC-02 验收仍未完成。
 - 2026-11-19 Windows 真机：`upload --url --headless` 经 `POST /capture/jobs` 完成一次真实采集；服务端终态 succeeded 后才显示成功。跨重启恢复、取消与失败重试仍待。
-- 服务端幂等和原子对象写入见 BE-01；部署必须升级到当前 Alembic head（现为 0022_demand_review_baseline）。旧端点没有幂等键时不自动重试不确定结果。
+- 服务端幂等和原子对象写入见 BE-01；部署必须升级到当前 Alembic head（现为 0026_maintenance_run）。旧端点没有幂等键时不自动重试不确定结果。
 - 文档文件队列已迁至统一任务（见[交付记录](../docs/DELIVERY-RECORD.md#be-01--fe-02--cc-02--durable-document-and-html-ingest-slice)）；在 Windows 验证已接入的安全重试和本地未开始任务取消；设计终态历史保留与清理；并在 Windows 真机验证客户端队列重启恢复。服务端 worker 已可轮询处理，但只有收到 succeeded 终态后才显示采集完成。
 - 分开抓取超时、上传超时和服务器处理超时；上传完成后继续轮询，不能提前显示“入库成功”。
 - 明确的 4xx 验证错误不进入自动重试；429/5xx 有限重试并优先采用 `Retry-After`（最多等待 10 分钟）。401/403身份提示仍待身份接入。
@@ -59,11 +59,11 @@
 - [ ] P0 · 部分实现 · 依赖 CC-01/02/03、FE-02。
 - 来源：Word §2.1；REQ-SIG-10/11；WBS 1.3.2。
 - 入口：[ui/](internal/ui/)、[queue.go](internal/queue/queue.go)。
-- 已有逐项状态、打开信号、安全重试、本地排队取消与微信原 URL 手工补录。剩余工作为核对 Windows GUI 的状态与真实 API 终态，覆盖多个文件与重启恢复。
+- 已有逐项状态、打开信号、安全重试与本地排队取消。剩余工作为核对 Windows GUI 的状态与真实 API 终态，覆盖多个文件与重启恢复。
 - 2026-11-19 Windows 真机：CLI 路径已打通 Edge + SingleFile + 任务轮询；GUI 状态、多个文件与重启恢复仍待真机走查。
 - GUI 每 20 秒领取平台导入面排队的 `awaiting_client` 链接任务，在本机浏览器采集后回传；与本地队列互斥共用浏览器，关闭窗口或取消时释放未完成的领取任务。
 - Windows 验证一项失败后其他项可继续处理，已被服务器接受的任务保持可追踪。补齐复制脱敏诊断的操作和验收。
-- 微信失败提示在平台保留原 URL 粘贴正文；明确这是补救而非已成功抓取。
+- 2026-11-25 移除客户端「微信补录」：微信链接只走普通浏览器采集，验证失败按普通失败处理，不再提供手工粘贴正文入口。
 - 验收：真实 API 下 GUI/CLI 同等可追溯，操作结果重启后可见；无虚假成功消息。
 
 ## CC-05 扩展协同

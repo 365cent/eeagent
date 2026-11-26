@@ -68,6 +68,8 @@ type Browser struct {
 	profile string
 	stderr  *tailBuffer
 	owned   bool
+	// ephemeralProfile is true when UserDataDir was empty and profile lives under os.TempDir.
+	ephemeralProfile bool
 
 	devtoolsHost    string
 	singleFileExtID string
@@ -112,6 +114,7 @@ func Launch(ctx context.Context, opts Options) (*Browser, error) {
 		// Many news sites block headless loads (chrome-error://); extension mode needs a visible window.
 		opts.Headless = false
 	}
+	ephemeralProfile := opts.UserDataDir == ""
 	profile := opts.UserDataDir
 	if profile == "" {
 		tmp, err := os.MkdirTemp("", "eea-capture-profile-*")
@@ -187,7 +190,7 @@ func Launch(ctx context.Context, opts Options) (*Browser, error) {
 		return nil, fmt.Errorf("start %s: %w", exe, err)
 	}
 
-	b := &Browser{opts: opts, cmd: cmd, profile: absProfile, stderr: tail, owned: true}
+	b := &Browser{opts: opts, cmd: cmd, profile: absProfile, stderr: tail, owned: true, ephemeralProfile: ephemeralProfile}
 	port, path, err := waitDevToolsPort(ctx, portFile, tail, opts.LaunchWait)
 	if err != nil {
 		_ = cmd.Process.Kill()
@@ -297,6 +300,9 @@ func (b *Browser) Close() error {
 	if b.owned && b.cmd != nil && b.cmd.Process != nil {
 		_ = b.cmd.Process.Kill()
 		_, _ = b.cmd.Process.Wait()
+	}
+	if b.ephemeralProfile && b.profile != "" {
+		_ = os.RemoveAll(b.profile)
 	}
 	return nil
 }

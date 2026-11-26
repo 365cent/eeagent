@@ -24,7 +24,6 @@ const (
 	KindURL Kind = iota
 	KindFile
 	KindArchive
-	KindManualFallback
 )
 
 // Status is a job lifecycle state.
@@ -56,7 +55,6 @@ type Job struct {
 	EvidenceState string
 	captureURL    string
 	archive       []byte
-	manualBody    []byte
 	hasPayload    bool
 	Status        Status
 	Attempts      int
@@ -73,7 +71,6 @@ type Job struct {
 type Uploader interface {
 	Capture(ctx context.Context, in platform.CaptureInput) (*platform.Signal, error)
 	SubmitFileJob(ctx context.Context, in platform.FileJobInput) (*platform.Signal, error)
-	CreateManualFallback(ctx context.Context, in platform.ManualFallbackInput) (*platform.Signal, error)
 	RetryCaptureJob(ctx context.Context, jobID string) (*platform.Signal, error)
 	WaitCaptureJobWithProgress(ctx context.Context, jobID string, onProgress platform.CaptureJobProgressFunc) (*platform.Signal, error)
 }
@@ -85,7 +82,12 @@ type Options struct {
 	Timeout       time.Duration
 	UploadTimeout time.Duration // files/archives may be up to 120 MiB
 	StateDir      string        // optional durable queue directory; call Restore before Start
-	OnUpdate      func(Job)
+	// HistoryRetention drops terminal jobs and stray payload files older than this
+	// on Restore (unless DisableAutoPruneOnRestore). Zero disables pruning.
+	HistoryRetention time.Duration
+	// DisableAutoPruneOnRestore keeps history intact on Restore; call PruneHistory explicitly.
+	DisableAutoPruneOnRestore bool
+	OnUpdate                  func(Job)
 }
 
 // Queue is a worker pool shared by the CLI and the GUI.
@@ -178,21 +180,6 @@ func (q *Queue) SubmitArchive(path, rawURL string) int {
 	return q.submit(&Job{Kind: KindArchive, Path: path, URL: rawURL})
 }
 
-// SubmitManualFallback submits a user-pasted source body. It is stored as a
-// private queue payload so a queued fallback can survive an application restart.
-// The API request itself is never retried automatically because POST /signals
-// does not expose an idempotency key.
-func (q *Queue) SubmitManualFallback(rawURL, title, body string) int {
-	return q.submit(&Job{
-		Kind:       KindManualFallback,
-		URL:        strings.TrimSpace(rawURL),
-		Title:      strings.TrimSpace(title),
-		Channel:    platform.InferChannel(rawURL),
-		manualBody: []byte(body),
-		Bytes:      len(body),
-	})
-}
-
 func (q *Queue) submit(job *Job) int {
 	q.sendMu.RLock()
 	defer q.sendMu.RUnlock()
@@ -226,29 +213,6 @@ func (q *Queue) submit(job *Job) int {
 	job.Status = StatusQueued
 	job.Stage = "queued"
 	job.QueuedAt = time.Now()
-	if job.Kind == KindManualFallback {
-		if q.opts.StateDir != "" {
-			if err := ensurePrivateDir(filepath.Join(q.opts.StateDir, "payloads")); err != nil {
-				job.Status = StatusFailed
-				job.Err = safeDiagnostic(fmt.Sprintf("persist manual fallback body: %v", err))
-				job.FinishedAt = time.Now()
-				q.jobs = append(q.jobs, job)
-				q.mu.Unlock()
-				q.notify(*job)
-				return job.ID
-			}
-			if err := atomicWriteFile(q.payloadPath(job.ID), job.manualBody, 0o600); err != nil {
-				job.Status = StatusFailed
-				job.Err = safeDiagnostic(fmt.Sprintf("persist manual fallback body: %v", err))
-				job.FinishedAt = time.Now()
-				q.jobs = append(q.jobs, job)
-				q.mu.Unlock()
-				q.notify(*job)
-				return job.ID
-			}
-			job.hasPayload = true
-		}
-	}
 	q.jobs = append(q.jobs, job)
 	if (job.Kind == KindURL || job.Kind == KindArchive || job.Kind == KindFile) && job.SubmissionID == "" {
 		job.Status = StatusFailed
@@ -392,7 +356,6 @@ func (q *Queue) Snapshot() []Job {
 	for _, j := range q.jobs {
 		snapshot := *j
 		snapshot.archive = nil
-		snapshot.manualBody = nil
 		out = append(out, snapshot)
 	}
 	return out
@@ -494,7 +457,7 @@ func (q *Queue) runJob(job *Job) {
 			}
 			q.mu.Unlock()
 		}
-		if job.Kind == KindManualFallback || !retryable(err) || attempt == q.opts.Retries+1 {
+		if !retryable(err) || attempt == q.opts.Retries+1 {
 			break
 		}
 		time.Sleep(retryDelay(err, attempt))
@@ -549,22 +512,6 @@ func (q *Queue) attempt(ctx context.Context, job *Job) error {
 	}
 
 	switch job.Kind {
-	case KindManualFallback:
-		if len(job.manualBody) == 0 {
-			return errors.New("manual fallback body is empty")
-		}
-		q.setStage(job, "uploading")
-		sig, err := q.api.CreateManualFallback(ctx, platform.ManualFallbackInput{
-			URL:     job.URL,
-			Title:   job.Title,
-			Channel: job.Channel,
-			Body:    string(job.manualBody),
-		})
-		if err != nil {
-			return err
-		}
-		q.recordCaptureSignal(job, sig)
-		return nil
 	case KindFile:
 		q.setStage(job, "uploading")
 		info, err := os.Stat(job.Path)
@@ -769,7 +716,7 @@ func (q *Queue) finish(job *Job, err error) {
 		job.Status = StatusFailed
 		job.Stage = "failed"
 		job.Err = safeDiagnostic(err.Error())
-		job.RetrySafe = isSafeManualRetry(job, err)
+		job.RetrySafe = isSafeRetry(job, err)
 	} else {
 		job.Status = StatusDone
 		job.Stage = "done"
@@ -800,7 +747,6 @@ func (q *Queue) finish(job *Job, err error) {
 
 func (q *Queue) notify(job Job) {
 	job.archive = nil
-	job.manualBody = nil
 	if q.opts.OnUpdate != nil {
 		q.opts.OnUpdate(job)
 	}
@@ -810,15 +756,15 @@ func initialStage(kind Kind) string {
 	switch kind {
 	case KindURL:
 		return "capturing"
-	case KindFile, KindArchive, KindManualFallback:
+	case KindFile, KindArchive:
 		return "uploading"
 	default:
 		return "queued"
 	}
 }
 
-func isSafeManualRetry(job *Job, err error) bool {
-	if job.Kind == KindFile || job.Kind == KindManualFallback {
+func isSafeRetry(job *Job, err error) bool {
+	if job.Kind == KindFile {
 		return false
 	}
 	var terminal *platform.CaptureJobStatusError

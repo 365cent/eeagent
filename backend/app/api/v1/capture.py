@@ -178,12 +178,20 @@ async def capture(
             )
         channel_code = normalized_channel
 
+    # Normalize once so /capture and /capture/jobs agree on the fingerprint for
+    # the same bytes (a .pptx sent as application/octet-stream is still PPTX).
+    filename = file.filename if file is not None and data else None
+    mime = (
+        normalize_document_mime(filename, file.content_type)
+        if file is not None and data
+        else None
+    )
     via = "upload" if data else "server-fetch"
     fingerprint = _submission_fingerprint(
         url=url,
         data=data,
-        filename=file.filename if data and file is not None else None,
-        mime=file.content_type if data and file is not None else None,
+        filename=filename,
+        mime=mime,
         channel_code=channel_code,
         publisher=publisher,
         source_label=source_label,
@@ -229,13 +237,6 @@ async def capture(
             raise HTTPException(422, str(exc)) from exc
         data, filename, mime = page.data, page.filename, page.content_type
         url = page.final_url
-    else:
-        filename = file.filename if file is not None else None
-        mime = (
-            normalize_document_mime(filename, file.content_type)
-            if file is not None
-            else None
-        )
 
     if len(data) > get_settings().doc_raw_upload_max_bytes:
         raise HTTPException(413, f"capture file exceeds {get_settings().doc_raw_upload_max_bytes} bytes")

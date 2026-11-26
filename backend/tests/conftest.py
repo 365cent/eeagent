@@ -73,7 +73,8 @@ _ADMIN_DSN = (
 _TRUNCATE_SQL = text(
     "TRUNCATE TABLE eea_agent_event, eea_agent_message, eea_agent_patch, eea_agent_run, eea_agent_memory, "
     "eea_agent_session, eea_document_chunk, eea_document_figure, "
-    "eea_chain_report, eea_embedding_cache, eea_signal_source, eea_stored_object_orphan, "
+    "eea_maintenance_run, eea_chain_report, eea_embedding_cache, eea_signal_source, "
+    "eea_stored_object_orphan, "
     "eea_panorama_import_url, eea_panorama_import_batch, "
     "eea_access_log, eea_capture_client_claim, eea_capture_job, eea_document, eea_signal_tag, eea_signal, "
     "eea_correction_audit, "

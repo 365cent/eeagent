@@ -10,7 +10,13 @@ import pytest
 from app.services import signal_dedup
 from app.services.signal_dedup import fingerprint, group_signals, keep_priority
 from app.services.tagging import normalize_url
-from tests.support import create_signal
+from tests.support import (
+    DEMAND_STEP_KEYS,
+    assign_signal_theme,
+    create_signal,
+    create_theme,
+    set_signal_tags,
+)
 
 pytestmark = [pytest.mark.anyio, pytest.mark.db]
 
@@ -280,6 +286,89 @@ async def test_scan_endpoint_serializes_a_suspect_group(client):
     assert group["identical"] is False
     assert "url" in group["different_fields"]
     assert {member["id"] for member in group["members"]} == {first["id"], second["id"]}
+
+
+async def test_cleanup_skips_evidence_cited_by_a_confirmed_demand(client):
+    """Deleting a cited duplicate makes a confirmed demand un-derivable
+    (REQ-DEM-03: 引用了不存在的原始信号) — the same failure class as stripping
+    its tags or re-theming it, which 0eff600 already guards."""
+    theme = await create_theme(client)
+    cited = await create_signal(
+        client,
+        url="https://example.com/cited-evidence",
+        title="被引用证据",
+        publisher="发布方甲",
+        channel_code="web",
+        evidence_status_code="retained",
+    )
+    await set_signal_tags(client, cited["id"], ["智能配电"])
+    await assign_signal_theme(client, cited["id"], theme["id"])
+    independent = await create_signal(
+        client,
+        url="https://mp.weixin.qq.com/s/independent-evidence",
+        title="独立证据",
+        publisher="发布方乙",
+        channel_code="wechat_mp",
+        evidence_status_code="retained",
+    )
+    await set_signal_tags(client, independent["id"], ["车载电源"])
+    await assign_signal_theme(client, independent["id"], theme["id"])
+
+    evidence_ids = [cited["id"], independent["id"]]
+    payload = {
+        "name": "引用重复信号的测试需求",
+        "value_chain_stage_code": "creation_supply",
+        "source_tech_theme_id": theme["id"],
+        "derivation_trace": {
+            "steps": [
+                {"key": key, "content": f"步骤：{key}", "evidence_signal_ids": evidence_ids}
+                for key in DEMAND_STEP_KEYS
+            ]
+        },
+        "cross_validation": {
+            "conclusion": "通过",
+            "perspectives": ["架构变化", "器件供给"],
+            "evidence_signal_ids": evidence_ids,
+        },
+        "time_series": [{"time": "2026-03", "event": "测试事件"}],
+    }
+    create = await client.post("/api/v1/demands", json=payload)
+    assert create.status_code == 201, create.text
+    demand = create.json()
+    confirm = await client.patch(
+        f"/api/v1/demands/{demand['id']}", json={"review_status": "confirmed"}
+    )
+    assert confirm.status_code == 200, confirm.text
+
+    # a redundant re-capture of the cited URL joins its duplicate group
+    copy = await create_signal(
+        client,
+        url="https://example.com/cited-evidence",
+        title="被引用证据",
+        evidence_status_code="retained",
+    )
+
+    result = (
+        await client.post(
+            "/api/v1/signals/duplicates/cleanup",
+            json={"delete_ids": [cited["id"]], "reason": "试图删除被引用证据"},
+        )
+    ).json()
+
+    assert result["deleted"] == []
+    skipped = next(row for row in result["skipped"] if row["id"] == cited["id"])
+    assert "需求" in skipped["reason"]
+    assert (await client.get(f"/api/v1/signals/{cited['id']}")).status_code == 200
+
+    # the uncited redundant copy of the same group is still deletable
+    result = (
+        await client.post(
+            "/api/v1/signals/duplicates/cleanup",
+            json={"delete_ids": [copy["id"]], "reason": "删除未引用副本"},
+        )
+    ).json()
+    assert result["deleted"] == [copy["id"]]
+    assert (await client.get(f"/api/v1/signals/{cited['id']}")).status_code == 200
 
 
 async def test_cleanup_never_deletes_the_last_copy_of_a_group(client):

@@ -457,6 +457,29 @@ class StoredObjectOrphan(Base):
     resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class MaintenanceRun(Base):
+    """Recorded apply run of an operator maintenance command (BE-01)."""
+
+    __tablename__ = "eea_maintenance_run"
+    __table_args__ = (
+        CheckConstraint("scan_limit >= 0", name="ck_maintenance_run_limit"),
+        CheckConstraint("scanned >= 0", name="ck_maintenance_run_scanned"),
+        CheckConstraint("pruned >= 0", name="ck_maintenance_run_pruned"),
+        Index("eea_maintenance_run_command_idx", "command", "finished_at"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    command: Mapped[str] = mapped_column(Text, nullable=False)
+    scan_limit: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    scanned: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    pruned: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    operator_subject: Mapped[str] = mapped_column(Text, nullable=False)
+    operator_role: Mapped[str] = mapped_column(Text, nullable=False, server_default="system")
+    details: Mapped[dict | None] = mapped_column(JSONB)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    finished_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class ChainReport(Base):
     __tablename__ = "eea_chain_report"
     __table_args__ = (
