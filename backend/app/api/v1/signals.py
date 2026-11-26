@@ -509,11 +509,15 @@ async def get_signal_figures(signal_id: uuid.UUID, db: AsyncSession = Depends(ge
     if s.document_id is None:
         return []
     doc = await db.get(Document, s.document_id)
-    if doc is None or not doc.object_key:
-        return []
+    if doc is None:
+        raise HTTPException(404, "document not found for this signal")
+    if not doc.object_key:
+        raise HTTPException(404, "document raw object is not stored")
     raw = load_bytes(doc.object_key)
     if raw is None:
-        return []
+        raise HTTPException(
+            404, f"raw object {doc.object_key!r} missing from the object store"
+        )
     from app.services.doc_ingest import extract_figures, normalize_document_mime, suffix_for
 
     mime = normalize_document_mime(doc.filename, doc.mime)

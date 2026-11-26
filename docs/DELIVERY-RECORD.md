@@ -4,6 +4,19 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 ## 2026-11-26
 
+### Deploy to 10.215.35.10 (hzh2admin) + capture-client download page
+
+- Transferred the working tree with `tar`/`scp` (secrets and build caches excluded) over the host's existing copy at `~/projects/eea`; `deploy/.env` and `backend/.env` were preserved (backed up to `/tmp` first).
+- `bash deploy/build.sh 10.215.8.87` now completes; containers recreated (api/web healthy, nginx restarted) and every public route returns 200 through the proxy: `/`, `/healthz`, `/readyz`, `/api/v1/overview`, `/docs`, 94 OpenAPI paths. `/readyz` reports `semantic_gateway: degraded` because that host still has no model-gateway key (unchanged from the 11-23 deploy).
+- Web image build was failing for two reasons, both fixed in `deploy/Dockerfile.frontend`:
+  - compose passed `HTTP_PROXY`/`HTTPS_PROXY` as build args but the Dockerfile never declared them, so `pnpm` connected directly and tarballs timed out;
+  - the proxy is a TLS-inspecting mitmproxy whose CA the node image does not carry, so fetches failed with `UnknownIssuer`. The build stage now declares the proxy args, points at `registry.npmmirror.com`, and sets `NODE_TLS_REJECT_UNAUTHORIZED=0` for the build only; package authenticity still comes from `pnpm-lock.yaml` integrity hashes.
+- New in-app page `下载采集客户端` (`/downloads`): release table with version/size/SHA-256 and a download button; nginx serves `deploy/downloads/` read-only at `/downloads/`. Windows artifact `capture-v0.1.1-windows-amd64.zip` (5,116,495 B) published; the served file's SHA-256 matches `38ff97c4…f818`.
+- Verified: page renders the release row and the `/downloads/capture-v0.1.1-windows-amd64.zip` link; zip returns 200 `application/zip` with the expected hash; `SHA256SUMS` served alongside.
+- Not done: macOS client build. Its UI is Fyne-based and needs cgo plus the macOS SDK, so it must be built on a Mac; the page states this instead of offering a dead link. Screenshots of the deployed pages could not be captured (ego-browser stalls on `Page.captureScreenshot` for any page on this host); verification used DOM text plus HTTP responses.
+
+## 2026-11-26
+
 ### Orphan-maintenance entry runnable on Windows + explicit dry-run/apply (BE-01 slice, walkthrough O-8)
 
 - Problem: the 2026-11-25 seven-step walkthrough (O-8) found `python -m app.services.orphan_maintenance` fails on Windows with psycopg `InterfaceError: Psycopg cannot use the 'ProactorEventLoop'`, because the module entry called `asyncio.run` under the Windows default proactor loop — unlike `dev.py`/`worker.py`, which already install a selector policy. Reproduced before the fix on this machine with the same traceback.
@@ -69,6 +82,15 @@ This record keeps evidence for implementation slices removed from the remaining-
 - UI: frontend/components/evidence/signal-theme-assign.tsx renders the non-empty dimensions inline in the preview Alert. pnpm typecheck and antd lint pass; pnpm build passed in an isolated D:-drive copy that reused the local pnpm store, leaving the running dev server untouched.
 - Evidence: pytest tests/test_aggregation.py -q -> 14 passed; OpenAPI path snapshot -> 1 passed; pnpm typecheck, component antd lint and pnpm build -> passed; full backend suite after the slice -> 582 passed, 2 skipped (5:14).
 - Not done: the ordering inside structured_basis is a wave-1 heuristic (longest tag first), not a semantic classifier; real 8/16 data and business sign-off remain with DOC-02. The parent task stays open.
+
+### Missing stored objects fail clearly (BE-02 slice)
+
+- Problem: a document-backed signal's figures endpoint returned 200 [] when the raw document blob was gone, while HTML signals already returned a clear 404. The other read paths had clear 404s but no tests, so the "missing object" acceptance item was unverified.
+- What changed (backend/app/api/v1/signals.py): the document figure branch raises 404 for a missing document row, a missing raw object key, or a missing blob instead of falling through to an empty list.
+- Tests (backend/tests/test_missing_objects.py): signal body, archive and figures after deleting the stored object; document canonical.md and preview.pdf after deleting their blobs; document-signal figures after deleting the raw blob.
+- Evidence: pytest tests/test_missing_objects.py -q -> 4 passed; related document/signal files -> 47 passed (37.1 s); full backend suite after the change -> 586 passed, 2 skipped (6:04).
+- Note: frontend fetchSignalFigureByIndex already catches figure errors and falls back to archive parsing, so the 404 does not surface as a user-facing error.
+- Not done: storage-fault injection on Linux/PostgreSQL, and figure rows whose individual object is missing (the endpoint has a 404 path but no test yet). The parent task stays open.
 
 ## 2026-11-24
 
