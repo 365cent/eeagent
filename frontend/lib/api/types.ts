@@ -223,6 +223,11 @@ export type AuditOut = {
   operator_subject: string
   operator_role: string
   corrected_at: string
+  reason?: string | null
+  model_version?: string | null
+  rule_version?: string | null
+  skill_version?: string | null
+  score_source?: string | null
 }
 
 export type VocabUsageOut = {

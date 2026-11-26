@@ -62,6 +62,7 @@
 - 已交付主题写入身份与审计切片：创建/修改/删除均使用服务端 operator；记录 created、working_name、value_chain_stage_code、deleted 的前后值与操作者。
 - 对分类、标签、主题、需求复核、映射发布、落脚点角色、标准与战略变更记录原值/新值/人员/时间/理由；保存机器值及模型、规则、skill 版本和分数来源。
 - 保存字段级人工确认状态，自动重算只生成差异建议；显式人工提交才覆盖。自动动作也记录来源，禁止 auto-aggregate 无痕覆盖人工主题。
+- 2026-11-26 审计可见性：GET /audit 的响应补齐 reason、model_version、rule_version、skill_version、score_source，不再只在库里保存；落地删除路径写入 deleted 快照。
 - 对更新使用版本/条件写入检测过期提交，返回 409；审计与业务更新同事务，无变化不重复审计。
 - 2026-11-19 切片：图块局部重试已要求 researcher/taxonomy_admin/platform_admin 角色并写 CorrectionAudit；仍待真实代理身份与越权用例在 Linux 验证。
 - 验收：伪造角色、无权限复核、过期保存、人工值保护、事务失败及全部审计字段可追溯。
@@ -138,6 +139,7 @@
 - 入口：[landing_points.py](app/api/v1/landing_points.py)、[panorama.py](app/api/v1/panorama.py)。
 - 创建/编辑落脚点时检查所属功能仍已发布且需求证据仍有效；PATCH 已支持名称、域、角色更新并写入前后值审计。
 - 2026-11-25 走查发现：落脚点没有删除接口；临时的/样例落点只能 SQL 删除，且 `eea_correction_audit` 无外键，删后会留下指向已删实体的历史行（见[走查记录](../docs/acceptance-records/2026-11-25-seven-step-walkthrough.md#缺陷与观察) O-7）。
+- 2026-11-26 修复 O-7：新增 DELETE /landing-points/{id}（204），删除前写入 deleted 审计快照（功能 ID、名称、域、角色、标准/评估数、操作者与理由），标准/评估按外键级联；AuditOut 补齐 reason/model_version/rule_version/skill_version/score_source，删除后仍可按 entity_id 读到完整历史。证据：tests/test_landing_points.py 与 tests/test_audit_out.py 14 passed；相关 97 passed。
 - 一功能可关联五域多落脚点；2026-11-09 流程图确认软件、硬件、通信、电源与能源管理、工具。通过迁移 0010 初始化五个域词项；域词表继续开放复用，不能封闭为五值。
 - 全景完整展开所有需求/功能/落脚点及真实计数，不截取前两个节点；标准数只计实质条款。
 - 验收：未发布功能拒绝创建、开放域去重复用、角色修改审计、多分支追溯、空库真实为零。

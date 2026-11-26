@@ -922,6 +922,11 @@ class AuditOut(BaseModel):
     operator_subject: str
     operator_role: str
     corrected_at: datetime
+    reason: str | None = None
+    model_version: str | None = None
+    rule_version: str | None = None
+    skill_version: str | None = None
+    score_source: str | None = None
 
 
 class TagCandidateDetail(BaseModel):

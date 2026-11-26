@@ -1,6 +1,8 @@
 """Tech landing points: multiple landing points per function, open domain
 vocabulary, role recording (REQ-TECH-01/02/03, SCHEMA-LANDING-DOMAIN)."""
 
+import uuid
+
 import pytest
 
 from tests.support import (
@@ -8,6 +10,7 @@ from tests.support import (
     create_function,
     create_landing_point,
     publish_function,
+    put_standard,
 )
 
 pytestmark = pytest.mark.anyio
@@ -175,3 +178,46 @@ async def test_landing_point_patch_rejects_blank_name(client):
     assert response.status_code == 422
     detail = (await client.get(f"/api/v1/landing-points/{lp['id']}")).json()
     assert detail["name"] == lp["name"]
+
+async def test_delete_landing_point_is_audited_and_cascades(client):
+    from sqlalchemy import func, select
+
+    from app.db.base import SessionLocal
+    from app.models.models import DeploymentStandard
+
+    function = await _function(client)
+    lp = await create_landing_point(
+        client, function["id"], name="待删除样例", domain="硬件"
+    )
+    await put_standard(client, lp["id"], "设计", "工程化", "删除级联验证")
+
+    response = await client.delete(f"/api/v1/landing-points/{lp['id']}")
+    assert response.status_code == 204, response.text
+    assert (await client.get(f"/api/v1/landing-points/{lp['id']}")).status_code == 404
+
+    async with SessionLocal() as db:
+        remaining = (
+            await db.execute(
+                select(func.count())
+                .select_from(DeploymentStandard)
+                .where(
+                    DeploymentStandard.tech_landing_point_id == uuid.UUID(lp["id"])
+                )
+            )
+        ).scalar_one()
+    assert remaining == 0
+
+    audit = (await client.get("/api/v1/audit", params={"entity_id": lp["id"]})).json()
+    deleted = next(row for row in audit if row["field_name"] == "deleted")
+    assert deleted["old_value"]["name"] == "待删除样例"
+    assert deleted["old_value"]["standard_count"] == 1
+    assert deleted["new_value"] is None
+    assert deleted["reason"] == "删除技术落脚点"
+    assert deleted["operator_subject"] == "eea-test-actor"
+    assert deleted["operator_role"] == "platform_admin"
+    assert any(row["field_name"] == "created" for row in audit)
+
+
+async def test_delete_missing_landing_point_returns_404(client):
+    missing = "00000000-0000-0000-0000-0000000000ee"
+    assert (await client.delete(f"/api/v1/landing-points/{missing}")).status_code == 404

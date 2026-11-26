@@ -1,6 +1,6 @@
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -163,3 +163,48 @@ async def update_landing_point(
     await db.commit()
     updated = await _get_landing_point(db, lp_id)
     return _to_out(updated)
+
+@router.delete("/{lp_id}", status_code=204, response_class=Response)
+async def delete_landing_point(
+    lp_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    actor: OperatorIdentity = Depends(get_operator_identity),
+):
+    """Remove one landing point; standards and assessments cascade.
+
+    The deletion is audited with a snapshot first, so the surviving audit
+    trail explains why the entity no longer exists (walkthrough O-7).
+    """
+    lp = (
+        await db.execute(
+            select(TechLandingPoint)
+            .options(
+                selectinload(TechLandingPoint.standards),
+                selectinload(TechLandingPoint.assessments),
+            )
+            .where(TechLandingPoint.id == lp_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if lp is None:
+        raise HTTPException(404, "landing point not found")
+    await record_correction(
+        db,
+        "tech_landing_point",
+        lp.id,
+        "deleted",
+        {
+            "vehicle_function_id": str(lp.vehicle_function_id),
+            "name": lp.name,
+            "domain_vocab_id": str(lp.domain_vocab_id),
+            "role_description": lp.role_description,
+            "standard_count": len(lp.standards),
+            "assessment_count": len(lp.assessments),
+        },
+        None,
+        actor,
+        reason="删除技术落脚点",
+    )
+    await db.delete(lp)
+    await db.commit()
+    return Response(status_code=204)

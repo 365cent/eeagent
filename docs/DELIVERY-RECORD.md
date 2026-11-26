@@ -100,6 +100,14 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence: pytest tests/test_signals_list.py -q -> 15 passed (17.7 s).
 - Not done: the plan itself states no formal pagination contract (CONV-API-UNSTATED); these tests pin the implemented behavior only. The parent task stays open.
 
+### Audited landing-point deletion and complete audit responses (BE-08 slice, walkthrough O-7)
+
+- Problem: the seven-step walkthrough found no delete route for landing points, so temporary/sample points were removed with SQL. The audit table has no FK, leaving rows that pointed at a deleted entity with no deletion record. The audit response also hid reason/model/rule/skill/score_source even though the table stores them.
+- What changed (backend/app/api/v1/landing_points.py, backend/app/schemas/schemas.py, frontend/lib/api/types.ts): DELETE /landing-points/{id} locks the row, writes a "deleted" audit snapshot (function, name, domain, role, standard/assessment counts) in the same transaction, then deletes it; standards and assessments cascade. AuditOut now exposes reason, model_version, rule_version, skill_version and score_source; the frontend type mirrors them.
+- Tests: landing_points.py covers the 204, the 404 afterwards, a cascaded standard row, the deleted snapshot (counts, operator, role, reason) and the surviving created row; test_audit_out.py pins the five response fields via a directly inserted audit row.
+- Evidence: pytest tests/test_landing_points.py tests/test_audit_out.py -q -> 14 passed; related demand/trace/standards/strategy/panorama files -> 97 passed (89.2 s).
+- Not done: the pre-deletion audit rows still reference the deleted entity by design (the deletion snapshot explains them); a soft-delete/history view is not added. Linux/identity evidence remains OPS-side, and the parent task stays open.
+
 ## 2026-11-24
 
 ### Duplicate-signal scan and cleanup on an article URL key (BE-02 slice)

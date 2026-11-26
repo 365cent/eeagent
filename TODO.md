@@ -70,6 +70,7 @@
 - **BE-05（2026-11-26，结构化归集依据）**：主题归集预览暴露 structured_basis（对象/能力/方向）与 basis_reason，接线此前未使用的判断函数；补 2 项预览用例。证据：test_aggregation.py 14 passed；OpenAPI 1 passed；前端 typecheck、组件 antd lint 与 pnpm build 通过。
 - **BE-02（2026-11-26，失效对象）**：body/archive/figures/文档 canonical/preview 在对象缺失时统一 404；文档信号 figures 不再静默空列表；图块行图片缺失 404、recaption 转 needs_review。证据：5 passed；相关 47 passed。
 - **BE-02（2026-11-26，分页边界）**：limit 0/201 与负 offset 422、limit=200 通过；offset 越界返回空数组且总量不变；筛选总量与默认归档口径有断言。证据：test_signals_list.py 15 passed。
+- **BE-08（2026-11-26，落点删除审计）**：新增 DELETE /landing-points/{id}，删除前写 deleted 快照（标准/评估计数、操作者、理由），级联清理；AuditOut 补齐理由与模型/规则/skill/分数来源。证据：落点与审计 14 passed；相关 97 passed。
 - 上述均为组件切片；父任务验收、目标平台证据和真实业务样本仍按子清单保持开放。
 
 ## 下一项具体任务
