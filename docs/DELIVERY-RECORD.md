@@ -72,7 +72,7 @@ This record keeps evidence for implementation slices removed from the remaining-
 - The probe exposed a real defect: a brand-new database could not reach head. `0001_init` builds the schema with `Base.metadata.create_all` from the *current* models, so 0023/0025/0027 then hit `DuplicateColumn` when they re-added columns the fresh schema already had. CI did not catch it because `tests/conftest.py` skips migrations when `eea_test` is already at head.
 - Fix: 0023 and 0025 add their columns with `ADD COLUMN IF NOT EXISTS`, 0027 does the same for `progress` and drops the stage check with `DROP CONSTRAINT IF EXISTS`. Databases already at those revisions see no change; only the fresh-install path becomes re-runnable. Downgrades are untouched.
 - Evidence: `uv run python scripts/probe_migrations.py` -> fresh upgrade ok (head `0027_capture_job_progress`), downgrade/upgrade ok with the row surviving, upgrade from 0022 with data ok, database dropped. `pytest tests/test_db_schema.py tests/test_capture.py tests/test_capture_jobs.py tests/test_capture_job_concurrency.py -q` -> 27 passed (a stale `_set_stage` stub in `test_capture_jobs.py` was updated for the new `progress` argument, which is what the earlier failure was).
-- Remaining: the Linux pre-production upgrade of a real older database is still OPS-06; BE-16 also needs the REQ-to-test mapping and the 10k performance record.
+- The CI backend job now runs the probe before the integration slice, so a broken fresh-install chain fails the build instead of only showing up on a new deployment. Remaining: the Linux pre-production upgrade of a real older database is still OPS-06; BE-16 also needs the REQ-to-test mapping.
 
 ## Maintenance-run audit row (BE-01 slice)
 

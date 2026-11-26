@@ -47,6 +47,9 @@ jobs:
         run: |
           bash scripts/pytest_slices.sh contracts
           bash scripts/pytest_slices.sh unit
+      - name: Migration up/down with data
+        working-directory: backend
+        run: uv run python scripts/probe_migrations.py
       - name: Integration tests (eea_test)
         working-directory: backend
         run: bash scripts/pytest_slices.sh integration --tb=short
