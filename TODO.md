@@ -74,6 +74,10 @@
 - **BE-01（2026-11-26，对象存储并发）**：内容寻址写入容忍 Windows 并发 replace 冲突并重试；对象键包含检查改为词法（防短名竞态），路径穿越仍拒绝。证据：4 passed；capture 并发 4 passed。
 - **BE-02（2026-11-26，状态转换）**：五态逐一可达且每次转换写审计；无正文转 retained 422 且状态不变；重复写同一状态不重复审计。证据：test_signal_archive_ops.py 7 passed。
 - **FE-04（2026-11-26，来源列表）**：证据详情新增主/补充来源列表与补充 URL 表单，归档信号禁止新增；typecheck、组件 antd lint 与 pnpm build 通过。
+- **FE-12（2026-11-26，持久修改/降级/异步任务）**：新增 Playwright `pnpm pw:persist`（改分类后服务端字段与 revision 变化、旧 revision 409、刷新后仍显示并写审计）、`pnpm pw:degraded`（服务端 `degraded_reason` 原样显示且手动保存仍成功，网关正常则跳过）、`pnpm pw:async`（上传中刷新可续跑并到达结果面板、pending 记录被清除；因无文档删除端点默认跳过，需可丢弃库）。证据：三例各 1 passed，typecheck exit 0。
+- **FE-12/BE-16（2026-11-26，10k 分页）**：`scripts/probe_pagination_10k.py` 在临时库灌 10,000 条信号并起临时 API 测量后丢库；首页 24-43ms、末页 34-49ms、详情首载 17-98ms，两轮均校验 50+50 行无重叠与总数 10000。Linux 数字仍待 OPS。
+- **BE-16（2026-11-26，迁移升降级）**：新增 `scripts/probe_migrations.py` 并接入 CI；修复新库无法升级的真缺陷（`0001_init` 用当前模型建表，0023/0025/0027 改为 IF NOT EXISTS）；空库升级、降级再升级、0022 带数据升级均通过。证据：28 passed，lint-imports 3 kept。
+- **BE-16/DOC-05（2026-11-26，REQ 映射）**：`scripts/report_req_coverage.py` 生成 `docs/acceptance-records/req-test-map.md`；75 条 REQ 中 51 条有点名、24 条没有（AGT/DOC/部分 DEM/MAP/STR/UI），点名不等于通过。
 - 上述均为组件切片；父任务验收、目标平台证据和真实业务样本仍按子清单保持开放。
 
 ## 下一项具体任务
