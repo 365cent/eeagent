@@ -82,6 +82,36 @@ def figure_review_state(
     return "ready", None
 
 
+async def recaption_pending_figures(
+    db: AsyncSession, document_id: uuid.UUID, *, limit: int | None = None
+) -> tuple[list[int], list[int]]:
+    """Retry every not-ready figure one by one; returns (attempted, failed).
+
+    The batch caption pass inside an ingest shares one vision window, so a large
+    PDF can run out of it and leave figures empty. This is the per-figure path
+    the "重新识别" button uses, so one repair covers both.
+    """
+    rows = (
+        await db.execute(
+            select(DocumentFigure.figure_index, DocumentFigure.review_status)
+            .where(DocumentFigure.document_id == document_id)
+            .order_by(DocumentFigure.figure_index)
+        )
+    ).all()
+    attempted: list[int] = []
+    failed: list[int] = []
+    for figure_index, status in rows:
+        if status == "ready":
+            continue
+        if limit is not None and len(attempted) >= limit:
+            break
+        attempted.append(figure_index)
+        updated = await recaption_figure(db, document_id, figure_index)
+        if updated is None or updated.review_status != "ready":
+            failed.append(figure_index)
+    return attempted, failed
+
+
 def _rebuild_chunks(db: AsyncSession, document_id: uuid.UUID, canonical: str) -> None:
     chunks = split_markdown_sections(
         canonical, max_chars=get_settings().agent_rag_chunk_size

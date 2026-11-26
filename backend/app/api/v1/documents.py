@@ -10,6 +10,7 @@ POST /documents/{id}/ingest.
 from __future__ import annotations
 
 import asyncio
+import logging
 import mimetypes
 import time
 import uuid
@@ -20,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
 from app.core.identity import OperatorIdentity, get_operator_identity
+from app.platform.http_headers import content_disposition
 from app.platform.launchdarkly import EVIDENCE_CAPTURE, require_feature, track_workflow_success
 from app.db.base import get_db
 from app.models.models import Document
@@ -34,7 +36,7 @@ from app.schemas.schemas import (
 )
 from app.services.agent_rag import ensure_document_index
 from app.services.audit import record_correction
-from app.services.figure_recaption import recaption_figure
+from app.services.figure_recaption import recaption_figure, recaption_pending_figures
 from app.services.objectstore import load_body
 from app.services.tagging import suggest_tags, suggest_tech_tags, text_for_tagging
 from app.domains.evidence.document_pipeline import (
@@ -52,6 +54,8 @@ from app.services.doc_pdf_preview import (
     document_pdf_preview_supported,
 )
 from starlette.concurrency import run_in_threadpool
+
+logger = logging.getLogger(__name__)
 
 from app.services.objectstore import load_bytes, sha256_bytes
 from app.services.pptx_deck_preview import (
@@ -202,7 +206,8 @@ async def get_document_pdf_preview(
         raise HTTPException(503, str(exc)) from exc
     filename = (doc.filename or "document").rsplit(".", 1)[0] + ".pdf"
     headers = {
-        "Content-Disposition": f'inline; filename="{filename}"',
+        # Headers are latin-1: a Chinese filename must travel as RFC 5987.
+        "Content-Disposition": content_disposition(filename),
         "Content-Length": str(len(pdf_bytes)),
     }
     if request.method == "HEAD":
@@ -269,7 +274,12 @@ async def get_document_deck_preview_asset(
 
 @router.post("/{document_id}/ingest", response_model=DocumentDetail)
 async def reingest_document(document_id: uuid.UUID, db: AsyncSession = Depends(get_db)):
-    """Re-run MarkItDown + vision for an existing blob (retry or new vision model)."""
+    """Re-run MarkItDown + vision for an existing blob (retry or new vision model).
+
+    The vision batch inside an ingest shares one timeout window, so a large PDF
+    can come back with figures the model never answered for. Those are finished
+    here through the same per-figure path as the 重新识别 button.
+    """
     doc = await _load(db, document_id)
     data = load_bytes(doc.object_key)
     if data is None:
@@ -277,6 +287,15 @@ async def reingest_document(document_id: uuid.UUID, db: AsyncSession = Depends(g
             404, f"raw object {doc.object_key!r} missing from the object store"
         )
     await _ingest(db, doc, data)
+    attempted, failed = await recaption_pending_figures(db, document_id)
+    if attempted:
+        await db.commit()
+        logger.info(
+            "reingest %s: retried %d pending figure(s), %d still empty",
+            document_id,
+            len(attempted),
+            len(failed),
+        )
     return _detail(doc)
 
 
