@@ -59,6 +59,13 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Measured twice on the Windows dev host with the portable PostgreSQL (2026-11-26; five runs per case, median): first page 24-43 ms, last page at offset 9950 34-49 ms, keyword filter 37-42 ms with X-Total-Count 100, value-chain-stage filter 20-26 ms with 2500, 200 rows at offset 5000 35-48 ms, signal detail first load 17-98 ms. Both runs asserted the boundaries: 50 rows on the first and last page, no overlap, no repeated row, X-Total-Count 10000.
 - These are dev-host figures against a local database with no proxy or TLS. FE-12 still needs the Linux intranet numbers and the browser first-screen timing; the list page calls the same `GET /signals` that was measured.
 
+### Model degradation stays visible and non-blocking (FE-12 slice)
+
+- Added `frontend/tests/e2e/degraded-suggestions.spec.ts` (`pnpm pw:degraded`). It creates a scratch signal, asks the server for `GET /signals/{id}/tag-suggestions`, and only proceeds when the response carries `degraded_reason`; a healthy gateway makes the case skip rather than fake a failure.
+- When degraded, the drawer must show the server's reason verbatim (the page cannot invent a different explanation), and the manual correction must still save: the case clicks 修正, picks a stage and asserts the server row moved to `realization_consumer` with a new `updated_at`. The scratch signal is archived and deleted in `finally`.
+- Evidence: `pnpm pw:degraded` -> 1 passed (58.9 s) against the dev stack, where the chat gateway was returning 'no chat model available' and the endpoint fell back to embedding rerank.
+- Remaining on FE-12: the async-task browser case (upload, reload mid-job, resume) and the history-version case; Linux intranet figures.
+
 ## Maintenance-run audit row (BE-01 slice)
 
 - Problem: `orphan_maintenance --apply` pruned orphan rows but left no durable record of who ran it, when, or how many rows it scanned/removed, so the BE-01 audit requirement stayed open.
