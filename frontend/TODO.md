@@ -156,7 +156,7 @@
 - OpenAPI 对应类型检查纳入 CI；统一 API base 支持生产同源 /api/v1 和开发 :8000。
 - 对触及组件执行 antd 分文件 lint，类型检查与 pnpm build；无公网字体/分析脚本依赖。
 - 添加 Playwright 主流程测试：空库、真实七环节、持久修改、角色限制、模型失败、异步任务、历史版本、报告。
-- 2026-11-19 已补：追溯/七环节链条/角色越权三组 Playwright 用例（共 7 个），数据由 `scripts/seed_smoke_chain.py` 通过公开 API 预置；持久修改、模型失败、异步任务、历史版本与报告用例仍待补。
+- 2026-11-19 已补：追溯/七环节链条/角色越权三组 Playwright 用例（共 7 个），数据由 `scripts/seed_smoke_chain.py` 通过公开 API 预置；持久修改、模型失败、异步任务与历史版本用例仍待补。报告流程已由 2026-11-26 新增的 `pnpm pw:report` （`tests/e2e/report-smoke.spec.ts`，选择 eFuse 落脚点后生成 Markdown 预览并请求 PDF）覆盖，1 passed。
 - 基于固定 10,000 条测试数据验证服务端分页；记录详情首个可用内容时间，外链/大型原始归档加载单独说明。
 - 更新走查清单和截图证据；不把原先 checked checkbox 当此次验收。
 - 验收：构建/契约/浏览器测试记录齐全；Linux TLS 同源、SSE、深链接、空库/断网行为通过。

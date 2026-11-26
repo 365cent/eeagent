@@ -8,6 +8,7 @@ host Edge/Chrome (no browser download is bundled for the intranet image); set
 | --- | --- | --- |
 | `pnpm pw:smoke` | trace overview empty/relation state, invalid landing-point link | API :8000, web :3000 |
 | `pnpm pw:chain` | seeded signal → theme → demand → function → landing point → standards | API :8000, web :3000, `EEA_PW_SEED_FILE` |
+| `pnpm pw:report` | chain report Markdown preview and PDF request | API :8000, web :3000, an eFuse landing point |
 | `pnpm pw:roles` | non-admin token issuance denied, body-supplied role rejected, spoofed identity header ignored | API :8000 |
 
 ## Seeding the chain

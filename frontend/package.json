@@ -12,6 +12,7 @@
     "typecheck": "tsc --noEmit",
     "pw:smoke": "playwright test tests/e2e/trace-smoke.spec.ts",
     "pw:chain": "playwright test tests/e2e/chain-smoke.spec.ts",
+    "pw:report": "playwright test tests/e2e/report-smoke.spec.ts",
     "pw:roles": "playwright test tests/e2e/role-restrictions.spec.ts"
   },
   "dependencies": {
