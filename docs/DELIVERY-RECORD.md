@@ -53,6 +53,12 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence: live `POST /signals` with body text 25.8 s → 14.0 s, tags `['eFuse']` still present; `pytest tests/test_auto_tag_confidence.py tests/test_signals_ingest.py tests/test_llm_tags.py tests/test_tech_tag_pipeline.py -q` → 41 passed (two new cases: a 30 s stub is cancelled and jieba tags still land; a no-rerank signal keeps its jieba pre-tag); document/capture path `pytest tests/test_document_ingest.py tests/test_document_signals.py tests/test_capture.py -q` → 47 passed; `uv run lint-imports` → 3 kept, 0 broken.
 - Remaining: BE-04 parent still needs the unified re-classification service, per-candidate explanations and real-gateway acceptance; the 12 s budget is a local measurement, not yet a Linux-intranet figure.
 
+### 10k pagination probe on a scratch database (FE-12 slice)
+
+- Added `backend/scripts/probe_pagination_10k.py`, the evidence-list scale probe that FE-12 asks for. It creates the scratch database `eea_perf`, seeds 10,000 deterministic signals (fixed UUIDs, distinct `created_at`), starts a throwaway API on port 8010 against that database, measures with five runs per case and takes the median, then stops the API and drops the database. It refuses non-local hosts and never touches `eea` or `eea_test` (same pattern as `probe_dedup_scan_cost.py`).
+- Measured twice on the Windows dev host with the portable PostgreSQL (2026-11-26; five runs per case, median): first page 24-43 ms, last page at offset 9950 34-49 ms, keyword filter 37-42 ms with X-Total-Count 100, value-chain-stage filter 20-26 ms with 2500, 200 rows at offset 5000 35-48 ms, signal detail first load 17-98 ms. Both runs asserted the boundaries: 50 rows on the first and last page, no overlap, no repeated row, X-Total-Count 10000.
+- These are dev-host figures against a local database with no proxy or TLS. FE-12 still needs the Linux intranet numbers and the browser first-screen timing; the list page calls the same `GET /signals` that was measured.
+
 ## Maintenance-run audit row (BE-01 slice)
 
 - Problem: `orphan_maintenance --apply` pruned orphan rows but left no durable record of who ran it, when, or how many rows it scanned/removed, so the BE-01 audit requirement stayed open.
