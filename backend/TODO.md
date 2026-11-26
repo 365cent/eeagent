@@ -265,6 +265,8 @@
 - [tests/](tests/) 按需求补负面/并发/持久性测试；pytest 单进程，隔离 eea_test 与临时对象目录，不接真实生产数据。
 - 新迁移覆盖来源、review、funnel、缓存、图块、会话等；以当前 0026_maintenance_run 为 head 按实施顺序分配后续 revision，旧方案中 embedding/document keyword 的编号不可复用为既有迁移证据。
 - 完成需求对应的组件级回归、OpenAPI 与前端类型契约检查、迁移升级/降级检查；未知旧 JSON 不自动批准，历史快照与评分保持可读。
+- 2026-11-26 迁移升降级：新增 `scripts/probe_migrations.py`，在临时库 `eea_migrate` 上依次执行（1）空库升级到 head、（2）插入一行信号后 `downgrade -3` 再升级、（3）降到 0022 写入一行再升级到 head，均校验数据行存活与 revision 回到 head；实测全通过（head=0027_capture_job_progress）。过程中发现空库升级实际是坏的：`0001_init` 用当前模型 `Base.metadata.create_all` 建表，而 0023/0025/0027 用无条件 `ADD COLUMN`，新库会因列已存在而失败——已把这三处改成 `ADD COLUMN IF NOT EXISTS` 并把 0027 的约束删除改成 `DROP CONSTRAINT IF EXISTS`，对已升级的库无行为变化（仅让新装路径可重复执行）。这与“不重写已发布迁移”的常规做法不同，理由是新库根本无法升级；已升级库的 downgrade 语义保持不变。
+- 2026-11-26 迁移测试桩：`tests/test_capture_jobs.py` 的 `_set_stage` stub 未跟上 `progress` 参数，取消用例报 TypeError，已补参数。
 - 交付代码仓库层面的依赖锁定、启动/配置契约与组件验证证据；不把 macOS 检查描述为 Linux worker 或生产存储验收。
 - Linux 集成、离线 wheel 包、生产升级、备份/恢复及 10,000 条性能报告由 OPS-06 在 BE-16 后统一验收，避免 BE-16 ↔ OPS-02/05 循环依赖。
 - 验收：每条 traceability 用例有组件结果；迁移与接口契约检查齐全，严重缺陷清零；部署和恢复签收记录挂接 OPS-06。

@@ -24,11 +24,12 @@ _NEW_STAGES = (
 
 
 def upgrade() -> None:
-    op.add_column(
-        "eea_capture_job",
-        sa.Column("progress", sa.Integer(), nullable=False, server_default="0"),
+    # Idempotent: 0001_init creates the schema from the current models, so a
+    # fresh install already has the column and the widened check constraint.
+    op.execute(
+        "ALTER TABLE eea_capture_job ADD COLUMN IF NOT EXISTS progress INTEGER NOT NULL DEFAULT 0"
     )
-    op.drop_constraint("ck_capture_job_stage", "eea_capture_job", type_="check")
+    op.execute("ALTER TABLE eea_capture_job DROP CONSTRAINT IF EXISTS ck_capture_job_stage")
     op.create_check_constraint("ck_capture_job_stage", "eea_capture_job", _NEW_STAGES)
 
 

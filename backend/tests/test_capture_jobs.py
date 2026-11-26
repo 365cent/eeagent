@@ -195,11 +195,11 @@ async def test_cancel_running_job_creates_no_signal(client, monkeypatch):
 
     real_set_stage = cj._set_stage
 
-    async def patched_set_stage(job_id, worker_id, stage):
-        if stage == "processing":
+    async def patched_set_stage(job_id, worker_id, stage, progress=None):
+        if stage == "parsing":
             hold.set()
             await asyncio.sleep(5)
-        return await real_set_stage(job_id, worker_id, stage)
+        return await real_set_stage(job_id, worker_id, stage, progress)
 
     monkeypatch.setattr(cj, "_set_stage", patched_set_stage)
 

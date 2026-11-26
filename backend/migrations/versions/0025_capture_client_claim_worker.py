@@ -10,9 +10,11 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "eea_capture_client_claim",
-        sa.Column("client_worker_id", sa.Text(), nullable=True),
+    # Idempotent: 0001_init creates this table from the current models, so a
+    # fresh install already has the column.
+    op.execute(
+        "ALTER TABLE eea_capture_client_claim "
+        "ADD COLUMN IF NOT EXISTS client_worker_id TEXT"
     )
     # These rows are short-lived quota events, not business records; reset them
     # so the new per-instance key starts from a clean window.
