@@ -268,6 +268,7 @@
 - 完成需求对应的组件级回归、OpenAPI 与前端类型契约检查、迁移升级/降级检查；未知旧 JSON 不自动批准，历史快照与评分保持可读。
 - 2026-11-26 迁移升降级：CI 后端 job 增加 `uv run python scripts/probe_migrations.py` 步骤（空库升级/降级再升级/旧版本带数据升级）。新增 `scripts/probe_migrations.py`，在临时库 `eea_migrate` 上依次执行（1）空库升级到 head、（2）插入一行信号后 `downgrade -3` 再升级、（3）降到 0022 写入一行再升级到 head，均校验数据行存活与 revision 回到 head；实测全通过（head=0027_capture_job_progress）。过程中发现空库升级实际是坏的：`0001_init` 用当前模型 `Base.metadata.create_all` 建表，而 0023/0025/0027 用无条件 `ADD COLUMN`，新库会因列已存在而失败——已把这三处改成 `ADD COLUMN IF NOT EXISTS` 并把 0027 的约束删除改成 `DROP CONSTRAINT IF EXISTS`，对已升级的库无行为变化（仅让新装路径可重复执行）。这与“不重写已发布迁移”的常规做法不同，理由是新库根本无法升级；已升级库的 downgrade 语义保持不变。
 - 2026-11-26 迁移测试桩：`tests/test_capture_jobs.py` 的 `_set_stage` stub 未跟上 `progress` 参数，取消用例报 TypeError，已补参数。
+- 2026-11-26 REQ→测试映射：新增 `scripts/report_req_coverage.py`，从追溯表读取 75 条 REQ、扫描 backend/tests、frontend/tests 与 client 的测试文件，生成 `docs/acceptance-records/req-test-map.md`。当前 51 条至少被一个测试文件点名，24 条没有任何测试引用（AGT-01…06、DEM-04/05/07/12、DOC-01…05、MAP-04/07…11、STR-02/03、UI-01）。该映射只说明“有测试声称覆盖”，不等于验收通过；同一行为可能挂在别的 REQ 编号下（例如落差点的 TECH 用例覆盖部分 MAP 行为），需要 DOC-05 逐条判定。
 - 交付代码仓库层面的依赖锁定、启动/配置契约与组件验证证据；不把 macOS 检查描述为 Linux worker 或生产存储验收。
 - Linux 集成、离线 wheel 包、生产升级、备份/恢复及 10,000 条性能报告由 OPS-06 在 BE-16 后统一验收，避免 BE-16 ↔ OPS-02/05 循环依赖。
 - 验收：每条 traceability 用例有组件结果；迁移与接口契约检查齐全，严重缺陷清零；部署和恢复签收记录挂接 OPS-06。

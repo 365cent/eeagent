@@ -74,6 +74,14 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence: `uv run python scripts/probe_migrations.py` -> fresh upgrade ok (head `0027_capture_job_progress`), downgrade/upgrade ok with the row surviving, upgrade from 0022 with data ok, database dropped. `pytest tests/test_db_schema.py tests/test_capture.py tests/test_capture_jobs.py tests/test_capture_job_concurrency.py -q` -> 27 passed (a stale `_set_stage` stub in `test_capture_jobs.py` was updated for the new `progress` argument, which is what the earlier failure was).
 - The CI backend job now runs the probe before the integration slice, so a broken fresh-install chain fails the build instead of only showing up on a new deployment. Remaining: the Linux pre-production upgrade of a real older database is still OPS-06; BE-16 also needs the REQ-to-test mapping.
 
+### REQ to test mapping (BE-16 slice)
+
+- Added `backend/scripts/report_req_coverage.py` and generated `docs/acceptance-records/req-test-map.md`. The script reads the 75 REQ ids from the traceability table, scans `backend/tests`, `frontend/tests` and the Go client for each id, and writes one table per domain plus the list of requirements no test names.
+- Result: 51 of 75 REQ are referenced by at least one test file; 24 are not (AGT-01..06, DEM-04/05/07/12, DOC-01..05, MAP-04/07..11, STR-02/03, UI-01). The document states explicitly that a reference is not acceptance: it only shows a test claims the requirement, and some behaviour is exercised under a different id (the landing-point TECH cases, for instance, cover part of the MAP behaviour).
+- Measured against the DOC-05 thresholds: the 10k probe above reported 24-43 ms for a page and 17-98 ms for the detail first load, both under the "pagination <=1 s, detail <=0.8 s" wording, on a single dev host with a local database. Linux pre-production still needs the OPS-06 run.
+- The same script prints the per-REQ table to stdout, so the mapping can be regenerated whenever ids move. Regenerate with `uv run python scripts/report_req_coverage.py --write ../docs/acceptance-records/req-test-map.md` from `backend/`.
+- Remaining: DOC-05 still has to judge each uncovered REQ against its AT case, and the 20-signal / 10-source / real-gateway records stay open.
+
 ## Maintenance-run audit row (BE-01 slice)
 
 - Problem: `orphan_maintenance --apply` pruned orphan rows but left no durable record of who ran it, when, or how many rows it scanned/removed, so the BE-01 audit requirement stayed open.
