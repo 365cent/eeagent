@@ -10,6 +10,7 @@ import {
   EeaApiError,
   type UploadProgressHandler,
 } from '@/lib/api/client'
+import { newUuid } from '@/lib/uuid'
 import type {
   AccessLogOut,
   AssessmentOut,
@@ -530,7 +531,7 @@ export async function captureSignal(
   },
   options?: { onUploadProgress?: UploadProgressHandler },
 ) {
-  const submissionId = crypto.randomUUID()
+  const submissionId = newUuid()
   const result = await runCaptureJobUntilResult(
     {
       file: input.archiveHtml,

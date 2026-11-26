@@ -18,6 +18,7 @@ import {
   retryCaptureJob,
 } from '@/lib/api/eea-api'
 import { EeaApiError, eeaErrorMessage } from '@/lib/api/client'
+import { newUuid } from '@/lib/uuid'
 import { sourceUrlFromSavedHtml } from '@/lib/ingest-source-url'
 import { duplicateUrlCaptureMessage } from '@/lib/signal-duplicate-notice'
 import { documentSummaryLine } from '@/lib/document-ingest'
@@ -291,11 +292,11 @@ function useNewSignalImport(onNavigate: (key: string) => void) {
     setJobError(null)
     setLastDocument(null)
     setLastDocumentName(null)
-    const submissionId = crypto.randomUUID()
     resumeAbort.current?.abort()
     const controller = new AbortController()
     resumeAbort.current = controller
     try {
+      const submissionId = newUuid()
       const name = file.name.toLowerCase()
       if (name.endsWith('.xlsx') || name.endsWith('.xlsm')) {
         messageApi.info(
