@@ -89,6 +89,9 @@ class Settings(BaseSettings):
     # Hard cap on vision model resolve + caption batch so xlsx/pptx ingest
     # cannot wedgie the capture worker when the gateway is slow or unreachable.
     doc_ingest_vision_timeout_seconds: float = Field(default=120.0, gt=0)
+    # A tag suggestion whose rerank confidence beats this is written at ingest;
+    # weaker candidates wait for a human. Review can always change them later.
+    auto_tag_min_confidence: float = Field(default=0.8, ge=0.0, le=1.0)
     agent_patch_ttl_hours: int = Field(default=24, ge=1, le=168)
     # Hedged chat: defaults assume a slow, queue-heavy intranet model farm (long
     # TTFT tail). Hedge near p95, not median, to avoid doubling load. Override

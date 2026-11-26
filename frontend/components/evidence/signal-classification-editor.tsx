@@ -122,7 +122,7 @@ export function SignalClassificationEditor({
       </div>
       <div style={{ marginBottom: 10 }}>
         <Text type="secondary">
-          模型建议（需人工明确采用）
+          模型建议（高置信度已自动采用，其余需人工确认，可随时调整）
           {suggestionsQuery.data?.source ? ` · ${suggestionSourceLabel(suggestionsQuery.data.source)}` : ''}
         </Text>
         {suggestionsQuery.isFetching && !suggestionsQuery.isLoading ? (

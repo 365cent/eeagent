@@ -103,5 +103,6 @@ async def create_signal_from_document(
         document_id=doc.id,
         capture_submission_id=capture_submission_id,
         capture_submission_sha256=capture_submission_sha256,
+        tagging_text=canonical or None,
     )
     return sig, document_raw_out(doc)
