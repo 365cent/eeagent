@@ -289,6 +289,7 @@
 - 2026-11-27 再切片：`doc_summary.py`（无 app 依赖）与 `signal_sources.py`（只依赖模型与 tagging 域）迁入 `app/domains/evidence/`，4 处导入；README/TODO/研究笔记中的路径同步更新。证据：`lint-imports` 两处配置各 3 kept，`pytest` 60 passed（文档信号/信号摄取/文档摄取），全量收集 624 条。
 - 2026-11-27 再切片：模型运行时基础设施 `model_speed.py`、`hedged_model.py`、`semantic_api.py`、`embedding_cache.py` 迁入 `app/platform/`（只依赖 core.config、platform.http、模型层与彼此）；`llm_gateway` 仍留在 services 并从 platform 引用它们。15 个文件更新导入（含 3 个用例与 1 个探针脚本，两处多名字 `from app.services import …` 拆行）。证据：`lint-imports` 两处配置各 3 kept，`pytest` 48 passed / 1 skipped，全量收集 624 条。
 - 2026-11-27 再切片：LLM 平台层补齐：`llm_prompts.py`（提示词模板与版本）、`llm_usage.py`（用量记录）、`llm_gateway.py`（网关客户端）迁入 `app/platform/`，25 个文件更新导入；`llm_gateway` 不再从 services 取任何东西。证据：`lint-imports` 两处配置各 3 kept，`pytest` 54 passed，全量收集 628 条。
+- 2026-11-27 再切片：业务语义建议层 `llm.py` 迁入 `app/domains/semantic/llm.py`（新增 semantic 上下文）；它只依赖 platform（gateway/prompts/usage）与 vocab/tagging 两个域，已无 services 依赖。8 个文件更新导入。证据：`lint-imports` 两处配置各 3 kept，`pytest` 52 passed，全量收集 628 条。
 - [ ] OpenAPI 路径快照：[tests/test_openapi_snapshot.py](tests/test_openapi_snapshot.py) + [tests/snapshots/openapi_paths.json](tests/snapshots/openapi_paths.json)；路由变更须同步快照（`OPENAPI_UPDATE_SNAPSHOT=1`）。
 - [ ] 迁移顺序建议：`core`/`db`/`models` → `platform`；采集/信号/需求等垂直切片按 WBS 迁入 `domains`；共享摄取逻辑取代 API 私有函数互调（对齐 BE-01）。
 - 验收：import-linter 通过；OpenAPI 快照测试通过；无新增 `platform`→`api`/`domains` 违规；领域迁移切片有对应 pytest 证据。

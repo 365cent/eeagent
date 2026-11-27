@@ -133,7 +133,7 @@ async def suggest_tech_tags(
     rerank_pool: int = TAG_RERANK_POOL,
 ) -> tuple[list[str], str, float | None]:
     """REQ-TAG-05 pipeline: jieba recall → embedding rerank → LLM pick (≤ final_max)."""
-    from app.services.llm import pick_tech_tags_from_candidates
+    from app.domains.semantic.llm import pick_tech_tags_from_candidates
 
     text = text_for_tagging(title, body)
     if not text:

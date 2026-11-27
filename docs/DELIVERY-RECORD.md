@@ -52,7 +52,9 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence for the eighth move: `lint-imports` 3 kept against both configs; `pytest tests/test_hedged_model.py tests/test_model_speed.py tests/test_llm_gateway_models.py tests/test_agent_rag_semantic.py tests/test_semantic_document_keywords.py` → 48 passed, 1 skipped (20.0 s); collection still 624 tests.
 - Ninth move: `llm_prompts.py` (prompt templates + revision), `llm_usage.py` (call logging) and `llm_gateway.py` (OpenAI-compatible client) joined `app/platform/`, 25 files updated. The gateway now imports only config, platform.http and platform modules — no services. `app/services/llm.py` (business suggestion layer) stays put and reads the gateway from platform.
 - Evidence for the ninth move: `lint-imports` 3 kept against both configs; `pytest tests/test_caption_cache.py tests/test_llm_usage.py tests/test_llm_gateway_models.py tests/test_agent_workflow.py tests/test_signal_assistant.py` → 54 passed (30.3 s); `py_compile` clean on the moved modules and `api/v1/signals.py`; collection is 628 tests.
-- Remaining BE-17 work: `app.services` still holds `doc_ingest`, `llm`, `body_excerpt`, `caption_cache` and related modules; each needs its own slice.
+- Tenth move: the business suggestion layer `llm.py` → `app/domains/semantic/llm.py`, creating the `semantic` context. After the platform work it imported only `app.platform.*` plus the `vocab` and `tagging` domains, so the move adds no new coupling; eight files updated. `tagging.service` and `evidence.signal_record` now read it as a domain sibling.
+- Evidence for the tenth move: `lint-imports` 3 kept against both configs; `pytest tests/test_llm_tags.py tests/test_tech_tag_pipeline.py tests/test_signals_ingest.py tests/test_themes.py` → 52 passed (46.5 s); `py_compile` clean; collection is 628 tests.
+- Remaining BE-17 work: `app.services` still holds `doc_ingest`, `body_excerpt`, `caption_cache`, `doc_pdf_preview` and the agent/capture orchestration modules; each needs its own slice.
 
 ### Full backend regression after the BE-17 moves (BE-16 evidence)
 

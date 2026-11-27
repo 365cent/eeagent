@@ -15,7 +15,7 @@ from app.domains.evidence.event_dates import event_date_from_published
 from app.domains.evidence.theme_match import match_theme
 from app.models.models import Signal, SignalTag
 from app.domains.evidence.judgment import judge_stage
-from app.services.llm import suggest_tags_with_llm
+from app.domains.semantic.llm import suggest_tags_with_llm
 from app.platform.objectstore import save_body
 from app.domains.evidence.signal_duplicate import disambiguate_title_for_url
 from app.domains.evidence.signal_sources import ensure_primary_source

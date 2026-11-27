@@ -7,9 +7,9 @@ from pydantic_ai import Agent
 from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import AgentInfo, FunctionModel
 
-import app.services.llm as llm
+import app.domains.semantic.llm as llm
 import app.domains.tagging.service as tagging
-from app.services.llm import LLMCandidateTagPick, pick_tech_tags_from_candidates
+from app.domains.semantic.llm import LLMCandidateTagPick, pick_tech_tags_from_candidates
 from app.domains.tagging.service import suggest_tags, suggest_tech_tags, text_for_tagging
 
 pytestmark = [pytest.mark.anyio, pytest.mark.no_db]

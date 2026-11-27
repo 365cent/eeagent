@@ -74,7 +74,7 @@ from app.domains.evidence.judgment import (
 from app.domains.evidence.signal_sources import add_supplementary_url, list_sources
 from app.services.signal_recaption import recaption_signal_article
 from app.domains.evidence.tagging_guard import assert_expected_signal_revision, human_corrected_fields
-from app.services.llm import suggest_tags_with_llm
+from app.domains.semantic.llm import suggest_tags_with_llm
 from app.platform.llm_gateway import (
     LLMNoModelError,
     LLMNotConfiguredError,

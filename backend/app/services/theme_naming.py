@@ -19,7 +19,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.models import Signal, SignalTag
 from app.schemas.schemas import ThemeNameSuggestionOut
-from app.services.llm import suggest_theme_name_with_llm
+from app.domains.semantic.llm import suggest_theme_name_with_llm
 from app.domains.vocab.refcodes import code_to_label
 
 _TITLE_PREFIX = re.compile(r"^【[^】]+】\s*")

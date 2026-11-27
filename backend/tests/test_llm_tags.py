@@ -13,8 +13,8 @@ from pydantic_ai.messages import ModelResponse, ToolCallPart
 from pydantic_ai.models.function import FunctionModel, AgentInfo
 from pydantic_ai.models.test import TestModel
 
-import app.services.llm as llm
-from app.services.llm import LLMExcerpt, LLMTagSuggestion, suggest_excerpt_with_llm, suggest_tags_with_llm
+import app.domains.semantic.llm as llm
+from app.domains.semantic.llm import LLMExcerpt, LLMTagSuggestion, suggest_excerpt_with_llm, suggest_tags_with_llm
 
 pytestmark = pytest.mark.anyio
 

@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-from app.services.llm import suggest_excerpt_with_llm
+from app.domains.semantic.llm import suggest_excerpt_with_llm
 from app.domains.tagging.service import text_for_tagging
 
 _MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
