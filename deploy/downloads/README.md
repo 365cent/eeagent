@@ -11,7 +11,7 @@ of a dead link.
 # Windows (build on Windows, Go >= 1.26)
 cd client
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -Version v0.1.2
-cp dist/capture.exe ../deploy/downloads/capture-v0.1.2-windows-amd64.exe
+cp dist/capture.exe ../deploy/downloads/capture.exe
 
 # macOS (.app + .dmg, must run on a Mac: Fyne needs cgo + the macOS SDK)
 cd client
@@ -19,8 +19,12 @@ bash scripts/package-macos.sh v0.1.2
 cp dist/EEA-Capture-v0.1.2-macOS.dmg ../deploy/downloads/
 
 # checksums for whatever is published
-sha256sum capture-*-windows-amd64.exe EEA-Capture-*.dmg > SHA256SUMS
+sha256sum capture.exe EEA-Capture*.dmg > SHA256SUMS
 ```
+
+The Windows build is published as plain `capture.exe` (no version in the name,
+no archive). A leftover `capture-vX-windows-amd64.exe` is served only when
+`capture.exe` is missing, so a stale file cannot shadow the current build.
 
 The Windows binary alone is enough: its default `capture_archive=auto` uses the
 staged SingleFile extension when present and otherwise falls back to the

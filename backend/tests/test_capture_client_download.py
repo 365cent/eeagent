@@ -3,6 +3,10 @@
 The page must only offer what the server actually has (a dead macOS link is
 worse than an honest "not published yet"), and the download itself must be the
 binary - not a zip wrapper that 7-Zip refuses.
+
+The Windows build is published as plain `capture.exe`; a versioned
+`capture-vX-windows-amd64.exe` from an older publish may still sit beside it and
+must never win.
 """
 from __future__ import annotations
 
@@ -25,8 +29,12 @@ def _stage(tmp_path, name: str, payload: bytes):
     return path
 
 
-async def test_releases_lists_only_what_is_published(client, tmp_path, monkeypatch):
-    _stage(tmp_path, "capture-v0.1.2-windows-amd64.exe", WINDOWS_BYTES)
+def _publish_windows(tmp_path, payload: bytes = WINDOWS_BYTES, name: str = "capture.exe"):
+    return _stage(tmp_path, name, payload)
+
+
+async def test_releases_lists_the_plain_exe(client, tmp_path, monkeypatch):
+    _publish_windows(tmp_path)
     monkeypatch.setattr(capture_api, "_client_dist_dir", lambda: tmp_path)
 
     response = await client.get("/api/v1/capture/client-releases")
@@ -34,7 +42,7 @@ async def test_releases_lists_only_what_is_published(client, tmp_path, monkeypat
     assert response.status_code == 200, response.text
     releases = response.json()
     assert [(item["platform"], item["filename"]) for item in releases] == [
-        ("windows", "capture-v0.1.2-windows-amd64.exe")
+        ("windows", "capture.exe")
     ]
     assert releases[0]["size_bytes"] == len(WINDOWS_BYTES)
     assert releases[0]["sha256"] == hashlib.sha256(WINDOWS_BYTES).hexdigest()
@@ -42,7 +50,7 @@ async def test_releases_lists_only_what_is_published(client, tmp_path, monkeypat
 
 
 async def test_macos_appears_once_a_dmg_is_published(client, tmp_path, monkeypatch):
-    _stage(tmp_path, "capture-v0.1.2-windows-amd64.exe", WINDOWS_BYTES)
+    _publish_windows(tmp_path)
     _stage(tmp_path, "EEA-Capture-v0.1.2-macOS.dmg", MAC_BYTES)
     monkeypatch.setattr(capture_api, "_client_dist_dir", lambda: tmp_path)
 
@@ -52,7 +60,7 @@ async def test_macos_appears_once_a_dmg_is_published(client, tmp_path, monkeypat
 
 
 async def test_windows_download_is_the_executable_itself(client, tmp_path, monkeypatch):
-    _stage(tmp_path, "capture-v0.1.2-windows-amd64.exe", WINDOWS_BYTES)
+    _publish_windows(tmp_path)
     monkeypatch.setattr(capture_api, "_client_dist_dir", lambda: tmp_path)
 
     response = await client.get("/api/v1/capture/client-download?platform=windows")
@@ -60,24 +68,35 @@ async def test_windows_download_is_the_executable_itself(client, tmp_path, monke
     assert response.status_code == 200, response.text
     assert response.content == WINDOWS_BYTES
     assert response.headers["content-type"] == "application/vnd.microsoft.portable-executable"
-    assert "capture-v0.1.2-windows-amd64.exe" in response.headers["content-disposition"]
+    assert 'filename="capture.exe"' in response.headers["content-disposition"]
 
 
-async def test_newest_build_wins(client, tmp_path, monkeypatch):
-    old = _stage(tmp_path, "capture-v0.1.1-windows-amd64.exe", b"old")
-    new = _stage(tmp_path, "capture-v0.1.2-windows-amd64.exe", b"new")
-    old.touch()
-    os.utime(old, (1_000_000, 1_000_000))
+async def test_plain_capture_exe_beats_a_leftover_versioned_build(client, tmp_path, monkeypatch):
+    versioned = _publish_windows(tmp_path, b"old", "capture-v0.1.1-windows-amd64.exe")
+    plain = _publish_windows(tmp_path, b"new")
+    # Even when the leftover is newer, the published name wins.
+    os.utime(plain, (1_000_000, 1_000_000))
     monkeypatch.setattr(capture_api, "_client_dist_dir", lambda: tmp_path)
 
     response = await client.get("/api/v1/capture/client-download?platform=windows")
 
     assert response.content == b"new"
-    assert new.name in response.headers["content-disposition"]
+    assert 'filename="capture.exe"' in response.headers["content-disposition"]
+    assert versioned.is_file()
+
+
+async def test_a_versioned_build_still_works_when_it_is_all_there_is(client, tmp_path, monkeypatch):
+    _publish_windows(tmp_path, b"only", "capture-v0.1.2-windows-amd64.exe")
+    monkeypatch.setattr(capture_api, "_client_dist_dir", lambda: tmp_path)
+
+    response = await client.get("/api/v1/capture/client-download?platform=windows")
+
+    assert response.status_code == 200
+    assert response.content == b"only"
 
 
 async def test_unpublished_platform_is_a_404(client, tmp_path, monkeypatch):
-    _stage(tmp_path, "capture-v0.1.2-windows-amd64.exe", WINDOWS_BYTES)
+    _publish_windows(tmp_path)
     monkeypatch.setattr(capture_api, "_client_dist_dir", lambda: tmp_path)
 
     mac = await client.get("/api/v1/capture/client-download?platform=macos")

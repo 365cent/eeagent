@@ -42,7 +42,7 @@ bash deploy/build.sh
 | 看日志 | `cd deploy && docker compose logs -f api worker web` |
 | 改代码后更新 | `bash deploy/build.sh`（加 `--no-cache` 强制全量重建） |
 | 手动迁移 | `bash deploy/migrate.sh` |
-| 发布采集客户端 | 把 `capture-vX-windows-amd64.zip` 与 `SHA256SUMS` 放进 `deploy/downloads/`，再 `docker compose restart nginx`；应用内「下载采集客户端」页面即列出该文件 |
+| 发布采集客户端 | 把 `capture.exe`（macOS 为 `EEA-Capture-*.dmg`）与 `SHA256SUMS` 放进 `deploy/downloads/`，API 与 nginx 会自动列出并直接下载（不再打包 zip） |
 | 备份 | `bash deploy/backup.sh` → `deploy/backups/eea-<时间>.{dump,tar.gz,manifest.txt}` |
 | 恢复 | `bash deploy/restore.sh <备份时间戳>` |
 | 清理孤立对象与过期终态任务 | `cd deploy && docker compose --profile ops run --rm maintenance`（终态任务默认保留 `CAPTURE_JOB_RETENTION_DAYS=30` 天） |

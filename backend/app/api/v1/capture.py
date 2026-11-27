@@ -64,17 +64,26 @@ def _client_dist_dir() -> Path:
 
 # The client is published uncompressed: a Windows .exe and a macOS .dmg.
 # A .app is a directory, so a disk image is the one-file form macOS users expect.
-_CLIENT_PLATFORMS: dict[str, tuple[str, str]] = {
-    "windows": ("capture-*-windows-amd64.exe", "application/vnd.microsoft.portable-executable"),
-    "macos": ("EEA-Capture-*.dmg", "application/x-apple-diskimage"),
+# (preferred filename, fallback glob, media type) - capture.exe always wins over
+# a versioned name left behind by an older publish.
+_CLIENT_PLATFORMS: dict[str, tuple[str, str, str]] = {
+    "windows": (
+        "capture.exe",
+        "capture*.exe",
+        "application/vnd.microsoft.portable-executable",
+    ),
+    "macos": ("EEA-Capture.dmg", "EEA-Capture-*.dmg", "application/x-apple-diskimage"),
 }
 
 
 def _client_artifact(platform: str) -> Path | None:
-    pattern, _media_type = _CLIENT_PLATFORMS[platform]
+    preferred_name, pattern, _media_type = _CLIENT_PLATFORMS[platform]
     dist = _client_dist_dir()
     if not dist.is_dir():
         return None
+    preferred = dist / preferred_name
+    if preferred.is_file():
+        return preferred
     candidates = [path for path in dist.glob(pattern) if path.is_file()]
     if not candidates:
         return None
@@ -124,7 +133,7 @@ async def download_capture_client(platform: str = "windows"):
     artifact = _client_artifact(platform)
     if artifact is None:
         raise HTTPException(404, f"{platform} capture client build not found")
-    _pattern, media_type = _CLIENT_PLATFORMS[platform]
+    _preferred, _pattern, media_type = _CLIENT_PLATFORMS[platform]
     return FileResponse(artifact, filename=artifact.name, media_type=media_type)
 
 
