@@ -59,6 +59,7 @@ EXPECTED_TABLES = {
     "eea_stored_object_orphan",
     "eea_maintenance_run",
     "eea_signal_studio_artifact",
+    "eea_theme_cluster_run",
 }
 
 EXPECTED_VIEWS = {"eea_v_tech_theme_metrics", "eea_v_tech_theme_display_tags"}
