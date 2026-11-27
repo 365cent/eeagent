@@ -16,6 +16,7 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from app.domains.capture.jobs import worker_loop
+from app.services.cluster_runner import cluster_worker_loop
 from app.db.base import engine
 
 
@@ -29,7 +30,7 @@ async def _run() -> None:
             # Windows development can stop the process with the default handler.
             pass
     try:
-        await worker_loop(stop_event)
+        await asyncio.gather(worker_loop(stop_event), cluster_worker_loop(stop_event))
     finally:
         await engine.dispose()
 

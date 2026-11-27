@@ -2,21 +2,18 @@
 
 The page used to recompute the report inside the request, so a new signal only
 appeared after a reload and 重放聚类 replayed the same graph. These cases pin the
-new pipeline: a signal queues a pass, the job script stores the payload, the API
+new pipeline: a signal queues a pass, the clustering worker publishes it, the API
 serves it, and the recompute button queues a fresh one.
 """
 
 from __future__ import annotations
-
-from unittest.mock import AsyncMock
 
 import pytest
 from sqlalchemy import select
 
 from app.db.base import SessionLocal
 from app.models.models import ThemeClusterRun
-from app.services import cluster_job
-from app.services.cluster_runner import QUEUED, READY, enqueue_cluster_run
+from app.services.cluster_runner import QUEUED, READY, enqueue_cluster_run, run_queued_reports
 
 pytestmark = [pytest.mark.anyio, pytest.mark.db]
 
@@ -65,25 +62,27 @@ async def test_a_second_signal_reuses_the_pending_run(client):
         assert await enqueue_cluster_run(db, trigger="signal") is None
 
 
-async def test_job_computes_and_stores_the_payload():
+async def test_worker_publishes_the_report():
     async with SessionLocal() as db:
         db.add(ThemeClusterRun(trigger="manual", status=QUEUED))
         await db.commit()
 
-    code = await cluster_job.main()
+    processed = await run_queued_reports()
 
-    assert code == 0
+    assert processed == 1
     runs = await _runs()
-    assert len(runs) == 1
     assert runs[0].status == READY
     assert runs[0].payload is not None
     assert runs[0].finished_at is not None
     assert "clusters" in runs[0].payload
 
+    # Nothing queued: the loop is idle instead of recomputing on every tick.
+    assert await run_queued_reports() == 0
+
 
 async def test_report_serves_the_stored_snapshot(client):
     await _create_signal(client, "https://example.com/cluster-snapshot", "芯粒快照报告")
-    await cluster_job.main()
+    await run_queued_reports()
 
     response = await client.get("/api/v1/themes/cluster-report")
 
@@ -96,20 +95,22 @@ async def test_report_serves_the_stored_snapshot(client):
     assert len(report["clusters"]) == len(stored.payload["clusters"])
 
 
-async def test_recompute_button_queues_and_starts_the_job(client, monkeypatch):
-    spawn = AsyncMock(return_value=True)
-    monkeypatch.setattr("app.api.v1.themes.spawn_cluster_job", spawn)
-
+async def test_recompute_button_queues_a_pass(client):
     response = await client.post("/api/v1/themes/cluster-report/recompute")
 
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["run_id"] is not None
-    assert body["status"] in {QUEUED, "running"}
-    spawn.assert_awaited()
+    assert body["status"] == QUEUED
 
     status = await client.get("/api/v1/themes/cluster-report/status")
     assert status.json()["run_id"] == body["run_id"]
+    assert status.json()["status"] == QUEUED
+
+    # The worker is what publishes it; the page's poll then sees ready.
+    await run_queued_reports()
+    status = await client.get("/api/v1/themes/cluster-report/status")
+    assert status.json()["status"] == READY
 
 
 async def test_status_reports_when_nothing_ran_yet(client):

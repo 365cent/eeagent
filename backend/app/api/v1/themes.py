@@ -29,7 +29,6 @@ from app.services.cluster_runner import (
     pending_run,
     ready_run,
     run_summary,
-    spawn_cluster_job,
 )
 from app.domains.tagging.service import get_or_create_vocab  # noqa: F401 (shared helper)
 from app.domains.theme.naming import suggest_theme_name
@@ -133,7 +132,8 @@ async def theme_cluster_report(db: AsyncSession = Depends(get_db)):
         report = ThemeClusterReport.model_validate(stored.payload)
         report.computed_at = stored.finished_at or stored.started_at or stored.requested_at
         report.run_id = stored.id
-        report.pending = await pending_run(db) is not None
+        pending = await pending_run(db)
+        report.pending = pending is not None
         return report
 
     report = await build_theme_cluster_report(db)
@@ -157,16 +157,15 @@ async def theme_cluster_report(db: AsyncSession = Depends(get_db)):
 
 @router.post("/cluster-report/recompute", response_model=ThemeClusterRunOut)
 async def recompute_theme_cluster_report(db: AsyncSession = Depends(get_db)):
-    """Queue a fresh pass and start the background Python job right away."""
+    """Queue a fresh pass; the clustering worker publishes it within seconds."""
     await enqueue_cluster_run(db, trigger="manual")
     await db.commit()
-    await spawn_cluster_job()
     return ThemeClusterRunOut(**run_summary(await latest_run(db)))
 
 
 @router.get("/cluster-report/status", response_model=ThemeClusterRunOut)
 async def theme_cluster_run_status(db: AsyncSession = Depends(get_db)):
-    """Poll the newest pass; the page uses it to replace the graph when ready."""
+    """Poll the newest pass; the page replaces the graph when it is ready."""
     return ThemeClusterRunOut(**run_summary(await latest_run(db)))
 
 

@@ -1,21 +1,24 @@
 """Background theme-clustering runs.
 
-The list itself lives in ``eea_theme_cluster_run``; this module owns the queue
-rules, the subprocess launcher and the sweeper that restarts a job when runs are
-left queued (API restarted, subprocess died, or a signal arrived while nothing
-was running).
+A run row lives in ``eea_theme_cluster_run``. A signal insert queues one (see
+create_signal_record), the manual 重放聚类 button queues one, and the clustering
+worker claims them, builds the report and publishes it. The report snapshot is
+what GET /themes/cluster-report serves.
+
+Why a loop in the worker process instead of spawning a script per run: the API
+is a threaded server, and fork+exec from it was measured taking ~25 s before the
+child even started (the same command from a shell took 1 s). A warm loop in the
+worker claims a run within a couple of seconds and never touches the API.
 """
 
 from __future__ import annotations
 
 import asyncio
 import logging
-import os
-import sys
 import uuid
 from datetime import datetime, timedelta, timezone
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import SessionLocal
@@ -28,15 +31,11 @@ RUNNING = "running"
 READY = "ready"
 FAILED = "failed"
 
-CLUSTER_JOB_MODULE = "app.services.cluster_job"
-# A run that has been "running" longer than this lost its worker (deploy,
-# OOM kill); the sweeper may start a new pass instead of waiting forever.
+# How often an idle worker looks for queued runs.
+POLL_SECONDS = 2.0
+# A run that has been "running" longer than this lost its worker (deploy, OOM
+# kill); the loop may claim a new pass instead of waiting forever.
 STALE_RUNNING = timedelta(minutes=10)
-# Subprocesses are cheap but not free: keep at least this gap between spawns.
-MIN_SPAWN_GAP = timedelta(seconds=5)
-SWEEP_SECONDS = 5.0
-
-_last_spawn_at: datetime | None = None
 
 
 def _now() -> datetime:
@@ -121,70 +120,79 @@ def run_summary(run: ThemeClusterRun | None) -> dict[str, object]:
     }
 
 
-async def spawn_cluster_job() -> bool:
-    """Start `python -m app.services.cluster_job` without blocking the API.
-
-    The job is a separate process on purpose: sklearn/MDS work never sits on the
-    request loop, and a crash there cannot take the API down with it.
-    """
-    global _last_spawn_at
+async def _claim_queued() -> list[ThemeClusterRun]:
     now = _now()
-    if _last_spawn_at is not None and now - _last_spawn_at < MIN_SPAWN_GAP:
-        return False
-    _last_spawn_at = now
-    try:
-        env = os.environ.copy()
-        env.setdefault("PYTHONUNBUFFERED", "1")
-        await asyncio.create_subprocess_exec(
-            sys.executable,
-            "-m",
-            CLUSTER_JOB_MODULE,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-            env=env,
-            start_new_session=True,
+    async with SessionLocal() as db:
+        queued_ids = (
+            select(ThemeClusterRun.id)
+            .where(ThemeClusterRun.status == QUEUED)
+            .with_for_update(skip_locked=True)
         )
-        return True
-    except Exception as exc:  # noqa: BLE001 - a missing spawn must not break the API
-        logger.warning("cluster job spawn failed (%s)", exc.__class__.__name__)
-        return False
+        rows = (
+            await db.execute(
+                update(ThemeClusterRun)
+                .where(ThemeClusterRun.id.in_(queued_ids))
+                .values(status=RUNNING, started_at=now)
+                .returning(ThemeClusterRun.id, ThemeClusterRun.trigger)
+            )
+        ).all()
+        await db.commit()
+        return [ThemeClusterRun(id=row.id, trigger=row.trigger, status=RUNNING) for row in rows]
 
 
-async def _run_is_live(run: ThemeClusterRun | None) -> bool:
-    if run is None:
-        return False
-    if run.status == QUEUED:
-        return True
-    if run.status != RUNNING:
-        return False
-    started = run.started_at or run.requested_at
-    return started is not None and _now() - started < STALE_RUNNING
+async def run_queued_reports() -> int:
+    """Claim every queued pass, compute once, publish the JSON. 0 when idle."""
+    claimed = await _claim_queued()
+    if not claimed:
+        return 0
+    ids = [run.id for run in claimed]
+    try:
+        from app.domains.tagging.clustering import build_theme_cluster_report
+
+        async with SessionLocal() as db:
+            report = await build_theme_cluster_report(db)
+        async with SessionLocal() as db:
+            await db.execute(
+                update(ThemeClusterRun)
+                .where(ThemeClusterRun.id.in_(ids))
+                .values(
+                    status=READY,
+                    payload=report.model_dump(mode="json"),
+                    signal_count=report.sample_size,
+                    cluster_count=len(report.clusters),
+                    error=None,
+                    finished_at=_now(),
+                )
+            )
+            await db.commit()
+        return len(claimed)
+    except Exception as exc:  # noqa: BLE001 - the row records the failure
+        detail = f"{type(exc).__name__}: {exc}"[:1000]
+        async with SessionLocal() as db:
+            await db.execute(
+                update(ThemeClusterRun)
+                .where(ThemeClusterRun.id.in_(ids))
+                .values(status=FAILED, error=detail, finished_at=_now())
+            )
+            await db.commit()
+        logger.warning("theme cluster run failed (%s)", detail)
+        return len(claimed)
 
 
-async def cluster_sweeper(stop_event: asyncio.Event) -> None:
-    """Keep queued runs moving even when no request is in flight.
+async def cluster_worker_loop(stop_event: asyncio.Event) -> None:
+    """Publish queued clustering passes until stopped.
 
-    A signal commits its run row, but the process that inserted it may be the
-    capture worker (or a CLI import) with no request handling the spawn; the
-    sweeper is what makes "new signal -> new graph" true without a page reload.
+    Runs next to the capture worker so a new signal produces a new graph within
+    a couple of seconds without any request having to start a process.
     """
     while not stop_event.is_set():
         try:
-            async with SessionLocal() as db:
-                pending = await pending_run(db)
-                if pending is not None and await _run_is_live(pending):
-                    status = (
-                        (await db.execute(select(ThemeClusterRun.status).where(ThemeClusterRun.id == pending.id)))
-                        .scalar_one_or_none()
-                    )
-                    if status == QUEUED:
-                        await spawn_cluster_job()
-                    elif status == RUNNING and pending.started_at is not None:
-                        if _now() - pending.started_at >= STALE_RUNNING:
-                            await spawn_cluster_job()
-        except Exception as exc:  # noqa: BLE001 - the sweeper never dies
-            logger.warning("cluster sweeper pass failed (%s)", exc.__class__.__name__)
+            processed = await run_queued_reports()
+            if processed:
+                logger.info("theme cluster run published (%d pass(es))", processed)
+        except Exception as exc:  # noqa: BLE001 - the loop never dies
+            logger.warning("theme cluster loop pass failed (%s)", exc.__class__.__name__)
         try:
-            await asyncio.wait_for(stop_event.wait(), timeout=SWEEP_SECONDS)
+            await asyncio.wait_for(stop_event.wait(), timeout=POLL_SECONDS)
         except asyncio.TimeoutError:
             pass
