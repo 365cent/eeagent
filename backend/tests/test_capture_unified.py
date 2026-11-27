@@ -111,7 +111,7 @@ async def test_document_file_upload_creates_derived_signal(client, monkeypatch):
     """Drop a pptx → document row + ingest + derived signal with document_id."""
 
     async def fake_ingest(data, filename, mime, **kwargs):
-        from app.services.doc_ingest import IngestResult
+        from app.domains.evidence.doc_ingest import IngestResult
 
         return IngestResult(canonical_md="# 白皮书\n\n48V 智能配电", markitdown_version="0.1.9")
 
@@ -142,7 +142,7 @@ async def test_url_only_fetching_a_document_goes_document_path(client, monkeypat
     """Bare url that returns a PDF: fetched bytes land as a document signal."""
 
     async def fake_ingest(data, filename, mime, **kwargs):
-        from app.services.doc_ingest import IngestResult
+        from app.domains.evidence.doc_ingest import IngestResult
 
         assert data == b"%PDF-fake"
         return IngestResult(canonical_md="# 报告\n", markitdown_version="0.1.9")

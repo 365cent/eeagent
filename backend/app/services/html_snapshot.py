@@ -337,7 +337,7 @@ def _lift_content_images(container) -> list:
 
     The base64 payload never enters the markdown. Tiny images are dropped.
     """
-    from app.services.doc_ingest import Figure
+    from app.domains.evidence.doc_ingest import Figure
 
     figures: list[Figure] = []
     for img in list(container.find_all("img")):
@@ -534,7 +534,7 @@ def parse_html_snapshot(html: bytes | str, *, page_url: str | None = None) -> Ht
 
 async def _caption_snapshot_figures(figures: list) -> None:
     from app.core.config import get_settings
-    from app.services.doc_ingest import caption_figure
+    from app.domains.evidence.doc_ingest import caption_figure
     from app.platform.llm_gateway import resolve_vision_model
 
     settings = get_settings()
@@ -603,7 +603,7 @@ def figure_data_urls(figures: list) -> list[dict[str, int | str]]:
     """Serialize lifted figures for GET /signals/{id}/figures (no vision re-run)."""
     import base64
 
-    from app.services.doc_ingest import Figure
+    from app.domains.evidence.doc_ingest import Figure
 
     items: list[dict[str, int | str]] = []
     for figure in figures:

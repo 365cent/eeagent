@@ -22,7 +22,7 @@ PAGE_URL = "https://mp.weixin.qq.com/s/efuse-missing-objects"
 @pytest.fixture
 def fake_doc_ingest(monkeypatch):
     async def _ingest(data, filename, mime, **kwargs):
-        from app.services.doc_ingest import IngestResult
+        from app.domains.evidence.doc_ingest import IngestResult
 
         return IngestResult(
             canonical_md="# Missing objects\n\nCanonical body for the test.",

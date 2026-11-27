@@ -38,7 +38,7 @@ from app.platform.launchdarkly import EVIDENCE_CAPTURE, require_feature, track_w
 from app.db.base import get_db
 from app.models.models import CaptureClientClaim, CaptureJob, Document, PanoramaImportBatch, Signal
 from app.schemas.schemas import CaptureJobOut, CaptureResult
-from app.services.doc_ingest import normalize_document_mime
+from app.domains.evidence.doc_ingest import normalize_document_mime
 from app.platform.objectstore import save_bytes
 from app.domains.vocab.refcodes import codes, normalize as normalize_ref_code
 from app.services.url_fetch import FetchError, fetch_url

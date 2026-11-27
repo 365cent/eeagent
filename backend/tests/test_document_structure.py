@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.services.doc_ingest import Figure
+from app.domains.evidence.doc_ingest import Figure
 from app.domains.evidence.doc_structure import assign_figure_locations, split_markdown_sections
 
 pytestmark = pytest.mark.no_db

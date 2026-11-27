@@ -250,7 +250,7 @@ async def test_cluster_report_covers_a_document_only_corpus(client, monkeypatch)
     The report pool used to filter `document_id IS NULL`, so a document-only
     corpus clustered 0 samples and /createTopic could never propose a topic.
     """
-    from app.services import doc_ingest
+    from app.domains.evidence import doc_ingest
 
     async def fake_ingest(data, filename, mime, **kwargs):
         return doc_ingest.IngestResult(

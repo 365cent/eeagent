@@ -520,7 +520,7 @@ async def test_overview_counts_each_strategy_landing_point_at_its_current_step(c
 
 
 async def test_overview_failed_document_todo_tracks_retryable_ingest_state(client, monkeypatch):
-    from app.services import doc_ingest
+    from app.domains.evidence import doc_ingest
 
     async def fail_ingest(data, filename, mime, **kwargs):
         raise RuntimeError("expected parser failure")

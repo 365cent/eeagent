@@ -10,7 +10,7 @@ from PIL import Image
 from pptx import Presentation
 from pptx.util import Inches
 
-from app.services import doc_ingest
+from app.domains.evidence import doc_ingest
 
 pytestmark = pytest.mark.anyio
 
@@ -687,7 +687,7 @@ async def test_caption_only_pdf_is_not_readable_text(monkeypatch):
     def stub_convert(data, suffix):
         return "d1-05", None
 
-    monkeypatch.setattr("app.services.doc_ingest._convert_sync", stub_convert)
+    monkeypatch.setattr("app.domains.evidence.doc_ingest._convert_sync", stub_convert)
     with pytest.raises(ValueError, match="OCR"):
         await doc_ingest.ingest_document(
             _pdf_with_one_image(), "d1-05.pdf", "application/pdf", vision_captions=False

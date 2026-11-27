@@ -46,7 +46,7 @@ from app.domains.evidence.document_pipeline import (
     ingest_stored_document,
     mib_label,
 )
-from app.services.doc_ingest import ingest_document, normalize_document_mime
+from app.domains.evidence.doc_ingest import ingest_document, normalize_document_mime
 from app.services.doc_pdf_preview import (
     DocumentPreviewError,
     UnsupportedDocumentPreviewError,

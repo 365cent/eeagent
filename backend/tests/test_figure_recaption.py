@@ -28,7 +28,7 @@ def test_figure_review_state_flags_empty_and_unlocated():
 
 async def _upload_with_figure(client, monkeypatch, caption: str = ""):
     from app.domains.evidence import document_pipeline
-    from app.services.doc_ingest import Figure, IngestResult
+    from app.domains.evidence.doc_ingest import Figure, IngestResult
 
     async def fake_ingest(data, filename, mime, **kwargs):
         return IngestResult(
@@ -123,7 +123,7 @@ async def test_recaption_unknown_figure_is_404(client, monkeypatch):
 
 async def test_recaption_without_marker_keeps_needs_review(client, monkeypatch):
     from app.domains.evidence import document_pipeline
-    from app.services.doc_ingest import Figure, IngestResult
+    from app.domains.evidence.doc_ingest import Figure, IngestResult
 
     async def fake_ingest(data, filename, mime, **kwargs):
         return IngestResult(

@@ -56,7 +56,9 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence for the tenth move: `lint-imports` 3 kept against both configs; `pytest tests/test_llm_tags.py tests/test_tech_tag_pipeline.py tests/test_signals_ingest.py tests/test_themes.py` → 52 passed (46.5 s); `py_compile` clean; collection is 628 tests.
 - Eleventh move: `body_excerpt.py` → `app/domains/evidence/body_excerpt.py` (imports only the semantic and tagging domains plus models; seven call sites) and `caption_cache.py` → `app/platform/caption_cache.py` (imports core config and the platform prompt revision; four call sites). Both were dependency-clean for their target layers.
 - Evidence for the eleventh move: `lint-imports` 3 kept against both configs; `pytest tests/test_body_excerpt.py tests/test_caption_cache.py tests/test_document_ingest.py tests/test_signals_ingest.py` → 57 passed (39.7 s); `py_compile` clean; collection is 628 tests.
-- Remaining BE-17 work: `app.services` still holds `doc_ingest`, `doc_pdf_preview`, `pptx_deck_preview` and the agent/capture orchestration modules; each needs its own slice.
+- Twelfth move: the document ingest pipeline `doc_ingest.py` → `app/domains/evidence/doc_ingest.py`. After the cache/platform work it imported only core config, platform modules and `doc_structure`, so the evidence domain now owns the whole ingest path. Eighteen files updated, including four `from app.services import doc_ingest` module imports and one comment in `core/config.py`.
+- Evidence for the twelfth move: `lint-imports` 3 kept against both configs; `pytest tests/test_document_ingest.py tests/test_document_signals.py tests/test_capture_unified.py tests/test_figure_recaption.py tests/test_document_structure.py` → 63 passed (36.1 s); `py_compile` clean; collection is 628 tests.
+- Remaining BE-17 work: `app.services` holds `doc_pdf_preview`, `pptx_deck_preview`, `pptx_slide_render` and the agent/capture orchestration modules; each needs its own slice.
 
 ### Full backend regression after the BE-17 moves (BE-16 evidence)
 

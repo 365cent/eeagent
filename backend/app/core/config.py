@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     doc_raw_upload_max_bytes: int = 120 * 1024 * 1024
     doc_ingest_max_bytes: int = 120 * 1024 * 1024
 
-    # Vision-caption budget per document (app/services/doc_ingest.py). Cap is
+    # Vision-caption budget per document (app/domains/evidence/doc_ingest.py). Cap is
     # configurable: a large deck can hold far more document-body figures than 8
     # (2026-10-29 会议 S1-4: QCC 样例 95 张内嵌图，8 张上限只覆盖零头).
     max_figures: int = 16

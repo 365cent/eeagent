@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.models.agent_models import DocumentChunk, DocumentFigure
 from app.models.models import Document
-from app.services.doc_ingest import Figure, caption_figure
+from app.domains.evidence.doc_ingest import Figure, caption_figure
 from app.domains.evidence.doc_structure import split_markdown_sections
 from app.platform.llm_gateway import resolve_vision_model
 from app.platform.objectstore import load_bytes, save_bytes, sha256_bytes
