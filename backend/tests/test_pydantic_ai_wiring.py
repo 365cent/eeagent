@@ -8,13 +8,13 @@ import pytest
 from pydantic_ai import Agent, DeferredToolRequests
 from pydantic_ai.models.test import TestModel
 
-from app.services.agent_contract import (
+from app.domains.agent.contract import (
     ALLOWED_AGENT_TOOLS,
     AgentDeps,
     AgentTurn,
     CitationLedger,
 )
-from app.services.agent_workflow import (
+from app.domains.agent.workflow import (
     build_eea_agent,
     dumps_message_history,
     loads_message_history,
@@ -48,8 +48,8 @@ async def test_message_history_round_trip():
 
 @pytest.mark.no_db
 async def test_propose_patch_rejects_forged_citations():
-    from app.services.agent_citations import assert_citations_usable
-    from app.services.agent_contract import CitationLedger
+    from app.domains.agent.citations import assert_citations_usable
+    from app.domains.agent.contract import CitationLedger
 
     ledger = CitationLedger()
     with pytest.raises(ValueError, match="无效"):
@@ -60,7 +60,7 @@ async def test_propose_patch_rejects_forged_citations():
 async def test_figure_citation_carries_index():
     import uuid
 
-    from app.services.agent_citations import figure_ref_id, make_figure_citation
+    from app.domains.agent.citations import figure_ref_id, make_figure_citation
 
     doc_id = uuid.uuid4()
     citation = make_figure_citation(
@@ -78,8 +78,8 @@ async def test_dynamic_instructions_include_project_and_memory():
     from app.core.identity import OperatorIdentity
     from app.db.base import SessionLocal
     from app.models.agent_models import AgentMemory, AgentSession
-    from app.services.agent_instructions import build_instruction_addon
-    from app.services.agent_workflow import deps_for_session
+    from app.domains.agent.instructions import build_instruction_addon
+    from app.domains.agent.workflow import deps_for_session
 
     async with SessionLocal() as db:
         session = AgentSession(operator_subject="dev-user", project_key="proj-a", title="t")
@@ -115,7 +115,7 @@ async def test_run_agent_turn_wires_event_stream_handler():
     from unittest.mock import MagicMock
 
     from app.core.identity import OperatorIdentity
-    from app.services.agent_workflow import build_eea_agent, run_agent_turn
+    from app.domains.agent.workflow import build_eea_agent, run_agent_turn
 
     agent = await build_eea_agent(model=TestModel())
     captured: dict = {}
@@ -162,7 +162,7 @@ async def test_run_agent_turn_without_sink_uses_non_stream_run():
     from unittest.mock import MagicMock
 
     from app.core.identity import OperatorIdentity
-    from app.services.agent_workflow import build_eea_agent, run_agent_turn
+    from app.domains.agent.workflow import build_eea_agent, run_agent_turn
 
     agent = await build_eea_agent(model=TestModel())
     captured: dict = {}
@@ -195,7 +195,7 @@ async def test_run_agent_turn_without_sink_uses_non_stream_run():
 
 @pytest.mark.no_db
 async def test_ledger_rejects_unknown_and_needs_review_citations():
-    from app.services.agent_citations import make_figure_citation
+    from app.domains.agent.citations import make_figure_citation
 
     ledger = CitationLedger()
     fig = make_figure_citation(

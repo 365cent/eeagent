@@ -9,8 +9,8 @@ import pytest
 
 from app.core.identity import OperatorIdentity
 from app.models.agent_models import AgentSession
-from app.services.agent_contract import AgentRunOutput
-from app.services.agent_runtime import execute_user_message
+from app.domains.agent.contract import AgentRunOutput
+from app.domains.agent.runtime import execute_user_message
 
 pytestmark = [pytest.mark.no_db, pytest.mark.anyio]
 
@@ -35,7 +35,7 @@ async def test_stream_buffer_not_duplicated_when_terminal_append_fails(monkeypat
         if event_type == "turn.completed":
             raise RuntimeError("simulate DB failure on terminal event")
 
-    monkeypatch.setattr("app.services.agent_runtime.append_event", append_event)
+    monkeypatch.setattr("app.domains.agent.runtime.append_event", append_event)
 
     async def fake_turn(agent, **kwargs):
         sink = kwargs["event_sink"]
@@ -44,13 +44,13 @@ async def test_stream_buffer_not_duplicated_when_terminal_append_fails(monkeypat
         output = AgentRunOutput(answer="ok", citation_refs=[], patch_ids=[])
         return output, [], None
 
-    monkeypatch.setattr("app.services.agent_runtime.run_agent_turn", fake_turn)
+    monkeypatch.setattr("app.domains.agent.runtime.run_agent_turn", fake_turn)
     monkeypatch.setattr(
-        "app.services.agent_runtime.build_eea_agent",
+        "app.domains.agent.runtime.build_eea_agent",
         AsyncMock(return_value=MagicMock()),
     )
     monkeypatch.setattr(
-        "app.services.agent_runtime.build_instruction_addon",
+        "app.domains.agent.runtime.build_instruction_addon",
         AsyncMock(return_value=""),
     )
 

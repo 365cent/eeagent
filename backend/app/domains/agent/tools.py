@@ -11,8 +11,8 @@ from sqlalchemy.orm import selectinload
 
 from app.models.agent_models import AgentPatch, AgentSession, DocumentChunk
 from app.models.models import Document, Signal, SignalTag, TechTheme
-from app.services.agent_citations import make_signal_citation
-from app.services.agent_contract import (
+from app.domains.agent.citations import make_signal_citation
+from app.domains.agent.contract import (
     AgentDeps,
     ApplyPatchRequest,
     ApplyPatchResult,
@@ -30,8 +30,8 @@ from app.services.agent_contract import (
     TagSuggestionToolResult,
     ThemeSuggestionToolResult,
 )
-from app.services.agent_patches import apply_confirmed_patch, propose_signal_patch
-from app.services.agent_rag import _chunk_citation, search_document_chunks
+from app.domains.agent.patches import apply_confirmed_patch, propose_signal_patch
+from app.domains.agent.rag import _chunk_citation, search_document_chunks
 from app.domains.evidence.body_excerpt import text_for_tagging
 from app.domains.evidence.judgment import judge_signal_type, judge_stage, rank_theme_overlaps
 from app.domains.semantic.llm import suggest_tags_with_llm
@@ -263,7 +263,7 @@ async def apply_confirmed_patch_tool(
 async def draft_trace_report_tool(
     ctx: RunContext[AgentDeps], payload: DraftTraceReportRequest
 ) -> DraftTraceReportResult:
-    from app.services.agent_trace import build_signal_trace_markdown
+    from app.domains.agent.trace import build_signal_trace_markdown
 
     markdown, citations = await build_signal_trace_markdown(ctx.deps.db, payload.signal_id)
     registered = [ctx.deps.ledger.register(c) for c in citations]

@@ -5,7 +5,7 @@ assistant; Pydantic AI talks to the same endpoint so agents share one model
 resolver, one key, and one place to observe traffic.
 
 The legacy signal assistant still uses `llm_gateway.chat_completion`.
-BE-14 uses `app.services.agent_workflow.build_eea_agent`.
+BE-14 uses `app.domains.agent.workflow.build_eea_agent`.
 """
 from __future__ import annotations
 

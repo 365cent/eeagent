@@ -15,9 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.core.identity import OperatorIdentity
 from app.models.agent_models import AgentMessage, AgentRun, AgentSession
-from app.services.agent_events import append_event
-from app.services.agent_instructions import build_instruction_addon
-from app.services.agent_workflow import (
+from app.domains.agent.events import append_event
+from app.domains.agent.instructions import build_instruction_addon
+from app.domains.agent.workflow import (
     build_eea_agent,
     deps_for_session,
     dumps_message_history,

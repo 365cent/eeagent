@@ -237,7 +237,7 @@
 - 网关实测（2026-11-19，企业内网）：`scripts/probe_model_speed.py` 测得 glm-5.3-o-anthropic 32.3 TPS / TTFT 0.58s，desaysv-anthropic 11.8、desaysv 10.8；Qwen3.6-35B 与 deepseek-v4.1-flash-1017 返回空内容（降级不记速度），d3-mini/fasth3 为 404 model_not_found、jev-27b-vl 503；浏览器实战单轮 14.9s 完成，回复脚注显示 `glm-5.3-w4a8-o`，`GET /llm/status` 返回 attempt_budget=30、hedge 2s/4。验收：52 项模型相关测试通过（榜单/预算/竞速/状态/用量）。
 - 流式文本（2026-11-19）：`run_agent_turn` 消费 pydantic-ai 2.x 交给 `event_stream_handler` 的事件流（异步可迭代，而不是单事件），把推理模型 `ThinkingPart` 增量转发为 `thinking.delta`、函数工具调用转发为 `tool.call`；最终答案仍由 `stream_output` 的部分校验增量给出 `text.delta`，校验回退重写时用 `text.replace` 校正。token 增量与心跳不落 `agent_events`（最终消息已单独存库），重连重放只保留工具、引用和审批事件。
 - 来源：实施计划 §7.2 REQ-AGT-01…06；WBS 1.3.10。
-- 入口：[agent_workflow.py](app/services/agent_workflow.py)、[agent_runtime.py](app/services/agent_runtime.py)、[api/v1/agent.py](app/api/v1/agent.py)；遗留 [`/signals/{id}/assistant/messages`](app/api/v1/signals.py) 保持兼容。
+- 入口：[workflow.py](app/domains/agent/workflow.py)、[runtime.py](app/domains/agent/runtime.py)、[api/v1/agent.py](app/api/v1/agent.py)；遗留 [`/signals/{id}/assistant/messages`](app/api/v1/signals.py) 保持兼容。
 - 单一 Pydantic AI 编排；新增 sessions/messages 持久化和 SSE，支持重连、取消、错误结束；使用已安装版本支持的序列化 API。
 - 注册 search_evidence/search_rag/suggest_tags/suggest_theme/propose_patch/apply_confirmed_patch/draft_trace_report；不暴露 shell、任意 SQL 或文件路径。
  - 已接入语义 RAG：关键词命中优先；未命中时对文档 chunk 做 embedding + cosine 排序，再用 rerank 精排；embedding/rerank 失败返回明确降级状态。
@@ -301,6 +301,7 @@
 - 2026-11-27 再切片：主题命名 `theme_naming.py` → `app/domains/theme/naming.py`、主题聚类 `theme_clustering.py` → `app/domains/theme/clustering.py`、标签聚类 `tag_clustering.py` → `app/domains/tagging/clustering.py`；三者只依赖模型、evidence 域、vocab 与 LLM 语义层，`api/v1/themes.py` 与 3 个用例更新导入（含 monkeypatch 路径）。证据：`lint-imports` 两处配置各 3 kept，`pytest` 31 passed（主题/主题命名/标签聚类/OpenAPI 快照），全量收集 628 条。
 - 2026-11-27 再切片：工作室生成 `studio.py` → `app/domains/studio/service.py`、工作室产物存取 `signal_studio_store.py` → `app/domains/studio/store.py`；二者只依赖 schemas、platform.llm_prompts 与模型，`api/v1/signals.py` 更新导入。证据：`lint-imports` 两处配置各 3 kept，`pytest` 33 passed（工作室/信号摄取/OpenAPI 快照），全量收集 628 条。
 - 2026-11-27 再切片：战略四步漏斗 `strategy_funnel.py` 迁入新 `app/domains/strategy/funnel.py`（只依赖模型、platform.audit、schemas 与 core.identity）；`api/v1/strategy.py` 与 `overview.py` 更新导入。证据：`lint-imports` 两处配置各 3 kept，`pytest` 42 passed（战略/追踪审计总览/OpenAPI 快照），全量收集 628 条。
+- 2026-11-27 再切片：持久化研究 Agent 的十个模块 `agent_contract/citations/events/instructions/patches/rag/runtime/tools/trace/workflow` 迁入新 `app/domains/agent/`（短名 `contract.py`、`citations.py`、`workflow.py` 等）；它们只依赖模型、schemas、core 与 platform/evidence 域，`api/v1/agent.py`、`api/v1/documents.py`、`platform/pydantic_agent.py` 注释与 5 个用例更新。证据：`lint-imports` 两处配置各 3 kept，`pytest` 32 passed（Agent 工作流/事件流/运行时缓冲/文档证据/Pydantic 接线/OpenAPI 快照），全量收集 628 条。
 - [ ] OpenAPI 路径快照：[tests/test_openapi_snapshot.py](tests/test_openapi_snapshot.py) + [tests/snapshots/openapi_paths.json](tests/snapshots/openapi_paths.json)；路由变更须同步快照（`OPENAPI_UPDATE_SNAPSHOT=1`）。
 - [ ] 迁移顺序建议：`core`/`db`/`models` → `platform`；采集/信号/需求等垂直切片按 WBS 迁入 `domains`；共享摄取逻辑取代 API 私有函数互调（对齐 BE-01）。
 - 验收：import-linter 通过；OpenAPI 快照测试通过；无新增 `platform`→`api`/`domains` 违规；领域迁移切片有对应 pytest 证据。

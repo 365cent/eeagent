@@ -14,8 +14,8 @@ from app.core.config import get_settings
 from app.models.agent_models import DocumentChunk, DocumentFigure
 from app.models.models import Document
 from app.platform import semantic_api
-from app.services.agent_citations import make_chunk_citation, make_figure_citation
-from app.services.agent_contract import AgentCitation
+from app.domains.agent.citations import make_chunk_citation, make_figure_citation
+from app.domains.agent.contract import AgentCitation
 from app.domains.evidence.doc_structure import split_markdown_sections
 from app.platform.objectstore import load_body
 

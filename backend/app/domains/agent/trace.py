@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.models import DemandPoint, Signal, TechLandingPoint, TechTheme, VehicleFunction
-from app.services.agent_citations import make_signal_citation
-from app.services.agent_contract import AgentCitation
+from app.domains.agent.citations import make_signal_citation
+from app.domains.agent.contract import AgentCitation
 
 
 def _evidence_signal_ids(demand: DemandPoint | None) -> set[uuid.UUID]:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import uuid
 
-from app.services.agent_contract import AgentCitation, CitationLedger
+from app.domains.agent.contract import AgentCitation, CitationLedger
 
 
 def signal_ref_id(signal_id: uuid.UUID) -> str:

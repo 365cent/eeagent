@@ -34,7 +34,7 @@ from app.schemas.schemas import (
     DocumentRawOut,
     FigureRecaptionBatchOut,
 )
-from app.services.agent_rag import ensure_document_index
+from app.domains.agent.rag import ensure_document_index
 from app.platform.audit import record_correction
 from app.domains.evidence.figure_recaption import recaption_figure, recaption_pending_figures
 from app.platform.objectstore import load_body

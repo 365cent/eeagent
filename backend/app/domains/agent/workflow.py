@@ -19,8 +19,8 @@ from pydantic_ai.models import Model
 from pydantic_ai.models.openai import OpenAIChatModel
 
 from app.core.identity import OperatorIdentity
-from app.services.agent_citations import assert_citations_usable
-from app.services.agent_contract import (
+from app.domains.agent.citations import assert_citations_usable
+from app.domains.agent.contract import (
     AGENT_SYSTEM_INSTRUCTIONS,
     ALLOWED_AGENT_TOOLS,
     AgentDeps,
@@ -28,7 +28,7 @@ from app.services.agent_contract import (
     AgentTurn,
     CitationLedger,
 )
-from app.services.agent_tools import (
+from app.domains.agent.tools import (
     apply_confirmed_patch_tool,
     draft_trace_report_tool,
     propose_db_patch_tool,

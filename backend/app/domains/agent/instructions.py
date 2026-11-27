@@ -8,7 +8,7 @@ from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.agent_models import AgentMemory
-from app.services.agent_contract import AgentDeps
+from app.domains.agent.contract import AgentDeps
 
 
 async def build_instruction_addon(db: AsyncSession, deps: AgentDeps) -> str:

@@ -19,7 +19,7 @@ from pydantic_ai.messages import (
     ToolCallPart,
 )
 
-from app.services.agent_workflow import forward_stream_event
+from app.domains.agent.workflow import forward_stream_event
 
 pytestmark = [pytest.mark.no_db, pytest.mark.anyio]
 

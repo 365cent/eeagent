@@ -11,7 +11,7 @@ from pydantic_ai.models.function import AgentInfo, DeltaToolCall, FunctionModel
 
 from app.core.identity import OperatorIdentity, get_operator_identity
 from app.main import app
-from app.services.agent_contract import AgentTurn
+from app.domains.agent.contract import AgentTurn
 from tests.support import create_signal
 
 pytestmark = pytest.mark.anyio
@@ -44,7 +44,7 @@ async def _stub_agent_stream(messages: list[ModelMessage], info: AgentInfo):
 
 
 async def _agent_with_test_model():
-    from app.services.agent_workflow import build_eea_agent
+    from app.domains.agent.workflow import build_eea_agent
 
     model = FunctionModel(_stub_agent_turn, stream_function=_stub_agent_stream)
     return await build_eea_agent(model=model)
@@ -114,12 +114,12 @@ async def test_patch_propose_confirm_and_duplicate(client, monkeypatch):
     sig = await create_signal(client, title="patch target")
     session = (await client.post("/api/v1/agent/sessions", json={})).json()
 
-    from app.services.agent_patches import propose_signal_patch
+    from app.domains.agent.patches import propose_signal_patch
     from app.models.agent_models import AgentSession
     from app.db.base import SessionLocal
-    from app.services.agent_contract import PatchFieldChange, CitationLedger
+    from app.domains.agent.contract import PatchFieldChange, CitationLedger
     from app.core.identity import OperatorIdentity
-    from app.services.agent_citations import make_signal_citation
+    from app.domains.agent.citations import make_signal_citation
 
     async with SessionLocal() as db:
         row = await db.get(AgentSession, uuid.UUID(session["id"]))
@@ -157,7 +157,7 @@ async def test_patch_propose_confirm_and_duplicate(client, monkeypatch):
 
 
 async def test_sse_replay_order(client, monkeypatch):
-    monkeypatch.setattr("app.services.agent_runtime.build_eea_agent", _agent_with_test_model)
+    monkeypatch.setattr("app.domains.agent.runtime.build_eea_agent", _agent_with_test_model)
     session = (await client.post("/api/v1/agent/sessions", json={})).json()
     resp = await client.post(
         f"/api/v1/agent/sessions/{session['id']}/messages",
@@ -197,7 +197,7 @@ async def test_gateway_unconfigured_returns_failed_turn(client, monkeypatch):
 
         raise LLMNotConfiguredError("unset")
 
-    monkeypatch.setattr("app.services.agent_runtime.build_eea_agent", boom)
+    monkeypatch.setattr("app.domains.agent.runtime.build_eea_agent", boom)
     session = (await client.post("/api/v1/agent/sessions", json={})).json()
     resp = await client.post(
         f"/api/v1/agent/sessions/{session['id']}/messages",
@@ -225,9 +225,9 @@ async def test_memory_owner_scoped(client):
 async def _propose_stage_patch(client, session_id: str, sig: dict, stage: str) -> str:
     from app.db.base import SessionLocal
     from app.models.agent_models import AgentSession
-    from app.services.agent_patches import propose_signal_patch
-    from app.services.agent_contract import PatchFieldChange, CitationLedger
-    from app.services.agent_citations import make_signal_citation
+    from app.domains.agent.patches import propose_signal_patch
+    from app.domains.agent.contract import PatchFieldChange, CitationLedger
+    from app.domains.agent.citations import make_signal_citation
 
     async with SessionLocal() as db:
         row = await db.get(AgentSession, uuid.UUID(session_id))
@@ -306,7 +306,7 @@ async def test_expired_patch_confirmation_rejected(client, monkeypatch):
 
 
 async def test_session_messages_list_user_before_assistant(client, monkeypatch):
-    monkeypatch.setattr("app.services.agent_runtime.build_eea_agent", _agent_with_test_model)
+    monkeypatch.setattr("app.domains.agent.runtime.build_eea_agent", _agent_with_test_model)
     session = (await client.post("/api/v1/agent/sessions", json={})).json()
     post = await client.post(
         f"/api/v1/agent/sessions/{session['id']}/messages",
@@ -321,7 +321,7 @@ async def test_session_messages_list_user_before_assistant(client, monkeypatch):
 
 
 async def test_session_message_history_persists(client, monkeypatch):
-    monkeypatch.setattr("app.services.agent_runtime.build_eea_agent", _agent_with_test_model)
+    monkeypatch.setattr("app.domains.agent.runtime.build_eea_agent", _agent_with_test_model)
     session = (await client.post("/api/v1/agent/sessions", json={})).json()
     first = await client.post(
         f"/api/v1/agent/sessions/{session['id']}/messages",
@@ -404,7 +404,7 @@ async def test_patch_confirm_writes_single_audit(client):
 
 async def test_workflow_smoke_sequence(client, monkeypatch):
     """10-step acceptance path from BE-14 (HTTP/SSE, two actors)."""
-    monkeypatch.setattr("app.services.agent_runtime.build_eea_agent", _agent_with_test_model)
+    monkeypatch.setattr("app.domains.agent.runtime.build_eea_agent", _agent_with_test_model)
     session = (await client.post("/api/v1/agent/sessions", json={"title": "smoke"})).json()
     turn = await client.post(
         f"/api/v1/agent/sessions/{session['id']}/messages",
@@ -451,7 +451,7 @@ async def test_workflow_smoke_sequence(client, monkeypatch):
 
 
 async def test_message_stream_returns_completed_sse(client, monkeypatch):
-    monkeypatch.setattr("app.services.agent_runtime.build_eea_agent", _agent_with_test_model)
+    monkeypatch.setattr("app.domains.agent.runtime.build_eea_agent", _agent_with_test_model)
     session = (await client.post("/api/v1/agent/sessions", json={"title": "stream"})).json()
 
     response = await client.post(
@@ -478,10 +478,10 @@ async def test_agent_turn_timeout_marks_the_run_failed(client, monkeypatch):
     from pydantic_ai.messages import ModelResponse, TextPart
 
     from app.core.config import get_settings
-    from app.services.agent_workflow import build_eea_agent
+    from app.domains.agent.workflow import build_eea_agent
 
     settings = get_settings().model_copy(update={"agent_turn_timeout_seconds": 0.5})
-    monkeypatch.setattr("app.services.agent_runtime.get_settings", lambda: settings)
+    monkeypatch.setattr("app.domains.agent.runtime.get_settings", lambda: settings)
 
     async def hang(messages, info):
         del messages, info
@@ -499,7 +499,7 @@ async def test_agent_turn_timeout_marks_the_run_failed(client, monkeypatch):
             model=FunctionModel(hang, stream_function=hang_stream)
         )
 
-    monkeypatch.setattr("app.services.agent_runtime.build_eea_agent", slow_agent)
+    monkeypatch.setattr("app.domains.agent.runtime.build_eea_agent", slow_agent)
 
     session = (await client.post("/api/v1/agent/sessions", json={})).json()
     response = await client.post(

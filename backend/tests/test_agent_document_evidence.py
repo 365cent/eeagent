@@ -15,8 +15,8 @@ import pytest
 from app.db.base import SessionLocal
 from app.models.agent_models import DocumentChunk
 from app.models.models import Document, Signal
-from app.services.agent_contract import CitationLedger
-from app.services.agent_tools import find_evidence_hits
+from app.domains.agent.contract import CitationLedger
+from app.domains.agent.tools import find_evidence_hits
 from tests.support import create_signal
 
 pytestmark = [pytest.mark.anyio, pytest.mark.db]
