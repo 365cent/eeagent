@@ -1,4 +1,4 @@
-from app.services.url_list_capture import parse_url_lines
+from app.domains.capture.url_list import parse_url_lines
 
 
 def test_parse_url_lines_dedupes_and_splits():

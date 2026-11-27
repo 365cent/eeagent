@@ -6,8 +6,8 @@ from uuid import uuid4
 import pytest
 
 from app.models.models import DemandPoint
-from app.services import panorama_import_graph as graph
-from app.services import panorama_import_signals as signals
+from app.domains.capture import panorama_import_graph as graph
+from app.domains.capture import panorama_import_signals as signals
 
 pytestmark = [pytest.mark.anyio, pytest.mark.no_db]
 

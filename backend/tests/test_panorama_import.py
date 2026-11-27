@@ -7,7 +7,7 @@ from io import BytesIO
 import pytest
 from openpyxl import Workbook
 
-from app.services.panorama_workbook import parse_panorama_workbook
+from app.domains.capture.panorama_workbook import parse_panorama_workbook
 from app.domains.vocab.refcodes import normalize
 
 

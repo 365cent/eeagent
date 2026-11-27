@@ -10,9 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.base import SessionLocal
 from app.models.models import CaptureJob, PanoramaImportBatch
-from app.services.panorama_import import capture_jobs_idle_for_batch, refresh_batch_capture_stats
-from app.services.panorama_import_graph import run_panorama_structure
-from app.services.panorama_import_signals import sync_import_url_signal
+from app.domains.capture.panorama_import import capture_jobs_idle_for_batch, refresh_batch_capture_stats
+from app.domains.capture.panorama_import_graph import run_panorama_structure
+from app.domains.capture.panorama_import_signals import sync_import_url_signal
 
 logger = logging.getLogger(__name__)
 

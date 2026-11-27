@@ -68,7 +68,7 @@ async def reclaim_stale_client_captures(now: datetime | None = None) -> int:
             row.error = (row.error or "Client capture interrupted; re-queued for EEA Capture.").strip()
         await db.commit()
         if batch_ids:
-            from app.services.panorama_import import refresh_batch_capture_stats
+            from app.domains.capture.panorama_import import refresh_batch_capture_stats
 
             async with SessionLocal() as refresh_db:
                 for batch_id in batch_ids:
@@ -80,7 +80,7 @@ async def _close_failed_batches(batch_ids: set[uuid.UUID]) -> None:
     """Finalize import batches whose last job just failed; never block a claim."""
     if not batch_ids:
         return
-    from app.services.panorama_import_hooks import on_import_capture_job_closed
+    from app.domains.capture.panorama_import_hooks import on_import_capture_job_closed
 
     for batch_id in batch_ids:
         try:
@@ -236,7 +236,7 @@ async def _mark_cancelled(job_id: uuid.UUID, worker_id: str) -> None:
         batch_id = result.scalar_one_or_none()
         await db.commit()
     if batch_id is not None:
-        from app.services.panorama_import_hooks import on_import_capture_job_closed
+        from app.domains.capture.panorama_import_hooks import on_import_capture_job_closed
 
         await on_import_capture_job_closed(batch_id)
 
@@ -318,7 +318,7 @@ async def _mark_failed(job_id: uuid.UUID, worker_id: str, exc: Exception) -> Non
         batch_id = job.import_batch_id if not can_retry else None
         await db.commit()
     if batch_id is not None:
-        from app.services.panorama_import_hooks import on_import_capture_job_closed
+        from app.domains.capture.panorama_import_hooks import on_import_capture_job_closed
 
         await on_import_capture_job_closed(batch_id)
 

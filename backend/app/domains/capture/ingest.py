@@ -74,7 +74,7 @@ async def on_capture_job_signal_created(
     """Post-capture hooks after a durable job produces a signal (panorama import today)."""
     if batch_id is None:
         return
-    from app.services.panorama_import_hooks import on_import_capture_job_succeeded
+    from app.domains.capture.panorama_import_hooks import on_import_capture_job_succeeded
 
     await on_import_capture_job_succeeded(batch_id, job_id, signal_id)
 

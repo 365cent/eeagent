@@ -14,7 +14,7 @@ from app.db.base import get_db
 from app.models.models import CaptureJob, PanoramaImportBatch
 from app.schemas.schemas import CaptureUrlBatchIn, PanoramaImportBatchOut
 from app.domains.imports.serialization import panorama_batch_out as _batch_out
-from app.services.url_list_capture import create_url_list_capture_batch
+from app.domains.capture.url_list import create_url_list_capture_batch
 
 router = APIRouter(prefix="/imports", tags=["imports"])
 

@@ -11,8 +11,8 @@ from app.core.identity import OperatorIdentity, get_operator_identity
 from app.db.base import SessionLocal
 from app.main import app
 from app.models.models import DemandPoint, PanoramaImportBatch, PanoramaImportUrl, Signal, TechTheme, VehicleFunction
-from app.services.panorama_import_graph import run_panorama_structure
-from app.services.panorama_workbook import parse_panorama_workbook
+from app.domains.capture.panorama_import_graph import run_panorama_structure
+from app.domains.capture.panorama_workbook import parse_panorama_workbook
 from tests.test_panorama_import import _minimal_workbook_bytes
 
 pytestmark = pytest.mark.anyio

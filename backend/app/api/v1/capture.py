@@ -506,7 +506,7 @@ async def claim_capture_job_for_client(
         batch_id = job.import_batch_id
         await db.commit()
         if batch_id is not None:
-            from app.services.panorama_import_hooks import on_import_capture_job_closed
+            from app.domains.capture.panorama_import_hooks import on_import_capture_job_closed
 
             await on_import_capture_job_closed(batch_id)
         raise HTTPException(429, "capture job exceeded the client claim limit")
@@ -597,7 +597,7 @@ async def client_release_capture_job(
     await db.commit()
     await db.refresh(job)
     if job.import_batch_id is not None:
-        from app.services.panorama_import import refresh_batch_capture_stats
+        from app.domains.capture.panorama_import import refresh_batch_capture_stats
 
         await refresh_batch_capture_stats(db, job.import_batch_id)
     return await _capture_job_out(db, job)
@@ -633,7 +633,7 @@ async def client_fail_capture_job(
     await db.commit()
     await db.refresh(job)
     if job.import_batch_id is not None:
-        from app.services.panorama_import_hooks import on_import_capture_job_closed
+        from app.domains.capture.panorama_import_hooks import on_import_capture_job_closed
 
         await on_import_capture_job_closed(job.import_batch_id)
     return await _capture_job_out(db, job)
@@ -769,7 +769,7 @@ async def cancel_capture_job(
     await db.commit()
     await db.refresh(job)
     if job.status == "cancelled" and job.import_batch_id is not None:
-        from app.services.panorama_import_hooks import on_import_capture_job_closed
+        from app.domains.capture.panorama_import_hooks import on_import_capture_job_closed
 
         await on_import_capture_job_closed(job.import_batch_id)
     return await _capture_job_out(db, job)
