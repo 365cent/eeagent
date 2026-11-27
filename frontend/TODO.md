@@ -151,6 +151,8 @@
 - 2026-11-26 导入结果修复与走查：文档上传成功后此前会立即跳转证据详情，DocumentIngestResult 实际不可见。现在文档结果显示在导入页（canonical 摘录、文档研究、查看完整 Markdown、新标签打开、刷新状态、打开信号），仅网页信号仍自动跳转；结果组件接收 signalId，隐藏会重复建信号的「保存为信号」。受控上传 fe11-import-smoke-20261126.md 验证：已解析、3 个章节分块、0 张图块、5 个关键词；预览弹窗显示全文；文档研究弹窗显示章节树/关键词/无图块提示；打开信号跳到 /singal/{id}。测试信号、文档与对象文件已删除；pnpm typecheck 与 antd lint 通过。
 - 2026-11-26 文档研究走查：证据页「文档研究」标签显示 42 个章节分块、16 张图块与章节关键词；图块图片经 /documents/{id}/figures/{n}/image 正常加载，逐图有定位图块/重试识别。发现 GET /documents/{id}/keywords 每次请求内直接调用模型且无超时，慢网关下曾阻塞 30s+；已加 12s 超时回退 jieba 并缓存 10 分钟（进程内），实测首次 14.3s （jieba-frequency）、第二次 26ms；pytest tests/test_document_ingest.py 28 passed。导入结果弹窗仍需真实导入路径。
 
+- 2026-11-27 补文档研究浏览器用例 `pnpm pw:research`（`tests/e2e/document-research.spec.ts`）：从真实文档信号进入「文档研究」，断言章节分块/图块数量与服务端一致、默认章节渲染正文、点「定位图块」写入 `doc_figure` 且图片实际加载（naturalWidth>0）、待复核图块显式标注、刷新后深链接仍聚焦同一图块，并能从章节树跳到带路径的分块（写 `doc_chunk`）。顺带修复：图块没有章节归属时，刷新会丢掉 `doc_figure` 焦点；现在仍把该图块置为激活态。实测 1 passed（14.7s），typecheck exit 0，`pnpm build` 通过。
+
 ## FE-12 前端验收与 Linux 接入
 
 - [ ] P0 · 未验证 · 依赖上述逐项完成、BE-16、OPS-03/04。OPS-06 is the combined preproduction gate and depends on FE-12; FE-12's independently runnable frontend/API/browser checks do not depend on OPS-06.

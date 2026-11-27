@@ -118,11 +118,11 @@ export const DocumentResearchPanel = memo(function DocumentResearchPanel({
     }
     if (focus?.figureIndex) {
       const section = tree.figureToSection.get(focus.figureIndex)
-      if (section) {
-        setActiveSectionKey(section)
-        setActiveFigureIndex(focus.figureIndex)
-        return
-      }
+      if (section) setActiveSectionKey(section)
+      // Figures are not always indexed into a chunk; the deep link must still
+      // focus the card instead of silently dropping the parameter.
+      setActiveFigureIndex(focus.figureIndex)
+      return
     }
     if (focus?.chunkId) {
       const section = tree.chunkToSection.get(focus.chunkId)

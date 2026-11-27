@@ -20,7 +20,8 @@
     "pw:async": "playwright test tests/e2e/async-task.spec.ts",
     "pw:history": "playwright test tests/e2e/history-versions.spec.ts",
     "pw:refcodes": "playwright test tests/e2e/ref-codes-recovery.spec.ts",
-    "pw:rejudge": "playwright test tests/e2e/strategy-rejudge.spec.ts"
+    "pw:rejudge": "playwright test tests/e2e/strategy-rejudge.spec.ts",
+    "pw:research": "playwright test tests/e2e/document-research.spec.ts"
   },
   "dependencies": {
     "@ant-design/cssinjs": "^1.24.0",

@@ -23,6 +23,14 @@ This record keeps evidence for implementation slices removed from the remaining-
 - The dev database was restored afterwards: cabin landing point back to `industry_scan` with no versions and only its original `created` audit; eFuse untouched (v1, 20/25, current); 65 signals.
 - Remaining: the 4/4/3/4/5 figures still need real business-material review, and Linux acceptance stays with OPS-06.
 
+### Document research deep link, counts and figure focus (FE-11 slice)
+
+- New `pnpm pw:research` (`frontend/tests/e2e/document-research.spec.ts`): picks a real document signal, opens 文档研究, and asserts the toolbar counts equal the server payload, the default section renders chunk text, 定位图块 writes `doc_figure` and the stored image actually decodes (`naturalWidth > 0`), a needs-review figure is labelled 待复核, a reload keeps the same figure focused, and a sectioned chunk opens from the tree with `doc_chunk`.
+- Defect found and fixed in `components/evidence/document-research-panel.tsx`: when a figure has no chunk-level index (the ANCAP document has 16 such figures), `?doc_figure=N` was dropped on reload because the effect only set the active figure inside the “mapped section” branch. The parameter now always activates the figure and keeps the mapped section when one exists.
+- Run note: the shared dev API on :8000 was still serving a scratch database, so verification used an isolated API on :8001 serving `eea` plus the normal web app on :3000 with a temporary route shim for both the API calls and the same-origin figure image that Next rewrites to the API origin.
+- Evidence: 1 passed (14.7 s); `pnpm typecheck` exit 0; `pnpm build` exit 0. `pnpm antd:lint` reports 5 issues in unrelated pre-existing files (`components/reminders/`, `components/search/`, `components/topics/`); the changed panel adds none.
+- Remaining: the assistant citation → chunk/figure jump still needs a live model gateway, and Linux figures stay with OPS-06.
+
 ## 2026-11-26
 
 ### Deploy to 10.215.35.10 (hzh2admin) + capture-client download page
