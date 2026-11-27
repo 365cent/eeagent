@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+import { divertApiOrigin } from './api-origin'
+
 const API = process.env.EEA_API_URL ?? 'http://127.0.0.1:8000'
 const SEED_FILE = process.env.EEA_PW_SEED_FILE ?? ''
 const STAGES = ['信号采集·证据库', '标签与主题归纳', '需求与功能映射', '技术全景图'] as const
@@ -8,6 +10,7 @@ test.describe('seven-stage chain smoke', () => {
   test.skip(!SEED_FILE, 'set EEA_PW_SEED_FILE to the JSON printed by scripts/seed_smoke_chain.py')
 
   test('the seeded chain is visible end to end on the real pages', async ({ page, request }) => {
+    await divertApiOrigin(page, process.env.EEA_PW_API_ORIGIN)
     const chain = JSON.parse(await (await import('node:fs/promises')).readFile(SEED_FILE, 'utf8')) as {
       signal_id: string
       demand_id: string
@@ -49,6 +52,7 @@ test.describe('seven-stage chain smoke', () => {
   })
 
   test('landing point deep link shows the full chain and standards', async ({ page }) => {
+    await divertApiOrigin(page, process.env.EEA_PW_API_ORIGIN)
     test.skip(!SEED_FILE, 'seed file missing')
     const chain = JSON.parse(await (await import('node:fs/promises')).readFile(SEED_FILE, 'utf8'))
     await page.goto(`/traceDetail/${chain.landing_point_id}`)

@@ -19,6 +19,25 @@ host Edge/Chrome (no browser download is bundled for the intranet image); set
 | `pnpm pw:rejudge` | a rejected landing point opens no scoring, then a pass scores 20/25, finalizes v1, and a revised score appends v2 with v1 as history; skips unless `EEA_PW_REJUDGE_LP` names an unscanned landing point and leaves funnel/assessment rows behind | API :8000, web :3000, `EEA_PW_REJUDGE_LP` |
 | `pnpm pw:research` | document research shows the server's chunk/figure counts, focuses a stored figure with a working image, keeps the `doc_figure` deep link across a reload, and opens a sectioned chunk from the tree; skips without a document signal | API :8000, web :3000, a parsed document |
 
+## Running against an isolated API
+
+`EEA_API_URL` only affects the `request` fixture. The specs that call
+`divertApiOrigin` (`pw:chain`, `pw:async`, `pw:history`) also honour
+`EEA_PW_API_ORIGIN`: set both to the isolated API (for example `:8001`) and the
+page's `/api/v1` calls are routed there without touching the dev database.
+
+A fresh database also needs the closed vocabularies and the five technical
+domains before seeding the chain:
+
+```powershell
+$env:DB_NAME = "eea_pw_history"
+python -m app.seed
+python scripts/seed_smoke_chain.py > .seed-chain.json
+```
+
+Without that step `/panorama` returns no stages and `pw:chain` cannot find the
+seeded landing point.
+
 ## Seeding the chain
 
 The chain smoke test asserts on real rows, so seed them first through the public

@@ -3,6 +3,8 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { divertApiOrigin } from './api-origin'
+
 const API = process.env.EEA_API_URL ?? 'http://127.0.0.1:8000'
 const PENDING_KEY = 'eea.pending-capture-job'
 
@@ -17,6 +19,7 @@ test.describe('async import task (FE-12)', () => {
   test.skip(!process.env.EEA_PW_DOC_ROWS, 'set EEA_PW_DOC_ROWS=1 to allow the document row this case leaves behind')
 
   test('a document upload resumes after a reload and still finishes', async ({ page, request }) => {
+    await divertApiOrigin(page, process.env.EEA_PW_API_ORIGIN)
     const stamp = Date.now()
     const name = `pw-async-${stamp}.md`
     const dir = mkdtempSync(join(tmpdir(), 'eea-async-'))

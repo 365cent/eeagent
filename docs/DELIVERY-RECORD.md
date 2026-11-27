@@ -4,6 +4,13 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 ## 2026-11-27
 
+### Skipped Playwright cases run against an isolated API (FE-12 / BE-16 evidence)
+
+- New `frontend/tests/e2e/api-origin.ts` exports `divertApiOrigin(page, origin)`: when `EEA_PW_API_ORIGIN` is set, page `/api/v1/**` requests are re-pointed with `route.continue({url})`, so streamed multipart uploads keep their body. `pw:chain`, `pw:async` and `pw:history` call it; `EEA_API_URL` still drives the request fixture.
+- Scratch database `eea_pw_history`: `alembic upgrade head`, then `DB_NAME=eea_pw_history python -m app.seed` for the closed vocabularies and the five domains, then `seed_smoke_chain.py` against an isolated API on :8001. Without the seed step `/panorama` returns no stages and the chain smoke cannot find a landing point.
+- Results: `pnpm pw:chain` **2 passed** (27.6 s); `pnpm pw:async` with `EEA_PW_DOC_ROWS=1` **1 passed** (21.9 s); `pnpm pw:history` **1 passed** (20.4 s) with v1 20, v2 20 as history and v3 21 current. These are the four cases the earlier 8-worker run skipped.
+- Cleanup: API :8001 stopped and `eea_pw_history` dropped; the dev database was not written. The first helper version used `route.fetch` and the multipart upload came back 422 with an empty file part; `route.continue` fixed it.
+
 ### Capture client build, upgrade and real upload check (CC-06 slice)
 
 - `dist/capture.exe` had drifted from the v0.1.1 archive; it was replaced with the archive's copy, and both `capture.exe` (`4b81940c…b2084ee`) and `capture-v0.1.1-windows-amd64.zip` (`38ff97c4…bf818`) now match `SHA256SUMS`. `dist` is gitignored, so the repo diff is documentation only.

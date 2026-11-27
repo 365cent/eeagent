@@ -1,5 +1,7 @@
 import { expect, test } from '@playwright/test'
 
+import { divertApiOrigin } from './api-origin'
+
 const API = process.env.EEA_API_URL ?? 'http://127.0.0.1:8000'
 
 test.setTimeout(120_000)
@@ -22,6 +24,7 @@ async function historyOf(request: import('@playwright/test').APIRequestContext, 
 
 test.describe('strategy history versions (FE-12)', () => {
   test('the strategy page shows the current version and the older ones as history', async ({ page, request }) => {
+    await divertApiOrigin(page, process.env.EEA_PW_API_ORIGIN)
     const lpsRes = await request.get(`${API}/api/v1/landing-points`)
     expect(lpsRes.ok(), 'landing points must be reachable').toBeTruthy()
     const landingPoints = (await lpsRes.json()) as LandingPoint[]
