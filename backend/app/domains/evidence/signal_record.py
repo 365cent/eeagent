@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.db.base import SessionLocal
 from app.services.cluster_runner import enqueue_cluster_run
 from app.domains.evidence.event_dates import event_date_from_published
 from app.domains.evidence.theme_match import match_theme
@@ -236,9 +237,15 @@ async def create_signal_record(
         basis["conflicts"] = list(skill_decision.conflicts) + extra_conflicts
     sig.classification_basis = basis
     await ensure_primary_source(db, sig)
-    # A new signal invalidates the clustering graph. Queue one pass here (the
-    # enqueue is deduplicated) so the page picks up the new graph on its own
-    # instead of waiting for someone to press 重放聚类.
-    await enqueue_cluster_run(db, trigger="signal")
     await db.commit()
+    # A new signal invalidates the clustering graph. Queue one pass in its own
+    # transaction, right away: the clustering worker claims with SKIP LOCKED, so
+    # a run left inside an ingest transaction stays invisible (and a 24 s ingest
+    # request held it for 24 s) until that request finally commits.
+    try:
+        async with SessionLocal() as cluster_db:
+            await enqueue_cluster_run(cluster_db, trigger="signal")
+            await cluster_db.commit()
+    except Exception:  # noqa: BLE001 - clustering must never fail an ingest
+        pass
     return sig
