@@ -17,7 +17,8 @@
     "pw:roles": "playwright test tests/e2e/role-restrictions.spec.ts",
     "pw:persist": "playwright test tests/e2e/persistent-edit.spec.ts",
     "pw:degraded": "playwright test tests/e2e/degraded-suggestions.spec.ts",
-    "pw:async": "playwright test tests/e2e/async-task.spec.ts"
+    "pw:async": "playwright test tests/e2e/async-task.spec.ts",
+    "pw:history": "playwright test tests/e2e/history-versions.spec.ts"
   },
   "dependencies": {
     "@ant-design/cssinjs": "^1.24.0",

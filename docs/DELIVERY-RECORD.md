@@ -89,6 +89,13 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence: `EEA_PW_DOC_ROWS=1 pnpm pw:async` -> 1 passed (26.3 s). The document row and its two object files created by that run were removed afterwards; the dev library is back to its previous 65 signals and no `pw-async-` document.
 - Remaining on FE-12: the history-version browser case; Linux intranet figures.
 
+### Strategy history versions in the browser (FE-12 slice)
+
+- Added 'frontend/tests/e2e/history-versions.spec.ts' (pnpm pw:history). It finds the landing point with the most assessment versions, opens /strategy, selects it through the real combobox, and checks the 当前与历史版本 timeline: the newest version carries 当前版本 (or 最近定稿 · 待复核 when the funnel is not complete), every older one carries 历史, each row shows the stored classification, operator and time, and a reload keeps the same version set.
+- The case is read-only by default and skips when no landing point has two versions. With EEA_PW_HISTORY_SEED=1 it first calls PATCH /strategy/landing-points/{id}/funnel {finalize:true} to create the second version; that leaves a permanent assessment row, so the flag is for a database that may carry the residue.
+- Evidence: ran against the eFuse landing point with two versions -> 1 passed (8.1 s). The extra version created for the run was removed afterwards together with its funnel pointer, so the dev sample is back to a single current v1 with total 20.
+- FE-12's local browser cases are now complete: persistent edit, model degradation, async import resume, history versions, plus the earlier trace/chain/report/demands/roles cases. Remaining for FE-12: Linux intranet numbers and the same-origin/SSE checks with OPS.
+
 ## Maintenance-run audit row (BE-01 slice)
 
 - Problem: `orphan_maintenance --apply` pruned orphan rows but left no durable record of who ran it, when, or how many rows it scanned/removed, so the BE-01 audit requirement stayed open.
