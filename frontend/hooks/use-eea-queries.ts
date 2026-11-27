@@ -45,6 +45,10 @@ export function useRefCodeMaps(enabled = true) {
     queryKey: eeaQueryKeys.refCodes,
     queryFn: () => fetchRefCodes(),
     enabled,
+    // Every labelled view waits for this dictionary. A dev-server reload or a
+    // proxy hiccup is transient, so retry instead of failing the whole page.
+    retry: 3,
+    retryDelay: (attempt) => Math.min(1_000 * 2 ** attempt, 4_000),
   })
 
   const maps = useMemo<RefCodeMaps>(
@@ -172,7 +176,8 @@ export function useCorrectionAudit(entityId: string | null | undefined) {
 }
 
 export function useSignalDetail(signalId: string) {
-  const { maps, isSuccess: codesReady } = useRefCodeMaps()
+  const codes = useRefCodeMaps()
+  const { maps, isSuccess: codesReady } = codes
   const query = useQuery({
     queryKey: eeaQueryKeys.signal(signalId),
     queryFn: () => fetchSignal(signalId),
@@ -181,7 +186,14 @@ export function useSignalDetail(signalId: string) {
 
   const ui = useMemo(() => (query.data ? mapSignalOut(query.data, maps) : null), [query.data, maps])
 
-  return { ...query, signal: ui, detail: query.data }
+  return {
+    ...query,
+    signal: ui,
+    detail: query.data,
+    codesPending: Boolean(signalId) && codes.isPending,
+    codesError: Boolean(signalId) && codes.isError,
+    retryCodes: codes.refetch,
+  }
 }
 
 export function useThemeRows(enabled = true) {

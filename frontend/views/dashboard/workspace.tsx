@@ -214,7 +214,15 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
   const [recaptioning, setRecaptioning] = useState(false)
   const markdownArticleRef = useRef<HTMLElement>(null)
   const stageViewLockedRef = useRef(false)
-  const { signal: liveSignal, detail, isLoading, isError } = useSignalDetail(signalId)
+  const {
+    signal: liveSignal,
+    detail,
+    isLoading,
+    isError,
+    codesPending,
+    codesError,
+    retryCodes,
+  } = useSignalDetail(signalId)
   const { maps } = useRefCodeMaps()
   const queryClient = useQueryClient()
   const apiId = detail?.id ?? (isUuid(signalId) ? signalId : null)
@@ -520,7 +528,7 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
     void queryClient.invalidateQueries({ queryKey: eeaQueryKeys.documentDetail(documentId) })
   }, [documentId, queryClient])
 
-  if (isLoading && !signal) {
+  if (!signal && (isLoading || codesPending)) {
     return (
       <div className="content-wrap">
         <Spin />
@@ -532,6 +540,18 @@ function EvidenceDetailWorkspace({ onNavigate, signalId }: { onNavigate: (key: s
     return (
       <div className="content-wrap">
         <PlatformEmptyState title="无法加载信号" description="请确认信号 ID 有效且 API 已启动。" />
+      </div>
+    )
+  }
+
+  if (!signal && codesError) {
+    return (
+      <div className="content-wrap">
+        <PlatformEmptyState
+          title="基础字典加载失败"
+          description="分类与环节名称暂时不可用，信号详情尚未读取。"
+          action={<Button onClick={() => void retryCodes()}>重试</Button>}
+        />
       </div>
     )
   }
@@ -1187,12 +1207,16 @@ export function DashboardWorkspace({ initialView, signalId }: { initialView: str
   }, [activeMenu])
 
   const isEvidenceStudio = activeMenu === 'singal'
-  const { signal: evidenceBarSignal, isLoading: evidenceBarLoading } = useSignalDetail(
+  const {
+    signal: evidenceBarSignal,
+    isLoading: evidenceBarLoading,
+    codesPending: evidenceBarCodesPending,
+  } = useSignalDetail(
     isEvidenceStudio ? activeSignalId : '',
   )
   const evidencePageTitle = isEvidenceStudio
     ? evidenceBarSignal?.title ??
-      (evidenceBarLoading ? '加载中…' : utilityPages.singal.title)
+      (evidenceBarLoading || evidenceBarCodesPending ? '加载中…' : utilityPages.singal.title)
     : undefined
 
   return (

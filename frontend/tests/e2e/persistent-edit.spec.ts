@@ -48,7 +48,7 @@ test.describe('persistent edits (FE-12)', () => {
       await page.goto(`/singal/${signal.id}`)
       expect(signal.value_chain_stage_code, 'the scratch signal starts unclassified').toBeNull()
       const editor = page.locator('.signal-classification-editor')
-      await expect(editor).toBeVisible()
+      await expect(editor).toBeVisible({ timeout: 30_000 })
 
       await editor.getByRole('button', { name: /修\s*正/ }).click()
       const selects = editor.locator('.ant-select')
@@ -72,8 +72,8 @@ test.describe('persistent edits (FE-12)', () => {
       expect(stale.status(), 'a save against an old revision must be a 409').toBe(409)
 
       await page.reload()
-      await expect(editor.getByText(STAGE_LABEL)).toBeVisible()
-      await expect(editor.getByText(TYPE_LABEL).first()).toBeVisible()
+      await expect(editor.getByText(STAGE_LABEL)).toBeVisible({ timeout: 30_000 })
+      await expect(editor.getByText(TYPE_LABEL).first()).toBeVisible({ timeout: 30_000 })
 
       // the drawer shows the server-side audit: old -> new, actor and time
       await page.getByRole('button', { name: /修正记录/ }).click()

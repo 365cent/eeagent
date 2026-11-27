@@ -40,7 +40,7 @@ test.describe('model degradation (FE-12)', () => {
 
       await page.goto(`/singal/${signal.id}`)
       const editor = page.locator('.signal-classification-editor')
-      await expect(editor).toBeVisible()
+      await expect(editor).toBeVisible({ timeout: 30_000 })
       // The server reason is rendered verbatim, so the page cannot invent a
       // different explanation than the one the API returned.
       await expect(editor.getByText(suggestion.degraded_reason as string)).toBeVisible({ timeout: 30_000 })

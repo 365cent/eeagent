@@ -2,6 +2,19 @@
 
 This record keeps evidence for implementation slices removed from the remaining-work TODOs. A slice does not close its parent task; acceptance stays open until the subsystem TODO criteria and required platform evidence pass.
 
+## 2026-11-27
+
+### Detail page no longer reports a failed dictionary as a missing signal (FE-12 slice)
+
+- Symptom: during an 8-worker Playwright run, `/singal/<id>` showed “信号不存在 / 请从证据库打开有效信号” for rows that existed and the classification drawer never appeared; `report-smoke` also waited out its 10 s bound while the generation request was still in flight.
+- Root cause: `useSignalDetail` enabled the detail request only after `GET /api/v1/ref-codes` succeeded. With the dictionary failing or still retrying, the detail query stayed disabled, so both `isLoading` and `isError` were false and the page fell through to the “missing signal” branch. That branch was unreachable for a real 404 (which sets `isError`), so its copy was wrong in every case it could show. The trigger was a transient platform event: a backend reload and Next recompilation landed mid-run while another slice was being saved.
+- Fix: the hook returns `codesPending` / `codesError` / `retryCodes`; the page shows a spinner while the dictionary loads and a retryable “基础字典加载失败” state when it fails, keeping the real 404 under “无法加载信号”. The dictionary query now retries three times with capped backoff (1 s / 2 s / 4 s), so a backend restart or proxy hiccup recovers without a manual reload.
+- Regression case `pnpm pw:refcodes` (`frontend/tests/e2e/ref-codes-recovery.spec.ts`): blocks `/api/v1/ref-codes` with 503, asserts the retryable error and the absence of “信号不存在”, then lets the request through and asserts the drawer appears after clicking 重试. The scratch signal is archived and deleted in `finally`.
+- Also hardened two browser waits that assumed a 10 s server turnaround (`report-smoke` generation/PDF, `degraded-suggestions` and `persistent-edit` editor visibility after a reload).
+- Evidence (2026-11-27, Windows dev host, dev API :8000 + Next :3000 + portable PostgreSQL): `pnpm typecheck` exit 0; `pnpm pw:refcodes` 1 passed (12.1 s); the three cases that failed in the 8-worker run pass serially (3 passed, 52.6 s); full `pnpm exec playwright test` with eight workers: **10 passed, 4 skipped, 0 failed** (36.6 s). The skips are the documented opt-in seeds: `async-task` (`EEA_PW_DOC_ROWS`), two `chain-smoke` cases (`EEA_PW_SEED_FILE`), `history-versions` (needs two assessment versions).
+- Dev data after the runs: 65 signals, no `PW %` rows, eFuse landing point still on assessment v1 (score_total 20, score_moat 3).
+- Remaining: Linux intranet TLS/same-origin/SSE figures stay with OPS-06; this slice closes no parent task.
+
 ## 2026-11-26
 
 ### Deploy to 10.215.35.10 (hzh2admin) + capture-client download page
