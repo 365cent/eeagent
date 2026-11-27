@@ -10,8 +10,9 @@ of a dead link.
 ```bash
 # Windows (build on Windows, Go >= 1.26)
 cd client
-powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -Version v0.1.2
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -Version v0.1.3
 cp dist/capture.exe ../deploy/downloads/capture.exe
+cp dist/capture.exe.json ../deploy/downloads/capture.exe.json
 
 # macOS (.app + .dmg, must run on a Mac: Fyne needs cgo + the macOS SDK)
 cd client
@@ -25,6 +26,11 @@ sha256sum capture.exe EEA-Capture*.dmg > SHA256SUMS
 The Windows build is published as plain `capture.exe` (no version in the name,
 no archive). A leftover `capture-vX-windows-amd64.exe` is served only when
 `capture.exe` is missing, so a stale file cannot shadow the current build.
+
+Because the name carries no version, publish `capture.exe.json` beside it
+(`{"version": "v0.1.3", "built_at": "…", "sha256": "…"}`; the release script
+writes it). The download page reads it for its 版本 column and shows `—` when
+the sidecar is missing.
 
 The Windows binary alone is enough: its default `capture_archive=auto` uses the
 staged SingleFile extension when present and otherwise falls back to the

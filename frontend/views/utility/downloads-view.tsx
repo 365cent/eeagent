@@ -78,6 +78,13 @@ export function DownloadsView() {
               },
               { title: '文件', dataIndex: 'filename', ellipsis: true },
               {
+                title: '版本',
+                dataIndex: 'version',
+                width: 96,
+                render: (value: string | null | undefined) =>
+                  value ? <Text>{value}</Text> : <Text type="secondary">—</Text>,
+              },
+              {
                 title: '大小',
                 dataIndex: 'size_bytes',
                 width: 100,

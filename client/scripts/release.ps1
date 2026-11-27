@@ -45,6 +45,20 @@ $hashes = @(
     (Get-FileHash (Join-Path $dist "capture.exe") -Algorithm SHA256),
     (Get-FileHash $zip -Algorithm SHA256)
 ) | ForEach-Object { "$($_.Hash.ToLower())  $(Split-Path $_.Path -Leaf)" }
+
+# The published binary is a plain capture.exe, so the download page cannot read
+# a version from its name. Ship a sidecar next to it (capture.exe.json).
+$meta = [ordered]@{
+    version  = $Version
+    built_at = (Get-Date).ToString("o")
+    sha256   = (Get-FileHash (Join-Path $dist "capture.exe") -Algorithm SHA256).Hash.ToLower()
+}
+$metaFile = Join-Path $dist "capture.exe.json"
+[System.IO.File]::WriteAllText(
+    $metaFile,
+    (($meta | ConvertTo-Json) + "`n"),
+    (New-Object System.Text.UTF8Encoding($false))
+)
 # LF + ASCII: sha256sum on Git Bash treats CR as part of the filename.
 $checksumFile = Join-Path $dist "SHA256SUMS"
 [System.IO.File]::WriteAllText($checksumFile, (($hashes -join "`n") + "`n"), [System.Text.Encoding]::ASCII)

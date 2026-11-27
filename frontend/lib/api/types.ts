@@ -473,6 +473,8 @@ export type CaptureClientRelease = {
   filename: string
   size_bytes: number
   sha256: string
+  /** Build version from the release sidecar; null when the publish left none. */
+  version?: string | null
   download_url: string
 }
 

@@ -17,6 +17,8 @@ endpoints remain for the browser extension and API callers.
 from __future__ import annotations
 
 import hashlib
+import json
+import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from functools import lru_cache, partial
@@ -105,6 +107,29 @@ def _artifact_sha256(path: Path) -> str:
     return _sha256_cached(str(path), stat.st_mtime_ns, stat.st_size)
 
 
+_VERSION_IN_NAME = re.compile(r"v(\d+\.\d+(?:\.\d+)?)", re.IGNORECASE)
+
+
+def _artifact_version(path: Path) -> str | None:
+    """Build version for the download table.
+
+    The published file is a plain `capture.exe`, so the version cannot come from
+    the name. A sidecar written by the release script (``capture.exe.json``) is
+    the source of truth; a versioned legacy filename is the fallback.
+    """
+    sidecar = path.with_name(path.name + ".json")
+    if sidecar.is_file():
+        try:
+            meta = json.loads(sidecar.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            meta = {}
+        version = meta.get("version") if isinstance(meta, dict) else None
+        if isinstance(version, str) and version.strip():
+            return version.strip()
+    match = _VERSION_IN_NAME.search(path.name)
+    return f"v{match.group(1)}" if match else None
+
+
 @router.get("/client-releases", include_in_schema=False)
 async def list_client_releases() -> list[dict[str, object]]:
     """Which client builds this server can hand out, so the page never shows a dead link."""
@@ -119,6 +144,7 @@ async def list_client_releases() -> list[dict[str, object]]:
                 "filename": artifact.name,
                 "size_bytes": artifact.stat().st_size,
                 "sha256": _artifact_sha256(artifact),
+                "version": _artifact_version(artifact),
                 "download_url": f"/api/v1/capture/client-download?platform={platform}",
             }
         )

@@ -36,7 +36,6 @@ def _publish_windows(tmp_path, payload: bytes = WINDOWS_BYTES, name: str = "capt
 async def test_releases_lists_the_plain_exe(client, tmp_path, monkeypatch):
     _publish_windows(tmp_path)
     monkeypatch.setattr(capture_api, "_client_dist_dir", lambda: tmp_path)
-
     response = await client.get("/api/v1/capture/client-releases")
 
     assert response.status_code == 200, response.text
@@ -104,3 +103,32 @@ async def test_unpublished_platform_is_a_404(client, tmp_path, monkeypatch):
 
     assert mac.status_code == 404
     assert unknown.status_code == 404
+
+
+async def test_version_comes_from_the_release_sidecar(client, tmp_path, monkeypatch):
+    _publish_windows(tmp_path)
+    (tmp_path / "capture.exe.json").write_text('{"version": "v0.1.3"}', encoding="utf-8")
+    monkeypatch.setattr(capture_api, "_client_dist_dir", lambda: tmp_path)
+
+    releases = (await client.get("/api/v1/capture/client-releases")).json()
+
+    assert releases[0]["version"] == "v0.1.3"
+
+
+async def test_broken_sidecar_falls_back_to_the_filename(client, tmp_path, monkeypatch):
+    _publish_windows(tmp_path, name="capture-v0.1.2-windows-amd64.exe")
+    (tmp_path / "capture-v0.1.2-windows-amd64.exe.json").write_text("not json", encoding="utf-8")
+    monkeypatch.setattr(capture_api, "_client_dist_dir", lambda: tmp_path)
+
+    releases = (await client.get("/api/v1/capture/client-releases")).json()
+
+    assert releases[0]["version"] == "v0.1.2"
+
+
+async def test_no_sidecar_and_plain_name_reports_no_version(client, tmp_path, monkeypatch):
+    _publish_windows(tmp_path)
+    monkeypatch.setattr(capture_api, "_client_dist_dir", lambda: tmp_path)
+
+    releases = (await client.get("/api/v1/capture/client-releases")).json()
+
+    assert releases[0]["version"] is None
