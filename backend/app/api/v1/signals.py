@@ -57,7 +57,7 @@ from app.domains.evidence.signal_dedup import (
     scan_duplicates,
 )
 from app.domains.evidence.body_excerpt import resolve_signal_excerpt
-from app.services.html_snapshot import (
+from app.domains.evidence.html_snapshot import (
     enrich_snapshot_figures,
     figure_data_urls,
     parse_html_snapshot,
@@ -72,7 +72,7 @@ from app.domains.evidence.judgment import (
     structured_basis_consistent,
 )
 from app.domains.evidence.signal_sources import add_supplementary_url, list_sources
-from app.services.signal_recaption import recaption_signal_article
+from app.domains.evidence.signal_recaption import recaption_signal_article
 from app.domains.evidence.tagging_guard import assert_expected_signal_revision, human_corrected_fields
 from app.domains.semantic.llm import suggest_tags_with_llm
 from app.platform.llm_gateway import (

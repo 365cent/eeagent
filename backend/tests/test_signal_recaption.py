@@ -3,7 +3,7 @@
 import pytest
 from fastapi import HTTPException
 
-from app.services import signal_recaption
+from app.domains.evidence import signal_recaption
 
 pytestmark = pytest.mark.anyio
 

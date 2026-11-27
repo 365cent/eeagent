@@ -11,7 +11,7 @@ from app.domains.evidence.channel import _infer_channel_code
 from app.domains.evidence.signal_record import create_signal_record
 from app.models.models import Signal
 from app.domains.evidence.body_excerpt import resolve_signal_excerpt
-from app.services.html_snapshot import enrich_snapshot_figures, parse_html_snapshot
+from app.domains.evidence.html_snapshot import enrich_snapshot_figures, parse_html_snapshot
 from app.platform.objectstore import save_bytes
 from app.domains.vocab.refcodes import codes, normalize as normalize_ref_code
 

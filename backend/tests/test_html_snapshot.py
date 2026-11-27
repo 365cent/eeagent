@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 pytestmark = pytest.mark.no_db
 
-from app.services.html_snapshot import (
+from app.domains.evidence.html_snapshot import (
     HtmlSnapshot,
     parse_html_snapshot,
     prepare_archive_replay_html,

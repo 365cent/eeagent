@@ -62,7 +62,9 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence for the thirteenth move: `lint-imports` 3 kept against both configs; `pytest tests/test_doc_pdf_preview.py tests/test_pptx_deck_preview.py tests/test_pptx_slide_render.py tests/test_document_ingest.py` → 37 passed (28.8 s); `py_compile` clean after fixing one indentation slip in a function-local import; collection is 628 tests.
 - Fourteenth move: `figure_recaption.py` (evidence domain + platform only) and `signal_dedup.py` (evidence.signal_duplicate only) → `app/domains/evidence/`. Five import sites updated: two API routes, one probe script, two test modules (including module-style imports). Only `signal_recaption`/html snapshot work remains in the ingest-adjacent services.
 - Evidence for the fourteenth move: `lint-imports` 3 kept against both configs; `pytest tests/test_figure_recaption.py tests/test_signal_dedup.py tests/test_document_signals.py tests/test_signals_ingest.py` → 61 passed (39.5 s); `py_compile` clean; collection is 628 tests.
-- Remaining BE-17 work: `app.services` holds the html snapshot/recaption pair, the agent, capture, demand, strategy and reporting orchestration modules; each needs its own slice.
+- Fifteenth move: `html_snapshot.py` and `signal_recaption.py` → `app/domains/evidence/`. Both depended only on core, platform, the models and each other, so the evidence domain now owns snapshot ingestion and article recaption end to end. Six import sites updated; `html_capture` and `signal_recaption` became intra-domain references.
+- Evidence for the fifteenth move: `lint-imports` 3 kept against both configs; `pytest tests/test_html_snapshot.py tests/test_signal_recaption.py tests/test_document_signals.py tests/test_missing_objects.py` → 37 passed (20.6 s); `py_compile` clean; collection is 628 tests.
+- Remaining BE-17 work: `app.services` holds the agent, capture, demand, strategy and reporting orchestration modules, plus `studio`/`skills`/`theme_*`; each needs its own slice.
 
 ### Full backend regression after the BE-17 moves (BE-16 evidence)
 
