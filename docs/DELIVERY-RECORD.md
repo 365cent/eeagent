@@ -66,6 +66,8 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence for the fifteenth move: `lint-imports` 3 kept against both configs; `pytest tests/test_html_snapshot.py tests/test_signal_recaption.py tests/test_document_signals.py tests/test_missing_objects.py` → 37 passed (20.6 s); `py_compile` clean; collection is 628 tests.
 - Sixteenth move: `url_fetch.py` (only `core.config` and `platform.http`) and `pydantic_agent.py` (core plus `platform.llm`, `hedged_model`, `llm_gateway` and `llm_prompts`) joined `app/platform/`; five app modules and two test modules now import the new paths. `agent_workflow` and `demand_agent` only changed their import site.
 - Evidence for the sixteenth move: `lint-imports` 3 kept against both configs; `pytest tests/test_capture_unified.py tests/test_capture_worker_errors.py tests/test_capture_tokens.py` → 45 passed (36.0 s); `py_compile` clean; collection is 628 tests.
+- Seventeenth move: `chain_report.py` and `chain_report_pdf.py` → the new `app/domains/report/` context. The pair only needs the models, `platform.objectstore` and reportlab, and `api/v1/reports.py` was the only external caller.
+- Evidence for the seventeenth move: `lint-imports` 3 kept against both configs; `pytest tests/test_chain_reports.py tests/test_openapi_snapshot.py` → 6 passed (16.4 s); collection is 628 tests.
 - Remaining BE-17 work: `app.services` holds the agent, capture, demand, strategy and reporting orchestration modules, plus `studio`/`skills`/`theme_*`; each needs its own slice.
 
 ### Full backend regression after the BE-17 moves (BE-16 evidence)

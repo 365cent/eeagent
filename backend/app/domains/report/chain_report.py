@@ -20,7 +20,7 @@ from app.models.models import (
     TechTheme,
     VehicleFunction,
 )
-from app.services.chain_report_pdf import render_markdown_to_pdf_bytes
+from app.domains.report.chain_report_pdf import render_markdown_to_pdf_bytes
 from app.platform.objectstore import save_bytes
 
 

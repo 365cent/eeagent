@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.identity import OperatorIdentity, get_operator_identity
 from app.db.base import get_db
 from app.models.models import ChainReport
-from app.services.chain_report import create_chain_report
+from app.domains.report.chain_report import create_chain_report
 from app.platform.objectstore import load_bytes
 
 router = APIRouter(prefix="/reports", tags=["reports"])

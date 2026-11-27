@@ -296,6 +296,7 @@
 - 2026-11-27 再切片：图块重识别 `figure_recaption.py`（只依赖 evidence 域与 platform）与去重 `signal_dedup.py`（只依赖 evidence.signal_duplicate）迁入 `app/domains/evidence/`，5 处导入。证据：`lint-imports` 两处配置各 3 kept，`pytest` 61 passed，全量收集 628 条。
 - 2026-11-27 再切片：HTML 快照 `html_snapshot.py` 与文章重识别 `signal_recaption.py` 迁入 `app/domains/evidence/`；两者只依赖 core、platform、模型与彼此，6 个文件更新导入（API/脚本/用例，`html_capture` 与 `signal_recaption` 变为域内引用）。证据：`lint-imports` 两处配置各 3 kept，`pytest` 37 passed，全量收集 628 条。
 - 2026-11-27 再切片：URL 抓取 `url_fetch.py`（只依赖 core.config 与 platform.http）与 Pydantic AI 装配 `pydantic_agent.py`（core 及 platform 的 llm/hedged_model/llm_gateway/llm_prompts）迁入 `app/platform/`；5 个 app 文件与 2 个用例更新导入。证据：`lint-imports` 两处配置各 3 kept，`pytest` 45 passed（统一采集/采集错误/采集令牌），全量收集 628 条。
+- 2026-11-27 再切片：链式报告 `chain_report.py` 与 PDF 渲染 `chain_report_pdf.py` 迁入新 `app/domains/report/`（只依赖模型、platform.objectstore 与 reportlab）；`api/v1/reports.py` 与报告内部导入同步更新。证据：`lint-imports` 两处配置各 3 kept，`pytest` 6 passed（链式报告/OpenAPI 快照），全量收集 628 条。
 - [ ] OpenAPI 路径快照：[tests/test_openapi_snapshot.py](tests/test_openapi_snapshot.py) + [tests/snapshots/openapi_paths.json](tests/snapshots/openapi_paths.json)；路由变更须同步快照（`OPENAPI_UPDATE_SNAPSHOT=1`）。
 - [ ] 迁移顺序建议：`core`/`db`/`models` → `platform`；采集/信号/需求等垂直切片按 WBS 迁入 `domains`；共享摄取逻辑取代 API 私有函数互调（对齐 BE-01）。
 - 验收：import-linter 通过；OpenAPI 快照测试通过；无新增 `platform`→`api`/`domains` 违规；领域迁移切片有对应 pytest 证据。
