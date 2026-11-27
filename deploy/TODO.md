@@ -79,7 +79,7 @@
 ## OPS-07 生产发布与验证
 
 - [ ] P0 · 未开始 · 依赖 OPS-06、DOC-05/06/07 的发布材料。
-- 2026-11-27 客户端候选：`deploy/downloads/capture.exe` 已替换为含 auto 回退修复的 v0.1.2 构建（SHA-256 `f8bd3e52…`，`SHA256SUMS` 同步），开发 API 的 `/api/v1/capture/client-releases` 已报告该哈希；尚未上传到 `10.215.35.10`，待发布窗口按 OPS-07 执行。
+- 2026-11-27 客户端候选：`deploy/downloads/capture.exe` 已替换为含 auto 回退修复的 v0.1.2 构建（SHA-256 `f8bd3e52…`，`SHA256SUMS` 同步），开发 API 的 `/api/v1/capture/client-releases` 与 `client-download?platform=windows` 实测哈希一致、版本为 v0.1.2；尚未上传到 `10.215.35.10`，待发布窗口按 OPS-07 执行。
 - 来源：WBS 1.6.1…1.6.4。
 - 记录发布版本、变更、维护窗口、执行者、业务/运维接收者；先核验备份和回退点，再发布。
 - 上传带校验和的版本目录，安装离线依赖，受控执行迁移/词表更新，切换服务版本并检查就绪。
