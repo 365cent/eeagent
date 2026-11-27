@@ -80,6 +80,7 @@
 
 - [ ] P0 · 未验证 · 依赖 CC-01…04、BE-16、OPS-03/04、DOC-02；独立 Windows 构建与浏览器证据供 OPS-06 汇总。
 - 2026-11-27 Edge 158 复测：`capture_archive=extension`（v0.1.1 已带 `DisableLoadExtensionCommandLineSwitch`）在 Edge `158.0.4370.33` 下 45s 内等不到 SingleFile 扩展 target，`capture.exe upload -url https://example.com` 报 “SingleFile extension did not load”；同页改 `embedded` 成功（5KB，服务端 signal `e8e114d3…`，已归档并删除）。修复：`auto` 模式在扩展加载失败时回退到内嵌 core（此前只在扩展暂存失败时回退），显式 `extension` 仍报错并提示改用 auto/embedded；`config.example.json` 默认改为 `auto`，README 同步。`go test ./internal/capture ./internal/application ./internal/config` → 3 ok；v0.1.1 二进制不含此修复，需 Windows 构建机重打包后用同一页面复测；本机 dist 配置暂设 `embedded` 以便继续使用旧二进制。
+- 2026-11-27 验证：用同源代码编译的临时 CLI（`CGO_ENABLED=0`，不含 Fyne UI）在 Edge 158 上以 `capture_archive=auto` 实测：扩展加载失败后自动回退到 embedded，`upload -url https://example.com` 成功（5KB，signal `91684da6…`，已归档删除）。发布包仍需 Windows 构建机重打包后复测。
 - 2026-11-27 Windows 构建与升级验证：`dist/capture.exe` 与 v0.1.1 包内 exe 哈希一致（4b8194…b2084ee），`SHA256SUMS` 两项均通过（散装 exe 原为旧构建，已换成发布包内容）；`capture.exe doctor` 显示 backend/capture/auth ok（`local-development-user`/`researcher`）、Edge 与 SingleFile 扩展就绪；升级模拟 v0.1.0→v0.1.1→v0.1.0 均保留 `config.json` 与 `data/capture-queue/pending.json`，版本输出 v0.1.1 / v0.1.0。打包客户端实测 `upload -html`：`ok 6e716479… 825B`，服务端返回标题、来源 URL、摘录、正文与快照对象键，随后归档并删除（DELETE 204→404）。剩余：干净业务机安装与 10 篇网页/5 篇微信真实材料验收仍待 DOC-02/OPS-06。
 - 来源：WBS 1.3.2、1.5、1.6、1.7。
 - 入口：[release.ps1](scripts/release.ps1)、[vendor-singlefile.sh](scripts/vendor-singlefile.sh)、[README](README.md)。

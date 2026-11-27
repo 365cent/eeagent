@@ -8,7 +8,8 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 - Repro: packaged v0.1.1 with `capture_archive=extension` on Edge `158.0.4370.33` waits 45 s for the SingleFile extension target and fails with "SingleFile extension did not load"; the same page succeeds with `embedded` (example.com, 5 KB, signal `e8e114d3...`, archived and deleted afterwards).
 - Fix: `auto` now falls back to the injected core when the extension fails to load (previously it fell back only when staging failed); explicit `extension` still fails, but the message points at `auto`/`embedded`. `config.example.json` defaults to `auto` and the README table matches.
-- Evidence: `go test ./internal/capture ./internal/application ./internal/config` -> 3 ok (capture 130.7 s). The v0.1.1 exe predates the fix, so a Windows build runner must repackage before the browser re-check; the local dist config stays `embedded` so the current binary keeps working.
+- Evidence: `go test ./internal/capture ./internal/application ./internal/config` -> 3 ok (capture 130.7 s).
+- Runtime check: a temp CLI built from the same source (`CGO_ENABLED=0`, no Fyne) with `capture_archive=auto` fell back after the extension load failure and uploaded example.com (5 KB, signal 91684da6..., archived and deleted). The packaged v0.1.1 still predates the fix. A Windows build runner must repackage before the browser re-check; the local dist config stays `embedded` so the current binary keeps working.
 
 ### Skipped Playwright cases run against an isolated API (FE-12 / BE-16 evidence)
 
