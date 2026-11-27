@@ -108,7 +108,7 @@ async def suggest_tags_with_rerank(
     candidates = suggest_tags(text, limit=recall_limit)
     if not candidates:
         return [], "jieba-frequency", None
-    from app.services import semantic_api
+    from app.platform import semantic_api
 
     query = text.strip()[:1200]
     if not query or not semantic_api.rerank_configured():

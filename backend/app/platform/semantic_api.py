@@ -100,7 +100,7 @@ async def create_embeddings(
     timeout: float = DEFAULT_TIMEOUT_SECONDS,
 ) -> list[list[float]]:
     """Embed up to ``MAX_BATCH`` non-empty strings via the configured ``/embeddings`` gateway."""
-    from app.services.embedding_cache import (
+    from app.platform.embedding_cache import (
         content_sha256,
         load_cached_vectors,
         store_cached_vectors,

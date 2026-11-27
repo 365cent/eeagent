@@ -9,7 +9,7 @@ import pytest
 
 import app.services.llm_gateway as gw
 from app.core.config import get_settings
-from app.services import semantic_api
+from app.platform import semantic_api
 
 pytestmark = [pytest.mark.anyio, pytest.mark.no_db]
 
@@ -166,7 +166,7 @@ def test_expand_attempt_sequence_round_robins_and_never_triples_a_model():
 
 
 async def test_attempt_sequence_ranks_measured_tps_first(monkeypatch):
-    from app.services import model_speed
+    from app.platform import model_speed
 
     model_speed.reset_speed_book()
     monkeypatch.setattr(
@@ -389,7 +389,7 @@ async def test_resolve_chat_model_returns_cached_model_without_probing(monkeypat
 
 async def test_ranking_change_is_logged(monkeypatch, caplog):
     """Operators get one line explaining why the retry order changed."""
-    from app.services import model_speed
+    from app.platform import model_speed
 
     model_speed.reset_speed_book()
     monkeypatch.setattr(gw, "get_settings", lambda: _settings(chat_attempt_budget_floor=2))
@@ -412,7 +412,7 @@ async def test_ranking_change_is_logged(monkeypatch, caplog):
 
 async def test_chat_completion_race_records_tps_and_ranks_the_winner_first(monkeypatch):
     """Slow first candidate, fast second: the fast one wins and leads the book."""
-    from app.services import model_speed
+    from app.platform import model_speed
 
     model_speed.reset_speed_book()
     monkeypatch.setattr(

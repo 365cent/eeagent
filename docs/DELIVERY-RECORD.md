@@ -48,7 +48,9 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence for the sixth move: `lint-imports` 3 kept against both configs; `pytest tests/test_tagging_text.py tests/test_tech_tag_pipeline.py tests/test_semantic_document_keywords.py tests/test_signal_dedup.py tests/test_signals_ingest.py` → 51 passed, 1 skipped (27.8 s, the skip is a live-gateway case); collection still 624 tests.
 - Seventh move: `doc_summary.py` (no app imports) and `signal_sources.py` (models plus the tagging domain) joined `app/domains/evidence/`; four import sites updated, and the README, backend TODO and the deckpeek research note now point at the new path.
 - Evidence for the seventh move: `lint-imports` 3 kept against both configs; `pytest tests/test_document_signals.py tests/test_signals_ingest.py tests/test_document_ingest.py` → 60 passed (66.6 s); collection still 624 tests.
-- Remaining BE-17 work: most of `app.services` still sits beside `app/domains`, and domains still import services such as `doc_ingest`, `llm` and `body_excerpt`; each needs its own slice.
+- Eighth move: `model_speed.py`, `hedged_model.py`, `semantic_api.py` and `embedding_cache.py` → `app/platform/`. They only need `app.core.config`, `app.platform.http`, the model layer and each other, so they are model-runtime infrastructure; `llm_gateway` stays in services and now reads them from platform. Fifteen files updated, including three tests and one probe script; two multi-name `from app.services import …` lines were split (the function-local one in `api/v1/signals.py` needed its indentation restored, caught by `py_compile` before any test run).
+- Evidence for the eighth move: `lint-imports` 3 kept against both configs; `pytest tests/test_hedged_model.py tests/test_model_speed.py tests/test_llm_gateway_models.py tests/test_agent_rag_semantic.py tests/test_semantic_document_keywords.py` → 48 passed, 1 skipped (20.0 s); collection still 624 tests.
+- Remaining BE-17 work: `app.services` still holds `doc_ingest`, `llm`, `llm_gateway`, `llm_usage`, `body_excerpt` and related modules; each needs its own slice.
 
 ## 2026-11-26
 

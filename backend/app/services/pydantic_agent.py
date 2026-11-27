@@ -15,7 +15,7 @@ from pydantic_ai.models.openai import OpenAIChatModel
 
 from app.core.config import get_settings
 from app.platform.llm import build_chat_model
-from app.services.hedged_model import HedgedChatModel
+from app.platform.hedged_model import HedgedChatModel
 from app.services.llm_gateway import (
     LLMNotConfiguredError,
     build_chat_model_chain,

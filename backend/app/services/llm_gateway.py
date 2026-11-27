@@ -26,8 +26,8 @@ logger = logging.getLogger(__name__)
 
 from app.core.config import get_settings, model_chain
 from app.platform.http import open_async_http_client
-from app.services import model_speed
-from app.services.hedged_model import race_first
+from app.platform import model_speed
+from app.platform.hedged_model import race_first
 from app.services.llm_usage import log_llm_call, usage_from_chat_payload
 
 _CACHE_TTL_SECONDS = 600.0

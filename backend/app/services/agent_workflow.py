@@ -37,7 +37,7 @@ from app.services.agent_tools import (
     suggest_signal_tags_tool,
     suggest_theme_membership_tool,
 )
-from app.services import model_speed
+from app.platform import model_speed
 from app.services.llm_gateway import LLMNotConfiguredError
 from app.services.llm_usage import (
     http_status_of,

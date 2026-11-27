@@ -17,7 +17,7 @@ import httpx
 import pytest
 
 from app.core.config import get_settings
-from app.services import semantic_api
+from app.platform import semantic_api
 from app.domains.tagging.service import suggest_tags
 
 pytestmark = [pytest.mark.anyio, pytest.mark.no_db]

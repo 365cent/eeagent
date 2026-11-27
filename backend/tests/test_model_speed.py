@@ -7,7 +7,7 @@ import types
 
 import pytest
 
-from app.services import model_speed
+from app.platform import model_speed
 
 pytestmark = [pytest.mark.anyio, pytest.mark.no_db]
 

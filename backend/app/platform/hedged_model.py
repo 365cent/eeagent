@@ -41,7 +41,7 @@ from pydantic_ai.models import Model, ModelRequestParameters, StreamedResponse
 from pydantic_ai.settings import ModelSettings
 
 from app.core.config import get_settings
-from app.services import model_speed
+from app.platform import model_speed
 
 logger = logging.getLogger(__name__)
 

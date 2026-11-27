@@ -9,8 +9,8 @@ from pydantic_ai.messages import ModelResponse, TextPart
 from pydantic_ai.models import ModelRequestParameters
 from pydantic_ai.models.function import FunctionModel
 
-from app.services import model_speed
-from app.services.hedged_model import HedgedChatModel, race_first
+from app.platform import model_speed
+from app.platform.hedged_model import HedgedChatModel, race_first
 
 pytestmark = [pytest.mark.anyio, pytest.mark.no_db]
 

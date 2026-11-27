@@ -13,7 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.config import get_settings
 from app.models.agent_models import DocumentChunk, DocumentFigure
 from app.models.models import Document
-from app.services import semantic_api
+from app.platform import semantic_api
 from app.services.agent_citations import make_chunk_citation, make_figure_citation
 from app.services.agent_contract import AgentCitation
 from app.domains.evidence.doc_structure import split_markdown_sections

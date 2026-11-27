@@ -10,7 +10,8 @@ import pytest
 from app.db.base import SessionLocal
 from app.models.agent_models import DocumentChunk
 from app.models.models import Document
-from app.services import agent_rag, semantic_api
+from app.services import agent_rag
+from app.platform import semantic_api
 
 pytestmark = pytest.mark.anyio
 

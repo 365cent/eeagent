@@ -1047,7 +1047,8 @@ async def tag_suggestions(
         suggest_tech_tags(s.title, tag_body),
         suggest_tags_with_llm(s.title, llm_body[:6000]),
     )
-    from app.services import llm_gateway, semantic_api
+    from app.services import llm_gateway
+    from app.platform import semantic_api
 
     stage = (
         llm.value_chain_stage_code
