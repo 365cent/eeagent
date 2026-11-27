@@ -211,11 +211,15 @@ func Launch(ctx context.Context, opts Options) (*Browser, error) {
 		b.enableTargetDiscovery(ctx)
 		id, err := b.waitForSingleFileExtension(ctx)
 		if err != nil {
-			_ = cmd.Process.Kill()
-			return nil, fmt.Errorf("SingleFile extension did not load in %s (%w); Google Chrome stable blocks --load-extension — use capture_engine edge", filepath.Base(exe), err)
+			if opts.ArchiveMode != ArchiveModeAuto {
+				_ = cmd.Process.Kill()
+				return nil, fmt.Errorf("SingleFile extension did not load in %s (%w); set capture_archive=auto or embedded to use the injected SingleFile core", filepath.Base(exe), err)
+			}
+			b.archiveMode = ArchiveModeEmbedded
+		} else {
+			b.singleFileExtID = id
+			b.wakeSingleFileExtension(ctx, b.singleFileExtID)
 		}
-		b.singleFileExtID = id
-		b.wakeSingleFileExtension(ctx, b.singleFileExtID)
 	} else if b.archiveMode == ArchiveModeAuto || b.archiveMode == ArchiveModeExtension {
 		b.archiveMode = ArchiveModeEmbedded
 	}

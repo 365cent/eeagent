@@ -89,8 +89,8 @@ dist/                发布产物（gitignored）
 | `page_ready_timeout_sec` | 普通页面等待可读正文稳定的上限，默认 25 |
 | `interactive_timeout_sec` | 微信/Cloudflare 验证页等待人工完成的上限，默认 180 |
 | `min_text_chars` | 判定“有正文”的最少字符数，默认 10；不足则拒绝归档 |
-| `headless` | `true` 则无窗口；`capture_archive=extension` 时会强制可见窗口以加载 SingleFile |
-| `capture_archive` | `extension`（默认）/ `auto` / `embedded` — 见下方「工作原理」 |
+| `headless` | `true` 则无窗口；`capture_archive=auto/extension` 时会强制可见窗口以加载 SingleFile |
+| `capture_archive` | `auto`（默认）/ `extension` / `embedded` — 见下方「工作原理」 |
 | `singlefile_extension_path` | 留空则自动从本机 Edge/Chrome 复制到 `data/extensions/singlefile` |
 | `ca_cert_path` | 企业 CA 的 PEM 文件；不得用关闭证书校验代替 |
 | `auth_token_env` | 读取 capture token 的环境变量名，默认 `EEA_CAPTURE_TOKEN` |
@@ -160,7 +160,7 @@ Edge/Chrome (--remote-debugging-port=0, 独立 profile)
 
 | 值 | 行为 |
 | --- | --- |
-| `auto`（默认） | 若能在 Edge/Chrome 配置目录找到 SingleFile，则用扩展归档；否则走内嵌 core |
+| `auto`（默认） | 若能找到 SingleFile，则用扩展归档；扩展开启失败或未安装时回退到内嵌 core |
 | `extension` | 仅扩展；未安装时报错 |
 | `embedded` | 仅内嵌 core（轻量，但复杂站点可能少于商店扩展） |
 

@@ -4,6 +4,12 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 ## 2026-11-27
 
+### Edge 158 blocks the staged SingleFile extension; auto mode now falls back (CC-06 slice)
+
+- Repro: packaged v0.1.1 with `capture_archive=extension` on Edge `158.0.4370.33` waits 45 s for the SingleFile extension target and fails with "SingleFile extension did not load"; the same page succeeds with `embedded` (example.com, 5 KB, signal `e8e114d3...`, archived and deleted afterwards).
+- Fix: `auto` now falls back to the injected core when the extension fails to load (previously it fell back only when staging failed); explicit `extension` still fails, but the message points at `auto`/`embedded`. `config.example.json` defaults to `auto` and the README table matches.
+- Evidence: `go test ./internal/capture ./internal/application ./internal/config` -> 3 ok (capture 130.7 s). The v0.1.1 exe predates the fix, so a Windows build runner must repackage before the browser re-check; the local dist config stays `embedded` so the current binary keeps working.
+
 ### Skipped Playwright cases run against an isolated API (FE-12 / BE-16 evidence)
 
 - New `frontend/tests/e2e/api-origin.ts` exports `divertApiOrigin(page, origin)`: when `EEA_PW_API_ORIGIN` is set, page `/api/v1/**` requests are re-pointed with `route.continue({url})`, so streamed multipart uploads keep their body. `pw:chain`, `pw:async` and `pw:history` call it; `EEA_API_URL` still drives the request fixture.
