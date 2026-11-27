@@ -11,7 +11,7 @@ from app.platform.launchdarkly import TECHNOLOGY_DECOMPOSITION, require_feature,
 from app.models.models import DemandPoint, DeploymentStandard, TechLandingPoint, VehicleFunction, Vocab
 from app.schemas.schemas import LandingPointCreate, LandingPointOut, LandingPointUpdate
 from app.platform.audit import record_correction
-from app.services.demand_validation import validate_confirmed_demand
+from app.domains.demand.validation import validate_confirmed_demand
 from app.domains.landing.serialization import landing_point_out as _to_out
 from app.domains.tagging.service import get_or_create_vocab
 

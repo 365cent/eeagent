@@ -10,8 +10,8 @@ from app.platform.launchdarkly import DEMAND_FUNCTION_MAPPING, require_feature, 
 from app.models.models import DemandPoint, VehicleFunction, Vocab
 from app.schemas.schemas import FunctionCreate, FunctionOut, FunctionUpdate
 from app.platform.audit import record_correction
-from app.services.demand_validation import validate_confirmed_demand
-from app.services.function_validation import (
+from app.domains.demand.validation import validate_confirmed_demand
+from app.domains.landing.validation import (
     validate_forward_trace,
     validate_function_card,
     validate_reverse_trace,

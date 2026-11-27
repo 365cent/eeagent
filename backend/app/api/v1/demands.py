@@ -21,7 +21,7 @@ from app.schemas.schemas import (
 from app.platform.audit import record_correction
 from app.services.demand_draft import demand_assistant_reply, propose_demand_draft
 from app.domains.demand.serialization import enrich_demand_out as _enrich
-from app.services.demand_validation import (
+from app.domains.demand.validation import (
     validate_demand_cross_validation,
     validate_demand_trace,
 )

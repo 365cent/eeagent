@@ -13,7 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import DemandPoint, PanoramaImportBatch, TechTheme
-from app.services.demand_validation import DEMAND_STEP_KEYS, validate_demand_trace
+from app.domains.demand.validation import DEMAND_STEP_KEYS, validate_demand_trace
 from app.services.panorama_import import load_workbook_model
 from app.services.panorama_import_signals import signal_ids_for_stage
 from app.services.panorama_workbook import PanoramaChainRow
