@@ -18,11 +18,12 @@ host Edge/Chrome (no browser download is bundled for the intranet image); set
 | `pnpm pw:refcodes` | a failed reference-dictionary load shows a retryable error and never claims the signal is missing; retry recovers the page | API :8000, web :3000 |
 | `pnpm pw:rejudge` | a rejected landing point opens no scoring, then a pass scores 20/25, finalizes v1, and a revised score appends v2 with v1 as history; skips unless `EEA_PW_REJUDGE_LP` names an unscanned landing point and leaves funnel/assessment rows behind | API :8000, web :3000, `EEA_PW_REJUDGE_LP` |
 | `pnpm pw:research` | document research shows the server's chunk/figure counts, focuses a stored figure with a working image, keeps the `doc_figure` deep link across a reload, and opens a sectioned chunk from the tree; skips without a document signal | API :8000, web :3000, a parsed document |
+| `pnpm pw:downloads` | the download page lists exactly the builds the API publishes: one row and one `platform=` link per published platform, version/size/SHA-256 mirror the server row, and the advertised link is fetched and re-hashed to the published digest | API :8000 or an isolated API, web :3000 |
 
 ## Running against an isolated API
 
 `EEA_API_URL` only affects the `request` fixture. The specs that call
-`divertApiOrigin` (`pw:chain`, `pw:async`, `pw:history`) also honour
+`divertApiOrigin` (`pw:chain`, `pw:async`, `pw:history`, `pw:downloads`) also honour
 `EEA_PW_API_ORIGIN`: set both to the isolated API (for example `:8001`) and the
 page's `/api/v1` calls are routed there without touching the dev database.
 

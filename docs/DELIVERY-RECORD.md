@@ -4,6 +4,14 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 ## 2026-11-27
 
+### 客户端下载页浏览器校验（FE-01 切片）
+
+- 新增 [downloads-view.spec.ts](../frontend/tests/e2e/downloads-view.spec.ts)（`pnpm pw:downloads`）：打开 `/downloads`，对每个已发布平台只断言一行、一个 `platform=` 下载链接，版本列取自服务端 `version`（无 sidecar 时显示破折号），大小与 SHA-256 与服务端行一致；再把页面上给出的下载链接真正取回，按 `size_bytes` 与 `sha256` 复核字节。
+- 页面不发布就不链接：行数与链接数等于平台数；没有 macOS 构建时保留“暂未提供”卡片，并确认页面不会凭空给出 dmg 链接。
+- 该 spec 走 `divertApiOrigin`，可用 `EEA_API_URL` / `EEA_PW_API_ORIGIN` 指向隔离 API。
+- 实测（Windows 开发机，Playwright 复用宿主机 Edge）：`pnpm pw:downloads` → **1 passed**；:8000（旧进程，无 `version` 字段）下版本列断言的破折号分支通过；另起 :8001 用当前代码（`version: v0.1.5`）复跑同样 **1 passed**，8.7 MB exe 取回后哈希等于 `f9cb4da3…`。`pnpm typecheck` exit 0。
+- 未覆盖：Linux/nginx 下载路径与真实 macOS `.dmg`（尚无产物）；上传到 `10.215.35.10` 仍按 OPS-07 待发布窗口执行。
+
 ### Full-stack regression on the combined tree (BE-16 evidence)
 
 - After the client/download changes landed (`f4336cd`, `3c25e86`, `48d0744`), ran the combined tree: backend `pytest -q` -> **635 passed, 2 skipped** (464.7 s, 637 collected, exit 0); `go vet ./...` and `go test ./...` exit 0; frontend `pnpm typecheck` and `pnpm build` exit 0.
