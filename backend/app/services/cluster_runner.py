@@ -33,8 +33,8 @@ CLUSTER_JOB_MODULE = "app.services.cluster_job"
 # OOM kill); the sweeper may start a new pass instead of waiting forever.
 STALE_RUNNING = timedelta(minutes=10)
 # Subprocesses are cheap but not free: keep at least this gap between spawns.
-MIN_SPAWN_GAP = timedelta(seconds=8)
-SWEEP_SECONDS = 15.0
+MIN_SPAWN_GAP = timedelta(seconds=5)
+SWEEP_SECONDS = 5.0
 
 _last_spawn_at: datetime | None = None
 
