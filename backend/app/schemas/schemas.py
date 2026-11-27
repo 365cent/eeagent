@@ -4,7 +4,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, computed_field, field_serializer, field_validator
 
-from app.services.refcodes import codes, normalize
+from app.domains.vocab.refcodes import codes, normalize
 
 Phase = Literal["设计", "制造", "运营"]
 ConstraintType = Literal["工程化", "经济性", "安全合规"]

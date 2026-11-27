@@ -14,7 +14,7 @@ Create Date: 2026-10-27
 from alembic import op
 from sqlalchemy import text
 
-from app.services.refcodes import REF_CODES
+from app.domains.vocab.refcodes import REF_CODES
 
 revision = "0002"
 down_revision = "0001"

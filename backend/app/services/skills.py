@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field, ValidationError, model_validator
 import yaml
 
 from app.core.config import get_settings
-from app.services.refcodes import codes
+from app.domains.vocab.refcodes import codes
 
 logger = logging.getLogger(__name__)
 

@@ -7,8 +7,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import PanoramaImportUrl, Signal, TechTheme
-from app.services.refcodes import normalize as normalize_ref_code
-from app.services.tagging_guard import human_corrected_fields
+from app.domains.vocab.refcodes import normalize as normalize_ref_code
+from app.domains.evidence.tagging_guard import human_corrected_fields
 
 
 async def sync_import_url_signal(

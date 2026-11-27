@@ -49,7 +49,7 @@ from httpx import ASGITransport, AsyncClient  # noqa: E402
 from sqlalchemy import create_engine, text  # noqa: E402
 
 from app.core.config import get_settings  # noqa: E402
-from app.services.refcodes import REF_CODES  # noqa: E402
+from app.domains.vocab.refcodes import REF_CODES  # noqa: E402
 
 SETTINGS = get_settings()  # cached with DB_NAME=eea_test
 

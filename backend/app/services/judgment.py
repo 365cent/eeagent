@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import uuid
 
-from app.services.refcodes import codes
+from app.domains.vocab.refcodes import codes
 
 # REQ-TAG-04: keyword rules over the ref-code labels/aliases per stage.
 _STAGE_KEYWORDS: dict[str, tuple[str, ...]] = {

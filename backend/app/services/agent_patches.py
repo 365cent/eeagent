@@ -18,7 +18,7 @@ from app.services.agent_citations import assert_citations_usable  # noqa: F401 â
 from app.services.agent_contract import CitationLedger, PatchFieldChange
 from app.services.audit import record_correction
 from app.services.tagging import get_or_create_vocab
-from app.services.tagging_guard import PROTECTED_SUGGESTION_FIELDS, assert_expected_signal_revision, human_corrected_fields
+from app.domains.evidence.tagging_guard import PROTECTED_SUGGESTION_FIELDS, assert_expected_signal_revision, human_corrected_fields
 
 
 PATCH_FIELDS = frozenset(PROTECTED_SUGGESTION_FIELDS)

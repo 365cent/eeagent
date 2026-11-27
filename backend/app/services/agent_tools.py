@@ -37,7 +37,7 @@ from app.services.judgment import judge_signal_type, judge_stage, rank_theme_ove
 from app.services.llm import suggest_tags_with_llm
 from app.platform.objectstore import load_body
 from app.services.tagging import suggest_tech_tags
-from app.services.tagging_guard import human_corrected_fields
+from app.domains.evidence.tagging_guard import human_corrected_fields
 
 
 async def search_evidence_tool(

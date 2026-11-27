@@ -9,7 +9,7 @@ from urllib.parse import urlparse
 from openpyxl import load_workbook
 from pydantic import BaseModel, Field
 
-from app.services.refcodes import normalize as normalize_ref_code
+from app.domains.vocab.refcodes import normalize as normalize_ref_code
 
 _URL_RE = re.compile(r"https?://[^\s\]]+", re.IGNORECASE)
 _SKIP_CELL = {"/", "—", "-", ""}

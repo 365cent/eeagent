@@ -73,7 +73,7 @@ from app.services.judgment import (
 )
 from app.services.signal_sources import add_supplementary_url, list_sources
 from app.services.signal_recaption import recaption_signal_article
-from app.services.tagging_guard import assert_expected_signal_revision, human_corrected_fields
+from app.domains.evidence.tagging_guard import assert_expected_signal_revision, human_corrected_fields
 from app.services.llm import suggest_tags_with_llm
 from app.services.llm_gateway import (
     LLMNoModelError,
@@ -84,7 +84,7 @@ from app.services.llm_gateway import (
     studio_generation_slot,
 )
 from app.platform.objectstore import load_body, load_bytes, save_body, save_bytes
-from app.services.refcodes import codes, normalize as normalize_ref_code
+from app.domains.vocab.refcodes import codes, normalize as normalize_ref_code
 from app.services.llm_prompts import evidence_assistant_system
 from app.services.signal_studio_store import (
     get_studio_artifact,

@@ -8,7 +8,7 @@ import pytest
 from openpyxl import Workbook
 
 from app.services.panorama_workbook import parse_panorama_workbook
-from app.services.refcodes import normalize
+from app.domains.vocab.refcodes import normalize
 
 
 def _minimal_workbook_bytes() -> bytes:
