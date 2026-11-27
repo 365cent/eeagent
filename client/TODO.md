@@ -1,6 +1,6 @@
 # Capture Client 实施清单
 
-更新：2026-11-26。生产服务端已选 Linux 内网；本目录仍是研究者 Windows 电脑上的 Go 采集程序。公网与登录浏览器留在用户终端。总顺序见 [项目清单](../TODO.md)，原文映射见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。
+更新：2026-11-27。生产服务端已选 Linux 内网；本目录仍是研究者 Windows 电脑上的 Go 采集程序。公网与登录浏览器留在用户终端。总顺序见 [项目清单](../TODO.md)，原文映射见 [需求追溯表](../docs/REQUIREMENTS-TRACEABILITY.md)。
 
 ## 现状和边界
 
@@ -79,6 +79,7 @@
 ## CC-06 Windows 包与生产验收
 
 - [ ] P0 · 未验证 · 依赖 CC-01…04、BE-16、OPS-03/04、DOC-02；独立 Windows 构建与浏览器证据供 OPS-06 汇总。
+- 2026-11-27 Windows 构建与升级验证：`dist/capture.exe` 与 v0.1.1 包内 exe 哈希一致（4b8194…b2084ee），`SHA256SUMS` 两项均通过（散装 exe 原为旧构建，已换成发布包内容）；`capture.exe doctor` 显示 backend/capture/auth ok（`local-development-user`/`researcher`）、Edge 与 SingleFile 扩展就绪；升级模拟 v0.1.0→v0.1.1→v0.1.0 均保留 `config.json` 与 `data/capture-queue/pending.json`，版本输出 v0.1.1 / v0.1.0。打包客户端实测 `upload -html`：`ok 6e716479… 825B`，服务端返回标题、来源 URL、摘录、正文与快照对象键，随后归档并删除（DELETE 204→404）。剩余：干净业务机安装与 10 篇网页/5 篇微信真实材料验收仍待 DOC-02/OPS-06。
 - 来源：WBS 1.3.2、1.5、1.6、1.7。
 - 入口：[release.ps1](scripts/release.ps1)、[vendor-singlefile.sh](scripts/vendor-singlefile.sh)、[README](README.md)。
 - 2026-11-19 构建切片：Windows `release.ps1 -Version v0.1.0` 产出 `capture.exe`、`capture-v0.1.0-windows-amd64.zip`、`SHA256SUMS`；zip 193 项，含 README/config/exe 与 SingleFile 扩展（manifest 4452 字节）。`capture doctor` 识别 Edge、后端、凭据与扩展；真浏览器本地页面采集已通过；10 篇网页/5 篇微信与干净业务机验收仍待；`gofmt` 已清理。

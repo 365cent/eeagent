@@ -4,6 +4,15 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 ## 2026-11-27
 
+### Capture client build, upgrade and real upload check (CC-06 slice)
+
+- `dist/capture.exe` had drifted from the v0.1.1 archive; it was replaced with the archive's copy, and both `capture.exe` (`4b81940c…b2084ee`) and `capture-v0.1.1-windows-amd64.zip` (`38ff97c4…bf818`) now match `SHA256SUMS`. `dist` is gitignored, so the repo diff is documentation only.
+- `capture.exe doctor` on this Windows host: `backend ok`, `capture ok`, `auth ok (local-development-user, researcher)`, Edge found, SingleFile extension present; `version` returned `capture v0.1.1`.
+- Upgrade/rollback simulation in a temp directory (v0.1.0 -> v0.1.1 -> v0.1.0) kept a marker `config.json` and `data/capture-queue/pending.json`; the binary reported v0.1.1 after the upgrade and v0.1.0 after the rollback. The v0.1.1 archive has 191 entries and contains only `config.example.json` - no user config, browser profile or queue.
+- Real packaged-client upload (not a stub): `capture.exe upload -html ... -html-url https://example.com/eea-client-check` returned `ok 6e716479-b77c-41e1-ac1d-78b0f46fe20b 825B`; `GET /api/v1/signals/<id>` returned the title, source URL, excerpt, body/snapshot object keys and `retained` status, which also proves the moved capture worker still serves the shipped client. The sample was archived and deleted afterwards (DELETE 204, then 404).
+- Remaining: clean business-machine install and the 10-web/5-WeChat real-material runs need DOC-02 material and OPS-06 sign-off; this slice closes no parent task.
+
+
 ### Detail page no longer reports a failed dictionary as a missing signal (FE-12 slice)
 
 - Symptom: during an 8-worker Playwright run, `/singal/<id>` showed “信号不存在 / 请从证据库打开有效信号” for rows that existed and the classification drawer never appeared; `report-smoke` also waited out its 10 s bound while the generation request was still in flight.
