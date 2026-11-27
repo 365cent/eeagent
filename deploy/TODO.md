@@ -80,7 +80,8 @@
 ## OPS-07 生产发布与验证
 
 - [ ] P0 · 未开始 · 依赖 OPS-06、DOC-05/06/07 的发布材料。
-- 2026-11-27 客户端候选：`deploy/downloads/capture.exe` 已替换为含 auto 回退修复的 v0.1.2 构建（SHA-256 `f8bd3e52…`，`SHA256SUMS` 同步），开发 API 的 `/api/v1/capture/client-releases` 与 `client-download?platform=windows` 实测哈希一致、版本为 v0.1.2；尚未上传到 `10.215.35.10`，待发布窗口按 OPS-07 执行。
+- 2026-11-27 客户端候选（当前）：`deploy/downloads/capture.exe` 为 v0.1.5（8,700,416 B，SHA-256 `f9cb4da3…`），sidecar `capture.exe.json` 与 `SHA256SUMS` 同步；`client/dist/capture.exe` 与发布副本字节一致，`capture.exe version` 自报 `capture v0.1.5`；`:8000` 与隔离 API 的 `/client-releases` 返回同一哈希，`client-download?platform=windows` 取回 8,700,416 B 且哈希一致，浏览器侧由 `pnpm pw:downloads` 复核。尚未上传到 `10.215.35.10`，待发布窗口按 OPS-07 执行。
+- 2026-11-27 制品清单修正：v0.1.4/v0.1.5 未经 `scripts/release.ps1` 构建，`client/dist/SHA256SUMS` 仍停留在 v0.1.2（`f8bd3e52…`）。已按实际字节重写（capture.exe `f9cb4da3…`、v0.1.2 zip `966c9e3a…` 复核一致）；后续发布用 release.ps1 一次产出 exe+zip+sidecar+SHA256SUMS，再复制到 `deploy/downloads/`，避免清单与二进制脱节。
 - 来源：WBS 1.6.1…1.6.4。
 - 记录发布版本、变更、维护窗口、执行者、业务/运维接收者；先核验备份和回退点，再发布。
 - 上传带校验和的版本目录，安装离线依赖，受控执行迁移/词表更新，切换服务版本并检查就绪。

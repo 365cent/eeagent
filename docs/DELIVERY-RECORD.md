@@ -4,6 +4,13 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 ## 2026-11-27
 
+### 客户端发布制品一致性（OPS-07 预检）
+
+- 三处副本对齐：`deploy/downloads/capture.exe`、`client/dist/capture.exe` 与 `:8000` 的 `client-download?platform=windows` 取回内容均为 8,700,416 B、SHA-256 `f9cb4da3…`；`client/dist/capture.exe version` 自报 `capture v0.1.5`，与 `capture.exe.json` 及隔离 API 的 `version` 一致。
+- 发现并修正一处真实不一致：v0.1.4/v0.1.5 不是经 `scripts/release.ps1` 产出的，`client/dist/SHA256SUMS` 仍写 v0.1.2 的 `f8bd3e52…`，按现有字节校验会失败。重写后逐行复核通过（capture.exe `f9cb4da3…`、留存 zip `966c9e3a…`）。
+- 未重新构建 exe：客户端源码有并发未提交改动，重建会把未完成代码打进制品；本次只修正清单与记录，不动字节。
+- 仍未做：`10.215.35.10` 上传与发布窗口（OPS-07），以及 Linux/nginx 下载路径（OPS-06）。
+
 ### 客户端下载页浏览器校验（FE-01 切片）
 
 - 新增 [downloads-view.spec.ts](../frontend/tests/e2e/downloads-view.spec.ts)（`pnpm pw:downloads`）：打开 `/downloads`，对每个已发布平台只断言一行、一个 `platform=` 下载链接，版本列取自服务端 `version`（无 sidecar 时显示破折号），大小与 SHA-256 与服务端行一致；再把页面上给出的下载链接真正取回，按 `size_bytes` 与 `sha256` 复核字节。
