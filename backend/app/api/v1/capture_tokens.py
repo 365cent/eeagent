@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.identity import OperatorIdentity, get_operator_identity
 from app.db.base import get_db
 from app.models.models import CaptureToken
-from app.services.audit import record_correction
+from app.platform.audit import record_correction
 from app.services.capture_tokens import (
     issue_capture_token,
     list_capture_tokens,

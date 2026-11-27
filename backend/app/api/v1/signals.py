@@ -49,7 +49,7 @@ from app.domains.evidence.html_capture import _signal_from_html
 from app.domains.evidence.signal_queries import find_signal, get_signal_detail, signal_out as _to_out
 from app.domains.evidence.signal_record import create_signal_record as _create_signal_record
 from app.domains.evidence.theme_match import match_theme as _match_theme, theme_display_tags
-from app.services.audit import record_correction
+from app.platform.audit import record_correction
 from app.services.demand_validation import confirmed_demand_citing
 from app.services.signal_dedup import (
     FIELD_LABELS,

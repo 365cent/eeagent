@@ -35,7 +35,7 @@ from app.schemas.schemas import (
     FigureRecaptionBatchOut,
 )
 from app.services.agent_rag import ensure_document_index
-from app.services.audit import record_correction
+from app.platform.audit import record_correction
 from app.services.figure_recaption import recaption_figure, recaption_pending_figures
 from app.platform.objectstore import load_body
 from app.services.tagging import suggest_tags, suggest_tech_tags, text_for_tagging

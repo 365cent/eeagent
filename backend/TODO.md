@@ -283,6 +283,7 @@
 - 2026-11-27 续切片：`useragent.py` → `app/platform/useragent.py`（会话域与用例共 2 处导入），`signal_duplicate.py` → `app/domains/evidence/signal_duplicate.py`（证据域两处与 `signal_dedup` 共 3 处导入）；重复采集标题规则归证据域。证据：`lint-imports` 两处配置各 3 kept，`pytest` 49 passed，全量收集仍 624 条。
 - 2026-11-27 再切片：`tagging_guard.py` → `app/domains/evidence/tagging_guard.py`（4 处导入）；`refcodes.py` → `app/domains/vocab/refcodes.py`，新增 `vocab` 限界上下文（12 处导入，含 seed/schemas/conftest；`0002_canonical_codes` 只改导入路径，无 SQL/模式变化）。证据：`lint-imports` 两处配置各 3 kept，`pytest` 44 passed，`alembic heads` 0027，全量收集 624 条。
 - 2026-11-27 再切片：`judgment.py`（环节/类型判定与主题排序）与 `doc_structure.py`（Markdown 章节与图块定位）迁入 `app/domains/evidence/`，共 12 处导入；两者已无 services 依赖。证据：`lint-imports` 两处配置各 3 kept，`pytest` 56 passed，全量收集 624 条。
+- 2026-11-27 再切片：修正审计写入器 `audit.py` 迁入 `app/platform/audit.py`（只依赖 core.identity 与模型），11 处导入（API 8、services 2、脚本 1）；`record_correction` 作为横切基础设施归平台层，审计策略仍由调用方决定。证据：`lint-imports` 两处配置各 3 kept，`pytest` 59 passed（战略/主题/主题命名/信号摄取），全量收集 624 条。
 - [ ] OpenAPI 路径快照：[tests/test_openapi_snapshot.py](tests/test_openapi_snapshot.py) + [tests/snapshots/openapi_paths.json](tests/snapshots/openapi_paths.json)；路由变更须同步快照（`OPENAPI_UPDATE_SNAPSHOT=1`）。
 - [ ] 迁移顺序建议：`core`/`db`/`models` → `platform`；采集/信号/需求等垂直切片按 WBS 迁入 `domains`；共享摄取逻辑取代 API 私有函数互调（对齐 BE-01）。
 - 验收：import-linter 通过；OpenAPI 快照测试通过；无新增 `platform`→`api`/`domains` 违规；领域迁移切片有对应 pytest 证据。

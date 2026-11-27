@@ -9,7 +9,7 @@ from app.db.base import get_db
 from app.platform.launchdarkly import DEMAND_FUNCTION_MAPPING, require_feature, track_workflow_success
 from app.models.models import DemandPoint, VehicleFunction, Vocab
 from app.schemas.schemas import FunctionCreate, FunctionOut, FunctionUpdate
-from app.services.audit import record_correction
+from app.platform.audit import record_correction
 from app.services.demand_validation import validate_confirmed_demand
 from app.services.function_validation import (
     validate_forward_trace,

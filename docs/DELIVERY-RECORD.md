@@ -42,7 +42,9 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence for the third move: `lint-imports` 3 kept against both configs; `pytest tests/test_panorama_import.py tests/test_signals_ingest.py tests/test_useragent.py` → 44 passed (35.2 s); `import app.main` loads 5 vocabulary domains; `alembic heads` reports `0027_capture_job_progress`; collection still 624 tests.
 - Fourth move: `judgment.py` (stage/type rules and theme ranking) and `doc_structure.py` (Markdown sections and figure placement) joined `app/domains/evidence/`, 12 import sites updated. `judgment` now depends only on `app.domains.vocab.refcodes`; `doc_structure` has no app imports at all.
 - Evidence for the fourth move: `lint-imports` 3 kept against both configs; `pytest tests/test_document_structure.py tests/test_document_ingest.py tests/test_signals_ingest.py` → 56 passed (46.7 s); collection still 624 tests.
-- Remaining BE-17 work: most of `app.services` still sits beside `app/domains`, and domains still import services such as `doc_ingest`, `llm`, `body_excerpt` and `audit`; each needs its own slice.
+- Fifth move: `audit.py` → `app/platform/audit.py`. `record_correction` only needs `app.core.identity` and the model, so the correction-audit writer is cross-cutting infrastructure; which field changes get audited stays with the callers. Eleven import sites updated (eight API routes, two services, one script).
+- Evidence for the fifth move: `lint-imports` 3 kept against both configs; `pytest tests/test_strategy.py tests/test_themes.py tests/test_theme_naming.py tests/test_signals_ingest.py` → 59 passed (54.3 s); collection still 624 tests.
+- Remaining BE-17 work: most of `app.services` still sits beside `app/domains`, and domains still import services such as `doc_ingest`, `llm`, `body_excerpt` and `tagging`; each needs its own slice.
 
 ## 2026-11-26
 

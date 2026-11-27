@@ -16,7 +16,7 @@ from app.models.models import (
     StrategicFunnel,
     TechLandingPoint,
 )
-from app.services.audit import record_correction
+from app.platform.audit import record_correction
 from app.schemas.schemas import (
     AssessmentCreate,
     AssessmentOut,

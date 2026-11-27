@@ -9,7 +9,7 @@ from app.db.base import get_db
 from app.platform.launchdarkly import DEPLOYMENT_STANDARDS, require_feature, track_workflow_success
 from app.models.models import DeploymentStandard, TechLandingPoint
 from app.schemas.schemas import StandardGrid, StandardOut, StandardUpsert
-from app.services.audit import record_correction
+from app.platform.audit import record_correction
 
 router = APIRouter(
     prefix="/landing-points/{lp_id}/standards",
