@@ -19,7 +19,7 @@ from pydantic_ai.messages import (
 
 from app.models.models import Signal
 from app.domains.evidence.signal_host import signal_host
-from app.services.pydantic_agent import build_model
+from app.platform.pydantic_agent import build_model
 from app.core.config import get_settings
 from app.platform.llm_gateway import (
     LLMNoModelError,

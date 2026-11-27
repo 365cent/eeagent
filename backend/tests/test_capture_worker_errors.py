@@ -9,7 +9,7 @@ def _permanent(exc: Exception) -> bool:
     from fastapi import HTTPException
 
     from app.platform.errors import DomainError
-    from app.services.url_fetch import FetchError, RetryableFetchError
+    from app.platform.url_fetch import FetchError, RetryableFetchError
 
     client_error = isinstance(exc, HTTPException) or isinstance(exc, DomainError)
     return (isinstance(exc, FetchError) and not isinstance(exc, RetryableFetchError)) or (

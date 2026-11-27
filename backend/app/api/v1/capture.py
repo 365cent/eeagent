@@ -41,7 +41,7 @@ from app.schemas.schemas import CaptureJobOut, CaptureResult
 from app.domains.evidence.doc_ingest import normalize_document_mime
 from app.platform.objectstore import save_bytes
 from app.domains.vocab.refcodes import codes, normalize as normalize_ref_code
-from app.services.url_fetch import FetchError, fetch_url
+from app.platform.url_fetch import FetchError, fetch_url
 from app.domains.capture.ingest import ingest_capture_payload
 from app.domains.capture.submission import _is_html, _submission_fingerprint
 from app.domains.evidence.signal_queries import get_signal_detail

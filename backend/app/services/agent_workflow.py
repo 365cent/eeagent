@@ -45,7 +45,7 @@ from app.platform.llm_usage import (
     usage_from_agent_result,
     usage_without_result,
 )
-from app.services.pydantic_agent import build_hedged_model, build_model
+from app.platform.pydantic_agent import build_hedged_model, build_model
 from app.core.config import get_settings
 
 

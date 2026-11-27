@@ -1,7 +1,7 @@
 """Unified capture entry (POST /api/v1/capture): file OR url, one shape out.
 
 No network access anywhere: the server-fetch path stubs
-app.services.url_fetch.fetch_url (monkeypatched at the import site in
+app.platform.url_fetch.fetch_url (monkeypatched at the import site in
 app.api.v1.capture), the document path stubs ingest_document like
 tests/test_documents_raw.py does.
 """
@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 
 from app.core.config import get_settings
-from app.services.url_fetch import FetchedPage, FetchError
+from app.platform.url_fetch import FetchedPage, FetchError
 
 pytestmark = pytest.mark.anyio
 
