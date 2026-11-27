@@ -16,9 +16,10 @@ endpoints remain for the browser extension and API callers.
 """
 from __future__ import annotations
 
+import hashlib
 import uuid
 from datetime import datetime, timedelta, timezone
-from functools import partial
+from functools import lru_cache, partial
 from pathlib import Path
 
 from anyio import to_thread
@@ -80,6 +81,21 @@ def _client_artifact(platform: str) -> Path | None:
     return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
+@lru_cache(maxsize=8)
+def _sha256_cached(path: str, mtime_ns: int, size: int) -> str:
+    """Hash a published build once per (path, mtime, size); the page prints it."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as handle:
+        for chunk in iter(lambda: handle.read(1 << 20), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _artifact_sha256(path: Path) -> str:
+    stat = path.stat()
+    return _sha256_cached(str(path), stat.st_mtime_ns, stat.st_size)
+
+
 @router.get("/client-releases", include_in_schema=False)
 async def list_client_releases() -> list[dict[str, object]]:
     """Which client builds this server can hand out, so the page never shows a dead link."""
@@ -93,6 +109,7 @@ async def list_client_releases() -> list[dict[str, object]]:
                 "platform": platform,
                 "filename": artifact.name,
                 "size_bytes": artifact.stat().st_size,
+                "sha256": _artifact_sha256(artifact),
                 "download_url": f"/api/v1/capture/client-download?platform={platform}",
             }
         )

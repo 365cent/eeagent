@@ -472,6 +472,7 @@ export type CaptureClientRelease = {
   platform: CaptureClientPlatform
   filename: string
   size_bytes: number
+  sha256: string
   download_url: string
 }
 

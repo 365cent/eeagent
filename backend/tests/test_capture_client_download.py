@@ -6,6 +6,7 @@ binary - not a zip wrapper that 7-Zip refuses.
 """
 from __future__ import annotations
 
+import hashlib
 import os
 
 import pytest
@@ -36,6 +37,7 @@ async def test_releases_lists_only_what_is_published(client, tmp_path, monkeypat
         ("windows", "capture-v0.1.2-windows-amd64.exe")
     ]
     assert releases[0]["size_bytes"] == len(WINDOWS_BYTES)
+    assert releases[0]["sha256"] == hashlib.sha256(WINDOWS_BYTES).hexdigest()
     assert releases[0]["download_url"].endswith("platform=windows")
 
 
