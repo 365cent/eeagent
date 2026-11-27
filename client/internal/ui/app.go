@@ -37,7 +37,11 @@ const (
 )
 
 // Run shows the window and blocks until it closes.
-func Run(cfg config.Config, dir string) (code int) {
+//
+// link is the eea-capture:// URL the process was launched with (empty for a
+// normal double-click): the platform's "打开采集客户端" button uses it to hand
+// queued jobs to this instance.
+func Run(cfg config.Config, dir, link string) (code int) {
 	runtime.LockOSThread()
 	// A panic before the first window exists is invisible in a -H=windowsgui
 	// build; turn it into a dialog so "double-click did nothing" is diagnosable.
@@ -56,17 +60,26 @@ func Run(cfg config.Config, dir string) (code int) {
 	// Double-clicking again while an instance is already up (minimised, behind
 	// the editor) used to open a second window nobody noticed. Bring the running
 	// one forward instead: one queue, one browser profile, one visible result.
-	if focusExistingWindow() {
+	// An app link also tells that instance to start claiming right away.
+	if hwnd, ok := runningWindow(); ok {
+		bringForward(hwnd)
+		if link != "" {
+			if !sendLaunchLink(hwnd, link) {
+				// Delivery failed: the 20s drain still claims the queued job.
+				_ = hwnd.SetForegroundWindow()
+			}
+		}
 		return 0
 	}
 
-	app := newApp(cfg, dir)
+	app := newApp(cfg, dir, link)
 	drainCtx, stopDrain := context.WithCancel(context.Background())
 	app.drainWG.Add(1)
 	go func() {
 		defer app.drainWG.Done()
 		app.runServerImportDrain(drainCtx)
 	}()
+	app.kickDrain()
 	code = app.wnd.RunAsMain()
 	stopDrain()
 	app.drainWG.Wait()
@@ -104,12 +117,16 @@ type appState struct {
 	activeQueue   *queue.Queue
 	queueRunning  bool
 	closeWhenIdle bool
+	tickerStop    chan struct{}
 
 	// The local queue and the platform (awaiting_client) drain share one
 	// browser session; captureOwner serializes them. drainRunning mirrors the
 	// server drain for UI checks.
 	drainRunning atomic.Bool
 	drainWG      sync.WaitGroup
+	// drainKick asks the drain loop for an immediate pass (app link received).
+	drainKick    chan struct{}
+	launchLink   string
 	captureMu    sync.Mutex
 	captureOwner string
 
@@ -125,7 +142,7 @@ type appState struct {
 	mu      sync.Mutex
 }
 
-func newApp(cfg config.Config, dir string) *appState {
+func newApp(cfg config.Config, dir, link string) *appState {
 	w := ui.DpiX(460)
 	h := ui.DpiY(308)
 	panelNote := ""
@@ -140,6 +157,8 @@ func newApp(cfg config.Config, dir string) *appState {
 		engineChrome: strings.EqualFold(cfg.CaptureEngine, "chrome"),
 		headlessOn:   cfg.Headless,
 		jobs:         make(map[int]queue.Job),
+		drainKick:    make(chan struct{}, 1),
+		launchLink:   link,
 	}
 	if cfg.StartupNotice != "" {
 		// main had to fall back to defaults; say so on the status line rather
@@ -208,9 +227,16 @@ func (a *appState) events() {
 		roundWindow(a.hwnd)
 		_, _ = a.edt.Hwnd().SetFocus()
 		a.resumeQueue()
+		a.startRepaintTicker()
+		if a.launchLink != "" {
+			a.acceptLaunchLink(a.launchLink)
+		}
 		a.invalidate()
 		return 0
 	})
+
+	// A second instance forwards its app link here instead of opening a window.
+	a.wnd.On().WmCopyData(func(p ui.WmCopyData) bool { return a.onLaunchLink(p) })
 
 	a.wnd.On().WmEraseBkgnd(func(ui.WmEraseBkgnd) int { return 1 })
 	a.wnd.On().WmPaint(func() { a.paint() })
@@ -274,6 +300,7 @@ func (a *appState) events() {
 	})
 
 	a.wnd.On().WmDestroy(func() {
+		a.stopRepaintTicker()
 		a.dropBack()
 		for _, f := range []win.HFONT{a.fonts.title, a.fonts.body, a.fonts.small} {
 			if f != 0 {
@@ -284,22 +311,6 @@ func (a *appState) events() {
 			_ = a.page.DeleteObject()
 		}
 	})
-}
-
-// focusExistingWindow restores the window of an already running client and
-// reports whether one was found.
-func focusExistingWindow() bool {
-	hwnd, ok := win.FindWindow(win.ClassNameStr(winClass), "")
-	if !ok || hwnd == 0 {
-		return false
-	}
-	// A background process may not raise a window on its own; this is the
-	// documented escape hatch and is best-effort only.
-	_ = win.AllowSetForegroundWindow(0xFFFF_FFFF) // ASFW_ANY
-	_ = hwnd.ShowWindowAsync(co.SW_RESTORE)
-	_ = hwnd.BringWindowToTop()
-	hwnd.SetForegroundWindow()
-	return true
 }
 
 func (a *appState) click(pt win.POINT) {
@@ -629,8 +640,8 @@ func (a *appState) waitQueue(q *queue.Queue) {
 }
 
 // runServerImportDrain claims URL-list jobs queued from the platform dashboard
-// (awaiting_client). It runs every 20s and skips while the local queue owns the
-// shared browser session.
+// (awaiting_client). It wakes every 20s, or immediately when an app link asks
+// for it, and skips while the local queue owns the shared browser session.
 func (a *appState) runServerImportDrain(ctx context.Context) {
 	ticker := time.NewTicker(20 * time.Second)
 	defer ticker.Stop()
@@ -639,21 +650,27 @@ func (a *appState) runServerImportDrain(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			rt, ok := a.beginServerDrain()
-			if !ok {
-				continue
-			}
-			jobCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-			okN, failN := importdrain.DrainAwaitingJobs(jobCtx, io.Discard, rt.API, rt.Browser, rt.PublicHTTP, "")
-			cancel()
-			a.endServerDrain()
-			if okN+failN > 0 {
-				a.wnd.UiThread(func() {
-					a.notice = fmt.Sprintf("平台排队链接：完成 %d · 失败 %d", okN, failN)
-					a.invalidate()
-				})
-			}
+		case <-a.drainKick:
 		}
+		a.drainOnce(ctx)
+	}
+}
+
+// drainOnce runs one claim-and-capture pass over the platform queue.
+func (a *appState) drainOnce(ctx context.Context) {
+	rt, ok := a.beginServerDrain()
+	if !ok {
+		return
+	}
+	jobCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+	okN, failN := importdrain.DrainAwaitingJobs(jobCtx, io.Discard, rt.API, rt.Browser, rt.PublicHTTP, "")
+	cancel()
+	a.endServerDrain()
+	if okN+failN > 0 {
+		a.wnd.UiThread(func() {
+			a.notice = fmt.Sprintf("平台排队链接：完成 %d · 失败 %d", okN, failN)
+			a.invalidate()
+		})
 	}
 }
 
@@ -767,11 +784,101 @@ func (a *appState) clickJobAction(pt win.POINT, f frame) bool {
 				}
 			case queue.StatusQueued:
 				a.cancelQueued(job.ID)
+			case queue.StatusRunning:
+				a.cancelRunning(job.ID)
 			}
+			return true
+		}
+		if f.jobSecondary[row].contains(pt.X, pt.Y) {
+			if job.Status == queue.StatusFailed {
+				a.recaptureJob(job)
+			}
+			return true
+		}
+		// A failed row without a safe retry used to dead-end here: the footer
+		// said "逐项处理" but no control explained why. The row itself now
+		// shows the recorded reason.
+		if f.jobRows[row].contains(pt.X, pt.Y) && job.Status == queue.StatusFailed {
+			a.showJobReason(job)
 			return true
 		}
 	}
 	return false
+}
+
+// showJobReason puts the recorded failure (and where to look next) in a native
+// dialog: the compact row has no space for a second line.
+func (a *appState) showJobReason(job queue.Job) {
+	reason := strings.TrimSpace(job.Err)
+	if reason == "" {
+		reason = "客户端没有记录到失败原因。"
+	}
+	lines := []string{
+		"任务：" + jobDisplayTarget(job),
+		"状态：" + jobStatusLabel(job),
+		"",
+		"原因：" + reason,
+	}
+	if job.URL != "" {
+		lines = append(lines, "链接："+job.URL)
+	}
+	if job.Attempts > 0 {
+		lines = append(lines, fmt.Sprintf("尝试次数：%d", job.Attempts))
+	}
+	if job.CaptureJobID != "" {
+		lines = append(lines, "服务端任务："+job.CaptureJobID)
+	}
+	lines = append(lines, "", "可用「重采」按新的提交标识重新采集同一来源。")
+	_, _ = a.hwnd.MessageBox(strings.Join(lines, "\n"), winTitle, co.MB_OK|co.MB_ICONINFORMATION)
+}
+
+// recaptureJob submits the same source again under a fresh submission id. That
+// is safe even when RetrySafe is false: the server treats it as a new capture,
+// not a replay of an uncertain POST.
+func (a *appState) recaptureJob(job queue.Job) {
+	if a.captureQueued() || a.busy > 0 {
+		a.notice = "当前队列仍有任务，稍后再重新采集"
+		a.invalidate()
+		return
+	}
+	var submit func(*queue.Queue)
+	switch job.Kind {
+	case queue.KindURL:
+		if strings.TrimSpace(job.URL) == "" {
+			a.notice = "此项目缺少原链接，无法重新采集"
+			a.invalidate()
+			return
+		}
+		target := job.URL
+		channel := job.Channel
+		submit = func(q *queue.Queue) { q.SubmitURL(target, channel) }
+	case queue.KindFile:
+		if strings.TrimSpace(job.Path) == "" {
+			a.notice = "原始文件已不在本地，无法重新采集"
+			a.invalidate()
+			return
+		}
+		path := job.Path
+		submit = func(q *queue.Queue) { q.SubmitFile(path) }
+	case queue.KindArchive:
+		if strings.TrimSpace(job.URL) == "" || strings.TrimSpace(job.Path) == "" {
+			a.notice = "此项目缺少原链接或快照文件，无法重新采集"
+			a.invalidate()
+			return
+		}
+		path, target := job.Path, job.URL
+		submit = func(q *queue.Queue) { q.SubmitArchive(path, target) }
+	default:
+		a.notice = "此项目无法重新采集"
+		a.invalidate()
+		return
+	}
+	a.showJobs = true
+	a.showInputControls()
+	if a.startBatch(submit) {
+		a.notice = "已按新的提交标识重新采集"
+		a.invalidate()
+	}
 }
 
 func (a *appState) retryJob(id int) {
@@ -821,6 +928,66 @@ func (a *appState) cancelQueued(id int) {
 	a.invalidate()
 }
 
+func (a *appState) cancelRunning(id int) {
+	if a.activeQueue == nil || !a.activeQueue.CancelRunning(id) {
+		a.notice = "该项目已不在抓取阶段，无法停止"
+		a.invalidate()
+		return
+	}
+	a.notice = "已停止抓取；可在项目页重新采集"
+	a.invalidate()
+}
+
+// startRepaintTicker keeps "抓取中 22% · 等待页面就绪 · 1m12s" counting while a
+// capture is in flight; without it the window only repaints on state changes and
+// the elapsed seconds look frozen.
+func (a *appState) startRepaintTicker() {
+	if a.tickerStop != nil {
+		return
+	}
+	stop := make(chan struct{})
+	a.tickerStop = stop
+	go func() {
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				a.mu.Lock()
+				running := false
+				for _, job := range a.jobs {
+					if job.Status == queue.StatusRunning {
+						running = true
+						break
+					}
+				}
+				a.mu.Unlock()
+				if running {
+					a.invalidate()
+				}
+			}
+		}
+	}()
+}
+
+func (a *appState) stopRepaintTicker() {
+	if a.tickerStop == nil {
+		return
+	}
+	close(a.tickerStop)
+	a.tickerStop = nil
+}
+
+// shortDuration renders an elapsed time compactly: 42s, 1m12s.
+func shortDuration(d time.Duration) string {
+	if d < time.Minute {
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	}
+	return fmt.Sprintf("%dm%02ds", int(d.Minutes()), int(d.Seconds())%60)
+}
+
 func findJob(jobs []queue.Job, id int) queue.Job {
 	for _, job := range jobs {
 		if job.ID == id {
@@ -867,7 +1034,7 @@ func (a *appState) statusText() string {
 	case a.notice != "":
 		return a.notice
 	case a.failed > 0:
-		return fmt.Sprintf("%d 项失败 · 请在任务页逐项处理", a.failed)
+		return fmt.Sprintf("%d 项失败 · 点任务行看原因，可重试或重采", a.failed)
 	case a.done > 0:
 		return fmt.Sprintf("任务记录 · %d 项已提交或完成", a.done)
 	default:
@@ -918,7 +1085,17 @@ func jobStatusLabel(job queue.Job) string {
 			label = "解析中"
 		}
 		if job.Progress > 0 && job.Progress < 100 {
-			return fmt.Sprintf("%s %d%%", label, job.Progress)
+			label = fmt.Sprintf("%s %d%%", label, job.Progress)
+		}
+		// A slow page must look alive: name the current step and how long it has
+		// been there, the same way the chat shows elapsed model time.
+		if job.Detail != "" {
+			label += " · " + job.Detail
+		}
+		if !job.StageStartedAt.IsZero() {
+			if elapsed := time.Since(job.StageStartedAt).Round(time.Second); elapsed >= time.Second {
+				label += " · " + shortDuration(elapsed)
+			}
 		}
 		return label
 	case queue.StatusDone:
@@ -966,11 +1143,22 @@ func jobPrimaryAction(job queue.Job) string {
 		if job.Attempts == 0 && job.CaptureJobID == "" {
 			return "取消"
 		}
+	case queue.StatusRunning:
+		// A capture waiting on a verification page can sit for minutes; let the
+		// operator stop it instead of closing the window.
+		if job.Stage == "capturing" {
+			return "停止"
+		}
 	}
 	return ""
 }
 
 func jobSecondaryAction(job queue.Job) string {
+	if job.Status == queue.StatusFailed {
+		// Always available: a fresh submission under a new id, even when an
+		// automatic replay would be unsafe.
+		return "重采"
+	}
 	return ""
 }
 

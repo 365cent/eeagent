@@ -256,7 +256,7 @@ func (b *Browser) ensureSingleFileContentReady(ctx context.Context, sess *cdp.Se
 	case <-ctx.Done():
 		return ctx.Err()
 	}
-	if err := b.waitForContent(ctx, sess); err != nil {
+	if err := b.waitForContent(ctx, sess, func(string) {}); err != nil {
 		return err
 	}
 	b.wakeSingleFileExtension(ctx, extID)

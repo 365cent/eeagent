@@ -315,10 +315,27 @@ func (b *Browser) Close() error {
 func (b *Browser) Profile() string { return b.profile }
 
 // Capture navigates to url and returns a SingleFile archive of it.
+// Capture navigates to url and returns a SingleFile archive of it.
 func (b *Browser) Capture(ctx context.Context, url string) (*Archive, error) {
+	return b.capture(ctx, url, nil)
+}
+
+// CaptureWithProgress is Capture plus a coarse phase callback, so the window can
+// say "等待页面就绪…" instead of a percentage that never moves.
+func (b *Browser) CaptureWithProgress(ctx context.Context, url string, progress func(string)) (*Archive, error) {
+	return b.capture(ctx, url, progress)
+}
+
+func (b *Browser) capture(ctx context.Context, url string, progress func(string)) (*Archive, error) {
 	if b.closed {
 		return nil, errors.New("browser already closed")
 	}
+	report := func(phase string) {
+		if progress != nil {
+			progress(phase)
+		}
+	}
+	report("打开浏览器标签页…")
 	b.singleFileReloaded = false
 	sess, err := b.cdp.NewTarget(ctx, "about:blank")
 	if err != nil {
@@ -350,6 +367,7 @@ func (b *Browser) Capture(ctx context.Context, url string) (*Archive, error) {
 
 	navigateCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
 	defer cancel()
+	report("加载页面…")
 	if err := sess.CallDecode(navigateCtx, "Page.navigate", map[string]any{"url": url}, nil); err != nil {
 		return nil, fmt.Errorf("navigate: %w", err)
 	}
@@ -360,7 +378,8 @@ func (b *Browser) Capture(ctx context.Context, url string) (*Archive, error) {
 		// Leave the page to the readyState probe below: slow pages still capture.
 	}
 
-	if err := b.waitForContent(ctx, sess); err != nil {
+	report("等待页面就绪…")
+	if err := b.waitForContent(ctx, sess, report); err != nil {
 		return nil, err
 	}
 
@@ -373,6 +392,7 @@ func (b *Browser) Capture(ctx context.Context, url string) (*Archive, error) {
 	}
 
 	if b.archiveMode == ArchiveModeExtension {
+		report("生成 HTML 快照…")
 		state, err := readPageState(ctx, sess)
 		if err != nil {
 			return nil, err
@@ -391,6 +411,7 @@ func (b *Browser) Capture(ctx context.Context, url string) (*Archive, error) {
 		return nil, extErr
 	}
 
+	report("生成 HTML 快照…")
 	if err := inject(ctx, sess); err != nil {
 		return nil, err
 	}
@@ -476,11 +497,12 @@ func readPageState(ctx context.Context, sess *cdp.Session) (pageState, error) {
 // event. Challenge pages are given a longer interactive window (a human can
 // solve them in the visible browser); empty shells are rejected rather than
 // uploaded as evidence.
-func (b *Browser) waitForContent(ctx context.Context, sess *cdp.Session) error {
+func (b *Browser) waitForContent(ctx context.Context, sess *cdp.Session, report func(string)) error {
 	readyWait := b.opts.ReadyWait
 	interactiveWait := b.opts.InteractiveWait
 	minText := b.opts.MinTextChars
 
+	challengeReported := false
 	readyDeadline := time.Now().Add(readyWait)
 	interactiveDeadline := time.Now().Add(interactiveWait)
 	stable, lastLen := 0, -1
@@ -498,6 +520,10 @@ func (b *Browser) waitForContent(ctx context.Context, sess *cdp.Session) error {
 			)
 		case state.Challenge:
 			stable = 0
+			if !challengeReported {
+				challengeReported = true
+				report("页面需要人工验证，请在打开的浏览器中完成")
+			}
 			if b.opts.Headless {
 				if time.Now().After(readyDeadline) {
 					return fmt.Errorf(

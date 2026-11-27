@@ -37,34 +37,42 @@ const (
 	StatusCanceled Status = "canceled"
 )
 
+// errJobCancelled marks a run stopped by the operator rather than by a failure.
+var errJobCancelled = errors.New("canceled by operator")
+
 // Job is one unit of work; fields are a snapshot for the UI.
 type Job struct {
-	ID            int
-	Kind          Kind
-	URL           string
-	Path          string
-	Channel       string
-	SubmissionID  string
-	CaptureJobID  string
-	RetryCapture  bool
-	RetrySafe     bool
-	Stage         string
-	ServerStage   string
-	ServerStatus  string
-	Progress      int
-	EvidenceState string
-	captureURL    string
-	archive       []byte
-	hasPayload    bool
-	Status        Status
-	Attempts      int
-	Err           string
-	SignalID      string
-	Title         string
-	Bytes         int
-	QueuedAt      time.Time
-	StartedAt     time.Time
-	FinishedAt    time.Time
+	ID           int
+	Kind         Kind
+	URL          string
+	Path         string
+	Channel      string
+	SubmissionID string
+	CaptureJobID string
+	RetryCapture bool
+	RetrySafe    bool
+	Stage        string
+	ServerStage  string
+	ServerStatus string
+	Progress     int
+	// Detail is the live capture sub-step ("等待页面就绪…"), shown next to the
+	// percentage so a slow page never looks like a frozen window.
+	Detail         string
+	StageStartedAt time.Time
+	canceled       bool
+	EvidenceState  string
+	captureURL     string
+	archive        []byte
+	hasPayload     bool
+	Status         Status
+	Attempts       int
+	Err            string
+	SignalID       string
+	Title          string
+	Bytes          int
+	QueuedAt       time.Time
+	StartedAt      time.Time
+	FinishedAt     time.Time
 }
 
 // Uploader submits captures and file jobs to the EEA backend.
@@ -100,6 +108,7 @@ type Queue struct {
 	sendMu      sync.RWMutex
 	cond        *sync.Cond
 	jobs        []*Job
+	cancels     map[int]context.CancelFunc
 	restoreJobs []*Job
 	pending     int
 	nextID      int
@@ -120,10 +129,11 @@ func New(engine capture.CaptureEngine, api Uploader, opts Options) *Queue {
 		opts.Timeout = 150 * time.Second
 	}
 	q := &Queue{
-		engine: engine,
-		api:    api,
-		opts:   opts,
-		ch:     make(chan *Job, 64),
+		engine:  engine,
+		api:     api,
+		opts:    opts,
+		ch:      make(chan *Job, 64),
+		cancels: make(map[int]context.CancelFunc),
 	}
 	q.cond = sync.NewCond(&q.mu)
 	return q
@@ -437,6 +447,13 @@ func (q *Queue) runJob(job *Job) {
 			break
 		}
 		q.mu.Lock()
+		canceled := job.canceled
+		q.mu.Unlock()
+		if canceled {
+			err = errJobCancelled
+			break
+		}
+		q.mu.Lock()
 		job.Err = safeDiagnostic(err.Error())
 		persistErr = q.persistLocked()
 		if persistErr != nil {
@@ -596,10 +613,28 @@ func (q *Queue) attempt(ctx context.Context, job *Job) error {
 			if captureBudget <= 0 {
 				captureBudget = 150 * time.Second
 			}
-			capCtx, capCancel := context.WithTimeout(context.Background(), captureBudget)
+			// Cancellable by the operator: a page stuck behind a verification
+			// challenge must not pin a worker until the budget runs out.
+			timeoutCtx, cancelTimeout := context.WithTimeout(context.Background(), captureBudget)
+			capCtx, cancelCapture := context.WithCancel(timeoutCtx)
+			q.mu.Lock()
+			q.cancels[job.ID] = cancelCapture
+			job.canceled = false
+			q.mu.Unlock()
 			q.setStage(job, "capturing")
-			page, err := q.engine.Capture(capCtx, job.URL)
-			capCancel()
+			progress := func(phase string) { q.setDetail(job, phase) }
+			var page *capture.Archive
+			var err error
+			if reporter, ok := q.engine.(capture.PhaseReporter); ok {
+				page, err = reporter.CaptureWithProgress(capCtx, job.URL, progress)
+			} else {
+				page, err = q.engine.Capture(capCtx, job.URL)
+			}
+			q.mu.Lock()
+			delete(q.cancels, job.ID)
+			q.mu.Unlock()
+			cancelCapture()
+			cancelTimeout()
 			if err != nil {
 				return err
 			}
@@ -664,11 +699,53 @@ func (q *Queue) recordCaptureSignal(job *Job, sig *platform.Signal) {
 func (q *Queue) setStage(job *Job, stage string) {
 	q.mu.Lock()
 	job.Stage = stage
+	job.StageStartedAt = time.Now()
+	job.Detail = ""
 	job.Progress = platform.LocalJobProgressPercent(stage, job.ServerStatus, job.ServerStage)
 	q.persistChangedLocked()
 	snapshot := *job
 	q.mu.Unlock()
 	q.notify(snapshot)
+}
+
+func (q *Queue) setDetail(job *Job, detail string) {
+	q.mu.Lock()
+	if job.Status != StatusRunning || job.Detail == detail {
+		q.mu.Unlock()
+		return
+	}
+	job.Detail = detail
+	snapshot := *job
+	q.mu.Unlock()
+	q.notify(snapshot)
+}
+
+// CancelRunning aborts the capture currently in flight for id. Queued jobs are
+// cancelled with CancelQueued; this one matters when a page sits behind a
+// verification challenge and the operator does not want to wait out the budget.
+func (q *Queue) CancelRunning(id int) bool {
+	q.mu.Lock()
+	cancel, ok := q.cancels[id]
+	var snapshot *Job
+	if ok {
+		for _, candidate := range q.jobs {
+			if candidate.ID == id {
+				candidate.canceled = true
+				copyOfJob := *candidate
+				snapshot = &copyOfJob
+				break
+			}
+		}
+	}
+	q.mu.Unlock()
+	if !ok {
+		return false
+	}
+	cancel()
+	if snapshot != nil {
+		q.notify(*snapshot)
+	}
+	return true
 }
 
 func (q *Queue) captureJobProgressReporter(job *Job) platform.CaptureJobProgressFunc {
@@ -712,7 +789,12 @@ func (q *Queue) onCaptureJobAccepted(job *Job) func(string) {
 func (q *Queue) finish(job *Job, err error) {
 	q.mu.Lock()
 	job.archive = nil
-	if err != nil {
+	if errors.Is(err, errJobCancelled) {
+		job.Status = StatusCanceled
+		job.Stage = "canceled"
+		job.Err = ""
+		job.RetrySafe = false
+	} else if err != nil {
 		job.Status = StatusFailed
 		job.Stage = "failed"
 		job.Err = safeDiagnostic(err.Error())
