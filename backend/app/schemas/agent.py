@@ -78,6 +78,14 @@ class AgentMessageRecord(BaseModel):
         default=None,
         description="UTC finish time of the run behind this reply; None when the run has not finished",
     )
+    status: str | None = Field(
+        default=None,
+        description="Status of the run behind this message (completed/failed/cancelled/approval_required)",
+    )
+    error: str | None = Field(
+        default=None,
+        description="Failure reason when the run failed; the content then holds the partial reply",
+    )
 
     model_config = ConfigDict(from_attributes=True)
 

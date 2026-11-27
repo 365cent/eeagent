@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { App as AntApp, Button, Card, Collapse, Descriptions, Input, Select, Space, Spin, Tag, Typography } from 'antd'
+import { ExclamationCircleOutlined, ReloadOutlined } from '@ant-design/icons'
 import { isUuid } from '@/lib/api/api-errors'
 import { EeaApiError } from '@/lib/api/client'
 import {
@@ -73,6 +74,60 @@ function ReplyMeta({ model, finishedAt }: { model?: string | null; finishedAt?: 
   )
 }
 
+/**
+ * The one loader used for every agent state. Ant Design's Spin draws the native
+ * four-dot motion, so the chat has a single, recognizable "working" cue instead
+ * of a text hint or a hand-rolled blinking caret.
+ */
+function ChatLoader({ label }: { label?: string | null }) {
+  return (
+    <span className="chat-stream-loader">
+      <Spin size="small" />
+      {label ? <span className="chat-stream-loader-label">{label}</span> : null}
+    </span>
+  )
+}
+
+/** A turn that died keeps its words; the strip explains and offers the retry. */
+function TurnFailure({
+  error,
+  onRetry,
+  disabled,
+}: {
+  error?: string | null
+  onRetry?: () => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="chat-turn-failure" role="status" aria-live="polite">
+      <ExclamationCircleOutlined className="chat-turn-failure-icon" aria-hidden />
+      <span className="chat-turn-failure-text">
+        生成中断{error ? `：${error}` : ''}
+      </span>
+      {onRetry ? (
+        <Button
+          size="small"
+          icon={<ReloadOutlined />}
+          onClick={onRetry}
+          disabled={disabled}
+          className="chat-turn-failure-retry"
+        >
+          重试
+        </Button>
+      ) : null}
+    </div>
+  )
+}
+
+/** Prompt behind a reply, so a failed turn can be re-sent verbatim. */
+function promptForTurn(messages: AgentMessageRecord[], index: number): string | null {
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const row = messages[cursor]
+    if (row.role === 'user' && row.content.trim()) return row.content
+  }
+  return null
+}
+
 type EvidenceAssistantChatProps = {
   signalId?: string | null
   onCitation?: (refId: string, kind: string) => void
@@ -94,10 +149,12 @@ export const EvidenceAssistantChat = memo(function EvidenceAssistantChat({
   const [citations, setCitations] = useState<{ refId: string; kind: string }[]>([])
   const [liveAnswer, setLiveAnswer] = useState('' )
   const [thinking, setThinking] = useState('')
+  const [failedTurn, setFailedTurn] = useState<{ prompt: string; partial: string; error: string } | null>(null)
   const [inFlightUser, setInFlightUser] = useState<string | null>(null)
   const [historyError, setHistoryError] = useState<string | null>(null)
   const [historyReloadKey, setHistoryReloadKey] = useState(0)
   const streamAbortRef = useRef<AbortController | null>(null)
+  const streamTextRef = useRef('')
   const lastEventSeqRef = useRef(0)
   const eventSourceRef = useRef<EventSource | null>(null)
   const chatListRef = useRef<HTMLDivElement | null>(null)
@@ -294,6 +351,8 @@ export const EvidenceAssistantChat = memo(function EvidenceAssistantChat({
           created_at: '',
           served_model: null,
           finished_at: null,
+          status: null,
+          error: null,
         }))
 
   const displayMessages =
@@ -310,6 +369,8 @@ export const EvidenceAssistantChat = memo(function EvidenceAssistantChat({
             created_at: '',
             served_model: null,
             finished_at: null,
+            status: null,
+            error: null,
           },
         ]
       : baseMessages
@@ -331,123 +392,164 @@ export const EvidenceAssistantChat = memo(function EvidenceAssistantChat({
     list.scrollTop = list.scrollHeight
   }, [busy, displayMessages.length, thinking, liveAnswer, streamNote])
 
-  const send = useCallback(async () => {
-    const text = draft.trim()
-    if (!text || busy) return
-    if (!apiSignalId) {
-      messageApi.warning('请从证据库打开已入库的信号后再向助手提问。')
-      return
-    }
-    setDraft('')
-    setInFlightUser(text)
-    setBusy(true)
-    pinnedToBottomRef.current = true
-    setStreamNote(null)
-    setActiveRunId(null)
-    setCitations([])
-    setLiveAnswer('')
-    setThinking('')
-    let streamedText = false
-    try {
-      const sid = await ensureSession()
-      closeEventSource()
-      try {
-        const controller = new AbortController()
-        streamAbortRef.current = controller
-        try {
-          const streamed = await streamAgentSessionMessage(sid, text, {
-            signal: controller.signal,
-            onEvent: (event) => {
-              if (event.type === 'text.delta' && typeof event.delta === 'string') {
-                streamedText = true
-                setLiveAnswer((prev) => prev + event.delta)
-              }
-              if (event.type === 'text.replace' && typeof event.text === 'string') {
-                streamedText = true
-                setLiveAnswer(event.text)
-              }
-              if (event.type === 'thinking.delta' && typeof event.delta === 'string') {
-                setThinking((prev) => prev + event.delta)
-              }
-              if (event.type === 'tool.call' && typeof event.tool === 'string') {
-                setThinking((prev) => (prev && !prev.endsWith('\n\n') ? prev + '\n\n' : prev))
-                setStreamNote('正在调用工具：' + toolLabel(event.tool))
-              }
-              if (event.type === 'turn.progress') {
-                const note = noteFromEvent(event)
-                if (note) setStreamNote(note)
-              }
-              if (event.type === 'citation') {
-                recordCitation(event as never)
-              }
-              if (event.type === 'turn.started' && typeof event.run_id === 'string') {
-                setActiveRunId(event.run_id)
-                void refreshConversation(sid)
-              }
-            },
-          })
-          setActiveRunId(streamed.run_id)
-          await refreshConversation(sid)
-          if (streamed.status === 'failed' && streamed.error) {
-            messageApi.warning(streamed.error)
-          }
-          return
-        } finally {
-          streamAbortRef.current = null
-          setLiveAnswer('')
-          setThinking('')
-        }
-      } catch (streamErr) {
-        if (streamedText) {
-          messageApi.error(streamErr instanceof Error ? streamErr.message : '流式响应中断')
-          return
-        }
+  const send = useCallback(
+    async (promptArg?: string) => {
+      const text = (promptArg ?? draft).trim()
+      if (!text || busy) return
+      if (!apiSignalId) {
+        messageApi.warning('请从证据库打开已入库的信号后再向助手提问。')
+        return
       }
-      closeEventSource()
-      const es = openAgentSessionEventSource(sid, {
-        lastEventId: String(lastEventSeqRef.current),
-        onEvent: (payload, eventId) => {
-          const parsed = Number.parseInt(eventId, 10)
-          if (!Number.isNaN(parsed)) lastEventSeqRef.current = Math.max(lastEventSeqRef.current, parsed)
-          recordCitation(payload)
-          const note = noteFromEvent(payload)
-          if (note) setStreamNote(note)
-          if (payload.run_id && typeof payload.run_id === 'string') setActiveRunId(payload.run_id)
-        },
-      })
-      eventSourceRef.current = es
-      const result = await postAgentSessionMessage(sid, text, { signal: AbortSignal.timeout(120_000) })
-      setActiveRunId(result.run_id)
-      closeEventSource()
-      const replay = await fetchAgentSessionEvents(sid, String(lastEventSeqRef.current))
-      lastEventSeqRef.current = replay.lastSeq
-      replay.payloads.forEach(recordCitation)
-      const terminal = replay.payloads.find((p) =>
-        ['turn.completed', 'turn.failed', 'turn.cancelled', 'approval.required'].includes(p.type),
-      )
-      if (terminal) setStreamNote(noteFromEvent(terminal))
-      await refreshConversation(sid)
-      if (result.status === 'failed' && result.error) {
-        messageApi.warning(result.error)
-      }
-    } catch (agentErr) {
-      closeEventSource()
-      const history = [...legacyTurns]
-      setLegacyTurns((prev) => [...prev, { role: 'user', content: text }])
-      try {
-        const out = await postSignalAssistantMessage(apiSignalId, text, history)
-        setLegacyTurns((prev) => [...prev, { role: 'assistant', content: out.reply }])
-      } catch (err) {
-        const detail = err instanceof EeaApiError ? err.message : String(agentErr)
-        messageApi.error(detail || '助手请求失败')
-        setDraft(text)
-      }
-    } finally {
+      if (!promptArg) setDraft('')
+      setInFlightUser(text)
+      setBusy(true)
+      pinnedToBottomRef.current = true
+      setStreamNote(null)
       setActiveRunId(null)
-      setBusy(false)
-      setInFlightUser(null)
-    }
-  }, [
+      setCitations([])
+      setLiveAnswer('')
+      setThinking('')
+      setFailedTurn(null)
+      streamTextRef.current = ''
+      let streamedText = false
+
+      // A failed turn keeps what the model already wrote. The server stores that
+      // partial reply with the run, so the transcript is the source of truth and
+      // the retry lives on the message itself; only a failed reload falls back
+      // to a local strip so the words on screen are never thrown away.
+      const recordFailure = async (sid: string, error: string) => {
+        try {
+          await refreshConversation(sid)
+          setFailedTurn(null)
+        } catch {
+          setFailedTurn({ prompt: text, partial: streamTextRef.current, error })
+        }
+        setLiveAnswer('')
+      }
+
+      try {
+        const sid = await ensureSession()
+        closeEventSource()
+        try {
+          const controller = new AbortController()
+          streamAbortRef.current = controller
+          try {
+            const streamed = await streamAgentSessionMessage(sid, text, {
+              signal: controller.signal,
+              onEvent: (event) => {
+                if (event.type === 'text.delta' && typeof event.delta === 'string') {
+                  streamedText = true
+                  streamTextRef.current += event.delta
+                  setLiveAnswer(streamTextRef.current)
+                }
+                if (event.type === 'text.replace' && typeof event.text === 'string') {
+                  streamedText = true
+                  streamTextRef.current = event.text
+                  setLiveAnswer(event.text)
+                }
+                if (event.type === 'turn.failed') {
+                  // The failure event carries whatever the model managed to say.
+                  const partial = typeof event.partial_text === 'string' ? event.partial_text : ''
+                  if (partial && !streamTextRef.current) {
+                    streamTextRef.current = partial
+                    setLiveAnswer(partial)
+                  }
+                  const note = noteFromEvent(event)
+                  if (note) setStreamNote(note)
+                }
+                if (event.type === 'thinking.delta' && typeof event.delta === 'string') {
+                  setThinking((prev) => prev + event.delta)
+                }
+                if (event.type === 'tool.call' && typeof event.tool === 'string') {
+                  setThinking((prev) => (prev && !prev.endsWith('\n\n') ? prev + '\n\n' : prev))
+                  setStreamNote('正在调用工具：' + toolLabel(event.tool))
+                }
+                if (event.type === 'turn.progress') {
+                  const note = noteFromEvent(event)
+                  if (note) setStreamNote(note)
+                }
+                if (event.type === 'citation') {
+                  recordCitation(event as never)
+                }
+                if (event.type === 'turn.started' && typeof event.run_id === 'string') {
+                  setActiveRunId(event.run_id)
+                  void refreshConversation(sid)
+                }
+              },
+            })
+            setActiveRunId(streamed.run_id)
+            if (streamed.status === 'failed') {
+              await recordFailure(sid, streamed.error ?? 'Agent 运行失败')
+              return
+            }
+            await refreshConversation(sid)
+            return
+          } finally {
+            streamAbortRef.current = null
+            setLiveAnswer('')
+            setThinking('')
+          }
+        } catch (streamErr) {
+          if (streamedText || streamTextRef.current) {
+            await recordFailure(
+              sid,
+              streamErr instanceof Error ? streamErr.message : '流式响应中断',
+            )
+            return
+          }
+        }
+        closeEventSource()
+        const es = openAgentSessionEventSource(sid, {
+          lastEventId: String(lastEventSeqRef.current),
+          onEvent: (payload, eventId) => {
+            const parsed = Number.parseInt(eventId, 10)
+            if (!Number.isNaN(parsed)) lastEventSeqRef.current = Math.max(lastEventSeqRef.current, parsed)
+            recordCitation(payload)
+            const note = noteFromEvent(payload)
+            if (note) setStreamNote(note)
+            if (payload.run_id && typeof payload.run_id === 'string') setActiveRunId(payload.run_id)
+          },
+        })
+        eventSourceRef.current = es
+        const result = await postAgentSessionMessage(sid, text, { signal: AbortSignal.timeout(120_000) })
+        setActiveRunId(result.run_id)
+        closeEventSource()
+        const replay = await fetchAgentSessionEvents(sid, String(lastEventSeqRef.current))
+        lastEventSeqRef.current = replay.lastSeq
+        replay.payloads.forEach(recordCitation)
+        const terminal = replay.payloads.find((p) =>
+          ['turn.completed', 'turn.failed', 'turn.cancelled', 'approval.required'].includes(p.type),
+        )
+        if (terminal) setStreamNote(noteFromEvent(terminal))
+        if (result.status === 'failed') {
+          await recordFailure(sid, result.error ?? 'Agent 运行失败')
+          return
+        }
+        await refreshConversation(sid)
+      } catch (agentErr) {
+        closeEventSource()
+        const history = [...legacyTurns]
+        setLegacyTurns((prev) => [...prev, { role: 'user', content: text }])
+        try {
+          const out = await postSignalAssistantMessage(apiSignalId, text, history)
+          setLegacyTurns((prev) => [...prev, { role: 'assistant', content: out.reply }])
+        } catch (err) {
+          const detail = err instanceof EeaApiError ? err.message : String(agentErr)
+          if (streamTextRef.current) {
+            setFailedTurn({ prompt: text, partial: streamTextRef.current, error: detail })
+            setLiveAnswer('')
+          } else {
+            messageApi.error(detail || '助手请求失败')
+            setDraft(text)
+          }
+        }
+      } finally {
+        setActiveRunId(null)
+        setBusy(false)
+        setInFlightUser(null)
+      }
+    },
+    [
     apiSignalId,
     busy,
     closeEventSource,
@@ -540,18 +642,29 @@ export const EvidenceAssistantChat = memo(function EvidenceAssistantChat({
             )}
           </div>
         ) : null}
-        {displayMessages.map((turn) => (
-          <div key={turn.id} className={`chat-message ${turn.role}`}>
-            {turn.role === 'assistant' ? (
-              <>
-                <ChatMarkdown content={turn.content} />
-                <ReplyMeta model={turn.served_model} finishedAt={turn.finished_at} />
-              </>
-            ) : (
-              turn.content
-            )}
-          </div>
-        ))}
+        {displayMessages.map((turn, index) => {
+          const failed = turn.role === 'assistant' && turn.status === 'failed'
+          const retryPrompt = failed ? promptForTurn(displayMessages, index) : null
+          return (
+            <div key={turn.id} className={`chat-message ${turn.role}${failed ? ' is-failed' : ''}`}>
+              {turn.role === 'assistant' ? (
+                <>
+                  {turn.content ? <ChatMarkdown content={turn.content} /> : null}
+                  {failed ? (
+                    <TurnFailure
+                      error={turn.error}
+                      disabled={busy}
+                      onRetry={retryPrompt ? () => void send(retryPrompt) : undefined}
+                    />
+                  ) : null}
+                  <ReplyMeta model={turn.served_model} finishedAt={turn.finished_at} />
+                </>
+              ) : (
+                turn.content
+              )}
+            </div>
+          )
+        })}
         {thinking && busy && !liveAnswer ? (
           <Collapse
             size="small"
@@ -568,16 +681,22 @@ export const EvidenceAssistantChat = memo(function EvidenceAssistantChat({
         {liveAnswer ? (
           <div className="chat-message assistant is-streaming">
             <ChatMarkdown content={liveAnswer} />
+            {busy ? <ChatLoader label={streamNote ?? '正在生成…'} /> : null}
+          </div>
+        ) : null}
+        {failedTurn ? (
+          <div className="chat-message assistant is-failed">
+            {failedTurn.partial ? <ChatMarkdown content={failedTurn.partial} /> : null}
+            <TurnFailure
+              error={failedTurn.error}
+              disabled={busy}
+              onRetry={() => void send(failedTurn.prompt)}
+            />
           </div>
         ) : null}
         {busy && !liveAnswer ? (
           <div className="chat-message assistant">
-            <Spin size="small" /> <Text type="secondary">{streamNote ?? '正在回复…'}</Text>
-          </div>
-        ) : null}
-        {streamNote && liveAnswer ? (
-          <div className="chat-message assistant">
-            <Text type="secondary">{streamNote}</Text>
+            <ChatLoader label={streamNote ?? '正在思考…'} />
           </div>
         ) : null}
       </div>
@@ -657,7 +776,14 @@ export const EvidenceAssistantChat = memo(function EvidenceAssistantChat({
             value={draft}
             disabled={busy || !apiSignalId}
             onChange={(event) => setDraft(event.target.value)}
-            onPressEnter={() => void send()}
+            onKeyDown={(event) => {
+              if (event.key !== 'Enter' || event.shiftKey) return
+              // A confirming Enter during IME composition must not send:
+              // keyCode 229 also catches Safari's out-of-order compositionend.
+              if (event.nativeEvent.isComposing || event.keyCode === 229) return
+              event.preventDefault()
+              void send()
+            }}
             placeholder="输入问题，Enter 发送"
           />
           <Button type="primary" loading={busy} disabled={!apiSignalId} onClick={() => void send()}>

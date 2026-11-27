@@ -930,6 +930,10 @@ export type AgentMessageRecord = {
   created_at: string
   served_model?: string | null
   finished_at?: string | null
+  /** Run status behind this message; `failed` means the content is a partial reply. */
+  status?: string | null
+  /** Why the run failed; shown next to the partial reply with a retry. */
+  error?: string | null
 }
 
 export type AgentPatchOut = {

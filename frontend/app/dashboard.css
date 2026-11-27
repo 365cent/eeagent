@@ -1041,28 +1041,52 @@ mark.evidence-tts-highlight {
   color: #a1a1aa;
 }
 
-/* The answer is still arriving: a caret rides the end of the last block. */
-.chat-message.is-streaming .chat-markdown > :last-child::after {
-  content: '';
-  display: inline-block;
-  width: 2px;
-  height: 1em;
-  margin-left: 2px;
-  vertical-align: -0.15em;
-  background: currentColor;
-  animation: chat-stream-caret 1s steps(1) infinite;
+/* One loader for every agent state: Ant Design's native four-dot Spin.
+   No fake caret, no text-only "thinking" line. */
+.chat-stream-loader {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  color: var(--eea-text-secondary, #64748b);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
-@keyframes chat-stream-caret {
-  50% {
-    opacity: 0;
-  }
+.chat-stream-loader .ant-spin {
+  line-height: 1;
 }
 
-@media (prefers-reduced-motion: reduce) {
-  .chat-message.is-streaming .chat-markdown > :last-child::after {
-    animation: none;
-  }
+/* A turn that died keeps its partial words; this strip explains and retries. */
+.chat-turn-failure {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border: 1px solid #fecaca;
+  border-radius: 8px;
+  background: #fef2f2;
+  color: #b91c1c;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.chat-turn-failure-text {
+  flex: 1 1 220px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.chat-turn-failure-retry {
+  flex-shrink: 0;
+}
+
+.dark-mode .chat-turn-failure {
+  border-color: #7f1d1d;
+  background: #1f1315;
+  color: #fca5a5;
 }
 
 .chat-message-meta {

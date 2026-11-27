@@ -27,6 +27,7 @@ from app.schemas.agent import (
 )
 from app.domains.skills.service import load_skill_registry
 from app.domains.agent.events import format_sse, format_sse_payload, list_events_after
+from app.schemas.agent_stream import stream_event_payload
 from app.domains.agent.patches import apply_confirmed_patch, get_owned_patch, reject_patch
 from app.domains.agent.runtime import cancel_run, execute_user_message, get_owned_session
 
@@ -140,6 +141,8 @@ async def list_session_messages(
                 created_at=message.created_at,
                 served_model=served if isinstance(served, str) and served else None,
                 finished_at=run.finished_at if run is not None else None,
+                status=run.status if run is not None else None,
+                error=run.error_message if run is not None and run.status == "failed" else None,
             )
         )
     return records
@@ -240,18 +243,23 @@ async def stream_message(
             await queue.put(
                 (
                     "message.completed",
-                    {
-                        "session_id": str(session.id),
-                        "run_id": str(run.id),
-                        "status": run.status,
-                        "output": output,
-                        "error": error,
-                        "served_model": served_model,
-                    },
+                    stream_event_payload(
+                        "message.completed",
+                        {
+                            "session_id": str(session.id),
+                            "run_id": str(run.id),
+                            "status": run.status,
+                            "output": output,
+                            "error": error,
+                            "served_model": served_model,
+                        },
+                    ),
                 )
             )
         except Exception as exc:  # noqa: BLE001 - stream must end with an error event
-            await queue.put(("message.failed", {"error": str(exc)[:500]}))
+            await queue.put(
+                ("message.failed", stream_event_payload("message.failed", {"error": str(exc)[:500]}))
+            )
         finally:
             await queue.put(None)
 

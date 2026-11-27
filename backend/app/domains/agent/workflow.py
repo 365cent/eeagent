@@ -165,11 +165,23 @@ async def run_agent_turn(
     message_history: list[Any] | None = None,
     deferred_tool_results=None,
     event_sink: EventSink | None = None,
+    partial_holder: list[str] | None = None,
 ) -> tuple[AgentRunOutput, list[Any], dict[str, Any] | None]:
+    """Run one turn, streaming deltas through `event_sink`.
+
+    ``partial_holder`` receives the answer text as it is produced. The caller
+    keeps it after a failure (timeout, upstream error, contract error) so the
+    reader still gets the part the model already wrote instead of a blank turn.
+    """
     model = getattr(agent, "model", None)
     requested_model = str(getattr(model, "model_name", None) or "")
     started = time.perf_counter()
     seen_tools: set[str] = set()
+    last_answer = ""
+
+    def remember(answer: str) -> None:
+        if partial_holder is not None:
+            partial_holder[:] = [answer]
 
     async def handler(ctx, events) -> None:
         if event_sink is None:
@@ -178,7 +190,6 @@ async def run_agent_turn(
 
     try:
         if event_sink is not None:
-            last_answer = ""
             async with agent.run_stream(
                 user_message,
                 deps=deps,
@@ -197,6 +208,7 @@ async def run_agent_turn(
                         # the client never shows a broken concatenation.
                         await event_sink("text.replace", {"text": answer})
                     last_answer = answer
+                    remember(answer)
                 output = await streamed.get_output()
                 messages = streamed.all_messages()
                 final_answer = getattr(output, "answer", None)
@@ -205,8 +217,12 @@ async def run_agent_turn(
                         await event_sink(
                             "text.delta", {"delta": final_answer[len(last_answer) :]}
                         )
+                        last_answer = final_answer
+                        remember(final_answer)
                 elif isinstance(final_answer, str):
                     await event_sink("text.replace", {"text": final_answer})
+                    last_answer = final_answer
+                    remember(final_answer)
         else:
             result = await agent.run(
                 user_message,

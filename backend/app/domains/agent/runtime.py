@@ -17,6 +17,7 @@ from app.core.identity import OperatorIdentity
 from app.models.agent_models import AgentMessage, AgentRun, AgentSession
 from app.domains.agent.events import append_event
 from app.domains.agent.instructions import build_instruction_addon
+from app.schemas.agent_stream import stream_event_payload
 from app.domains.agent.workflow import (
     build_eea_agent,
     deps_for_session,
@@ -88,16 +89,41 @@ async def execute_user_message(
 
     stream_buffer: list[tuple[str, dict]] = []
     stream_events_persisted = False
+    # Filled by run_agent_turn as tokens arrive, so a failure (including a
+    # timeout) can still hand the reader what was already produced.
+    partial_holder: list[str] = []
 
-    async def sink(event_type: str, payload: dict) -> None:
-        # Token deltas and progress heartbeats are ephemeral: the final message is
-        # stored separately, so replaying them only bloats the event table.
+    async def emit(event_type: str, payload: dict | None = None) -> None:
+        """Validate one event against the pydantic contract, then sink/persist it."""
+        normalized = stream_event_payload(event_type, payload or {})
         if event_type in PERSISTED_STREAM_EVENTS:
-            stream_buffer.append((event_type, payload))
+            stream_buffer.append((event_type, normalized))
         if event_sink is not None:
-            await event_sink(event_type, payload)
+            await event_sink(event_type, normalized)
 
-    async def persist_buffered_stream_events() -> None:
+    def partial_text() -> str:
+        return partial_holder[0] if partial_holder else ""
+
+    async def fail(exc: BaseException, message: str) -> None:
+        """Close a failed turn without throwing away the answer it already wrote."""
+        nonlocal error
+        error = message
+        run.status = "failed"
+        run.error_message = message[:1000] or f"{type(exc).__name__}"
+        # The partial reply stays in the transcript: the next reload must show
+        # the same text the reader already saw, plus the retry affordance.
+        db.add(
+            AgentMessage(
+                session_id=session.id,
+                run_id=run.id,
+                role="assistant",
+                content=partial_text(),
+            )
+        )
+        await flush_events()
+
+    async def flush_events() -> None:
+        """Persist buffered tool/citation events before the terminal failure."""
         nonlocal stream_events_persisted
         if stream_events_persisted or not stream_buffer:
             return
@@ -112,10 +138,28 @@ async def execute_user_message(
         stream_events_persisted = True
         stream_buffer.clear()
 
+    async def sink(event_type: str, payload: dict) -> None:
+        # Token deltas and progress heartbeats are ephemeral: the final message is
+        # stored separately, so replaying them only bloats the event table.
+        await emit(event_type, payload)
+
     status = "completed"
     output_payload: dict | None = None
     error: str | None = None
     served_model: str | None = None
+
+    async def close_turn(event_type: str, payload: dict) -> None:
+        normalized = stream_event_payload(event_type, payload)
+        await append_event(
+            db,
+            session=session,
+            event_type=event_type,
+            payload=normalized,
+            run_id=run.id,
+        )
+        if event_sink is not None:
+            await event_sink(event_type, normalized)
+
     try:
         agent = await build_eea_agent()
         heartbeat_task = asyncio.create_task(heartbeat())
@@ -127,6 +171,7 @@ async def execute_user_message(
                     deps=deps,
                     message_history=history,
                     event_sink=sink,
+                    partial_holder=partial_holder,
                 )
         except TimeoutError as exc:
             raise LLMUpstreamError(
@@ -161,50 +206,46 @@ async def execute_user_message(
         served_model = str((usage or {}).get("served_model") or "") or None
         run.status = status
         run.finished_at = datetime.now(timezone.utc)
-        await persist_buffered_stream_events()
-        await append_event(
-            db,
-            session=session,
-            event_type="turn.completed" if status == "completed" else "approval.required",
-            payload={"run_id": str(run.id), "status": status, "served_model": served_model},
-            run_id=run.id,
+        await flush_events()
+        await close_turn(
+            "turn.completed" if status == "completed" else "approval.required",
+            {"run_id": str(run.id), "status": status, "served_model": served_model},
         )
     except (LLMNotConfiguredError, LLMNoModelError) as exc:
         status = "failed"
-        error = "LLM 未配置或没有可用模型"
-        run.status = "failed"
-        run.error_message = str(exc)
-        await append_event(
-            db,
-            session=session,
-            event_type="turn.failed",
-            payload={"run_id": str(run.id), "error": error},
-            run_id=run.id,
+        await fail(exc, "LLM 未配置或没有可用模型")
+        await close_turn(
+            "turn.failed",
+            {
+                "run_id": str(run.id),
+                "error": error,
+                "partial_text": partial_text(),
+                "retryable": True,
+            },
         )
     except LLMUpstreamError as exc:
         status = "failed"
-        error = f"LLM 上游错误 ({exc.status})：{exc.detail}"[:240]
-        run.status = "failed"
-        run.error_message = error
-        await append_event(
-            db,
-            session=session,
-            event_type="turn.failed",
-            payload={"run_id": str(run.id), "error": error},
-            run_id=run.id,
+        await fail(exc, f"LLM 上游错误 ({exc.status})：{exc.detail}"[:240])
+        await close_turn(
+            "turn.failed",
+            {
+                "run_id": str(run.id),
+                "error": error,
+                "partial_text": partial_text(),
+                "retryable": True,
+            },
         )
     except Exception as exc:  # noqa: BLE001
         status = "failed"
-        error = "Agent 运行失败"
-        run.status = "failed"
-        run.error_message = str(exc)
-        await persist_buffered_stream_events()
-        await append_event(
-            db,
-            session=session,
-            event_type="turn.failed",
-            payload={"run_id": str(run.id), "error": error},
-            run_id=run.id,
+        await fail(exc, "Agent 运行失败")
+        await close_turn(
+            "turn.failed",
+            {
+                "run_id": str(run.id),
+                "error": error,
+                "partial_text": partial_text(),
+                "retryable": True,
+            },
         )
     run.finished_at = run.finished_at or datetime.now(timezone.utc)
     await db.commit()
