@@ -4,6 +4,12 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 ## 2026-11-27
 
+### Local backup/restore drill (OPS-05 evidence)
+
+- On the Windows portable PostgreSQL (not production): `probe_migrations.py` re-ran clean (fresh upgrade to 0027; downgrade -3 and upgrade with a row surviving; upgrade from 0022 with data surviving).
+- Created `eea_ops_drill` (migrate + `app.seed` + one signal), `pg_dump -Fc` produced 75,943 B (sha256 `a1e87940...`), restored it into `eea_ops_restore`, and asserted the Alembic revision, signal count, ref-code count and the drill row. Both databases and the dump were removed.
+- Not exercised: the Docker object-volume tar (the dev object directory is 1.47 GB / 784 files), encryption, off-site retention and RPO/RTO; those stay with OPS-05 in pre-production.
+
 ### Edge 158 blocks the staged SingleFile extension; auto mode now falls back (CC-06 slice)
 
 - Repro: packaged v0.1.1 with `capture_archive=extension` on Edge `158.0.4370.33` waits 45 s for the SingleFile extension target and fails with "SingleFile extension did not load"; the same page succeeds with `embedded` (example.com, 5 KB, signal `e8e114d3...`, archived and deleted afterwards).
