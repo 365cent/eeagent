@@ -24,8 +24,9 @@ This record keeps evidence for implementation slices removed from the remaining-
 ### Full-stack regression on the combined tree (BE-16 evidence)
 
 - After the client/download changes landed (`f4336cd`, `3c25e86`, `48d0744`), ran the combined tree: backend `pytest -q` -> **635 passed, 2 skipped** (464.7 s, 637 collected, exit 0); `go vet ./...` and `go test ./...` exit 0; frontend `pnpm typecheck` and `pnpm build` exit 0.
-- Client artifact: `deploy/downloads/capture.exe` is v0.1.4 (sha256 `39682ed2...`), matching `capture.exe.json` and `SHA256SUMS`; `client/dist/capture.exe` is the same build.
+- Client artifact: `deploy/downloads/capture.exe` is v0.1.4 (sha256 `39682ed2...`), matching `capture.exe.json` and `SHA256SUMS`; `client/dist/capture.exe` is the same build（此后已换为 v0.1.5，见上方“客户端发布制品一致性（OPS-07 预检）”）。
 - The new client-releases `version` field is covered by `test_version_comes_from_the_release_sidecar`; the long-running dev API on :8000 predates that code, so it needs a restart before the page can show the version.
+- 同日 e2e 复跑（:8000 + :3000，Playwright 复用宿主 Edge，只读用例）：`pnpm pw:smoke` → **2 passed**（26.8s，追溯页真实关系/空态与无效落脚点深链接）、`pnpm pw:refcodes` → **1 passed**（24.2s，字典加载失败可重试且不谎报信号缺失）、`pnpm pw:roles` → **3 passed**（1.2s，无 skip，开发操作者非管理员，负向拒绝真实执行）。
 
 ### Local backup/restore drill (OPS-05 evidence)
 
