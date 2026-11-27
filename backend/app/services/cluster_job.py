@@ -10,8 +10,7 @@ from __future__ import annotations
 import asyncio
 import sys
 
-from app.db.base import engine
-from app.services.cluster_runner import run_queued_reports
+from app.services.cluster_runner import dispose_engine, run_queued_reports
 
 
 async def _run() -> int:
@@ -20,7 +19,7 @@ async def _run() -> int:
         print(f"theme cluster job: {processed} pass(es)")
         return 0
     finally:
-        await engine.dispose()
+        await dispose_engine()
 
 
 if __name__ == "__main__":

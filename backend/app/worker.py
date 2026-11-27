@@ -16,7 +16,7 @@ if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
 from app.domains.capture.jobs import worker_loop
-from app.services.cluster_runner import cluster_worker_loop
+from app.services.cluster_runner import start_cluster_thread
 from app.db.base import engine
 
 
@@ -30,8 +30,13 @@ async def _run() -> None:
             # Windows development can stop the process with the default handler.
             pass
     try:
-        await asyncio.gather(worker_loop(stop_event), cluster_worker_loop(stop_event))
+        # Clustering runs on its own thread: an ingest pass can block this loop
+        # for >10 s, and the queued run would sit there waiting for it.
+        cluster_stop = start_cluster_thread()
+        await worker_loop(stop_event)
     finally:
+        if "cluster_stop" in locals():
+            cluster_stop.set()
         await engine.dispose()
 
 

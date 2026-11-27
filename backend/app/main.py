@@ -52,7 +52,7 @@ def create_app() -> FastAPI:
     async def lifespan(_app: FastAPI):
         worker_stop = asyncio.Event()
         worker_task: asyncio.Task | None = None
-        cluster_task: asyncio.Task | None = None
+        cluster_thread_stop = None
         try:
             await asyncio.to_thread(start_launchdarkly, settings.launchdarkly_sdk_key)
             embed = settings.app_env != "production" and os.environ.get("EEA_CAPTURE_EMBEDDED", "1").lower() not in (
@@ -62,14 +62,13 @@ def create_app() -> FastAPI:
             )
             if embed and os.environ.get("EEA_DEV_API_ONLY", "").lower() not in ("1", "true", "yes"):
                 from app.domains.capture.jobs import worker_loop
-                from app.services.cluster_runner import cluster_worker_loop
+                from app.services.cluster_runner import start_cluster_thread
 
                 worker_task = asyncio.create_task(worker_loop(worker_stop), name="eea-capture-worker")
                 # Development has no separate worker container, so the clustering
-                # loop rides along here; production runs it in the worker service.
-                cluster_task = asyncio.create_task(
-                    cluster_worker_loop(worker_stop), name="eea-cluster-worker"
-                )
+                # loop rides along here (own thread); production runs it in the
+                # worker service.
+                cluster_thread_stop = start_cluster_thread()
             yield
         finally:
             try:
@@ -80,13 +79,8 @@ def create_app() -> FastAPI:
                         await worker_task
                     except asyncio.CancelledError:
                         pass
-                if cluster_task is not None:
-                    worker_stop.set()
-                    cluster_task.cancel()
-                    try:
-                        await cluster_task
-                    except asyncio.CancelledError:
-                        pass
+                if cluster_thread_stop is not None:
+                    cluster_thread_stop.set()
             finally:
                 from app.db.base import engine
 

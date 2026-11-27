@@ -15,13 +15,14 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 
-from app.db.base import SessionLocal
+from app.core.config import get_settings
 from app.models.models import ThemeClusterRun
 
 logger = logging.getLogger(__name__)
@@ -36,6 +37,29 @@ POLL_SECONDS = 2.0
 # A run that has been "running" longer than this lost its worker (deploy, OOM
 # kill); the loop may claim a new pass instead of waiting forever.
 STALE_RUNNING = timedelta(minutes=10)
+
+# Own engine: the clustering loop runs in its own thread/loop (see
+# start_cluster_thread), and async connections must not hop between loops.
+_engine: AsyncEngine | None = None
+_sessions: async_sessionmaker[AsyncSession] | None = None
+
+
+def _session() -> AsyncSession:
+    global _engine, _sessions
+    if _sessions is None:
+        _engine = create_async_engine(
+            get_settings().database_url, pool_size=2, max_overflow=1, pool_pre_ping=True
+        )
+        _sessions = async_sessionmaker(_engine, expire_on_commit=False)
+    return _sessions()
+
+
+async def dispose_engine() -> None:
+    global _engine, _sessions
+    if _engine is not None:
+        await _engine.dispose()
+    _engine = None
+    _sessions = None
 
 
 def _now() -> datetime:
@@ -122,7 +146,7 @@ def run_summary(run: ThemeClusterRun | None) -> dict[str, object]:
 
 async def _claim_queued() -> list[ThemeClusterRun]:
     now = _now()
-    async with SessionLocal() as db:
+    async with _session() as db:
         queued_ids = (
             select(ThemeClusterRun.id)
             .where(ThemeClusterRun.status == QUEUED)
@@ -149,9 +173,9 @@ async def run_queued_reports() -> int:
     try:
         from app.domains.tagging.clustering import build_theme_cluster_report
 
-        async with SessionLocal() as db:
+        async with _session() as db:
             report = await build_theme_cluster_report(db)
-        async with SessionLocal() as db:
+        async with _session() as db:
             await db.execute(
                 update(ThemeClusterRun)
                 .where(ThemeClusterRun.id.in_(ids))
@@ -168,7 +192,7 @@ async def run_queued_reports() -> int:
         return len(claimed)
     except Exception as exc:  # noqa: BLE001 - the row records the failure
         detail = f"{type(exc).__name__}: {exc}"[:1000]
-        async with SessionLocal() as db:
+        async with _session() as db:
             await db.execute(
                 update(ThemeClusterRun)
                 .where(ThemeClusterRun.id.in_(ids))
@@ -196,3 +220,32 @@ async def cluster_worker_loop(stop_event: asyncio.Event) -> None:
             await asyncio.wait_for(stop_event.wait(), timeout=POLL_SECONDS)
         except asyncio.TimeoutError:
             pass
+
+
+def start_cluster_thread() -> threading.Event:
+    """Run the clustering loop in its own thread and event loop.
+
+    A capture worker pass can hold the main loop for over ten seconds (jieba
+    tagging, LLM calls with timeouts), which starved the 2 s poll: a queued run
+    waited 13 s. A separate thread with its own loop and engine is immune to it.
+    Returns the stop flag; set it to shut the thread down.
+    """
+    stop = threading.Event()
+
+    def run() -> None:
+        async def runner() -> None:
+            event = asyncio.Event()
+            task = asyncio.create_task(cluster_worker_loop(event))
+            while not stop.is_set():
+                await asyncio.sleep(0.25)
+            event.set()
+            try:
+                await task
+            finally:
+                await dispose_engine()
+
+        asyncio.run(runner())
+
+    thread = threading.Thread(target=run, name="eea-cluster-worker", daemon=True)
+    thread.start()
+    return stop
