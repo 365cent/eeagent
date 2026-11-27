@@ -26,8 +26,10 @@ import (
 	"eea/capture/internal/queue"
 )
 
-// Run shows the macOS capture window (blocks until closed).
-func Run(cfg config.Config, dir string) int {
+// Run shows the macOS capture window (blocks until closed). link is a
+// Windows app-link concept; macOS starts from the normal launcher.
+func Run(cfg config.Config, dir, link string) int {
+	_ = link
 	prepErr := capture.EnsureSingleFileExtension(dir, cfg.UserDataDir, cfg.CaptureArchive, cfg.CaptureEngine, &cfg.SingleFileExtensionPath)
 	a := &darwinApp{
 		cfg:  cfg,
@@ -54,6 +56,12 @@ func Run(cfg config.Config, dir string) int {
 	}
 	return 0
 }
+
+// LaunchLink is a Windows app-link concept; macOS has no protocol handler yet.
+func LaunchLink(args []string) string { _ = args; return "" }
+
+// RegisterLinkProtocol has nothing to register on macOS.
+func RegisterLinkProtocol() error { return nil }
 
 type darwinApp struct {
 	cfg          config.Config

@@ -16,14 +16,34 @@ import (
 var version = "dev"
 
 func main() {
-	if len(os.Args) > 1 {
-		os.Exit(cli.Run(os.Args[1:], os.Stdout, version))
+	run(args())
+}
+
+// args keeps os.Args out of the testable path and trims the argv[0] program name.
+func args() []string { return os.Args[1:] }
+
+func run(argv []string) {
+	// eea-capture://claim?batch=… (the platform's "打开采集客户端" link) is a GUI
+	// launch with an intent, not a subcommand.
+	if link := ui.LaunchLink(argv); link != "" {
+		os.Exit(runGUI(link))
 	}
+	if len(argv) > 0 {
+		os.Exit(cli.Run(argv, os.Stdout, version))
+	}
+	os.Exit(runGUI(""))
+}
+
+// runGUI starts the desktop client; link is the app link that woke it, if any.
+func runGUI(link string) int {
+	// Let the platform's app-internal link open this exe. Best effort: a portable
+	// copy without registry access still works when started by hand.
+	_ = ui.RegisterLinkProtocol()
 
 	dir, err := resolveConfigDir()
 	if err != nil {
 		reportFatalStartup("无法确定配置目录，采集客户端未能启动：\n" + err.Error())
-		os.Exit(1)
+		return 1
 	}
 
 	notices := make([]string, 0, 2)
@@ -44,7 +64,7 @@ func main() {
 	if dataErr != nil {
 		writeStartupLog(filepath.Join(dir, "capture-startup.log"), dir, "", cfg, loadErr, dataErr)
 		reportFatalStartup("采集客户端未能启动：\n" + dataErr.Error())
-		os.Exit(1)
+		return 1
 	}
 	cfg = config.RebaseDataPaths(cfg, filepath.Dir(dataRoot))
 	if dataNotice != "" {
@@ -57,5 +77,5 @@ func main() {
 	// One file the colleague can send back when it misbehaves on another PC.
 	writeStartupLog(filepath.Join(dataRoot, "capture-startup.log"), dir, dataRoot, cfg, loadErr, nil)
 
-	os.Exit(ui.Run(cfg, dir))
+	return ui.Run(cfg, dir, link)
 }

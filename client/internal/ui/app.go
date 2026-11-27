@@ -235,8 +235,11 @@ func (a *appState) events() {
 		return 0
 	})
 
-	// A second instance forwards its app link here instead of opening a window.
-	a.wnd.On().WmCopyData(func(p ui.WmCopyData) bool { return a.onLaunchLink(p) })
+	// A second instance forwards "claim now" here instead of opening a window.
+	a.wnd.On().Wm(wmLaunchLink, func(ui.Wm) uintptr {
+		a.acceptLaunchLink("")
+		return 0
+	})
 
 	a.wnd.On().WmEraseBkgnd(func(ui.WmEraseBkgnd) int { return 1 })
 	a.wnd.On().WmPaint(func() { a.paint() })
