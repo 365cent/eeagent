@@ -15,6 +15,14 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Dev data after the runs: 65 signals, no `PW %` rows, eFuse landing point still on assessment v1 (score_total 20, score_moat 3).
 - Remaining: Linux intranet TLS/same-origin/SSE figures stay with OPS-06; this slice closes no parent task.
 
+### Rejected funnel branch and re-judgment (FE-09 slice)
+
+- New `pnpm pw:rejudge` (`frontend/tests/e2e/strategy-rejudge.spec.ts`) walks the real strategy page: step 1 scan → step 2 reject → steps 3/4 show only the filtered notice with no score inputs → switch to pass → 4/4/3/4/5 shows 20/25 → classify and finalize v1 → `修改` on step 3 raises moat 3→4 → “上次已生成版本，当前依据待复核” and v1 “最近定稿 · 待复核” → re-enter classification → finalize v2 → v2 当前版本, v1 历史. The API history then returns [1, 2], v1 total 20, v2 total 21, exactly one current.
+- Opt-in: needs `EEA_PW_REJUDGE_LP=<landing point id|name>` naming an unscanned, pool-eligible landing point. The flow writes funnel, audit and assessment rows and there is no delete route, so the case skips without the flag; the README says so.
+- Run note: a parallel run had pointed the shared dev API on :8000 at a scratch database, so the browser flow was verified against an isolated API on :8001 serving `eea`, with the normal web app on :3000 and an uncommitted route shim. Evidence: 1 passed (13.7 s); `pnpm typecheck` exit 0.
+- The dev database was restored afterwards: cabin landing point back to `industry_scan` with no versions and only its original `created` audit; eFuse untouched (v1, 20/25, current); 65 signals.
+- Remaining: the 4/4/3/4/5 figures still need real business-material review, and Linux acceptance stays with OPS-06.
+
 ## 2026-11-26
 
 ### Deploy to 10.215.35.10 (hzh2admin) + capture-client download page
