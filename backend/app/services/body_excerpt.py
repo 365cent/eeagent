@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 
 from app.services.llm import suggest_excerpt_with_llm
-from app.services.tagging import text_for_tagging
+from app.domains.tagging.service import text_for_tagging
 
 _MD_LINK = re.compile(r"\[([^\]]*)\]\([^)]*\)")
 _HEADING = re.compile(r"^#+\s*", re.MULTILINE)

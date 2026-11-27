@@ -17,7 +17,7 @@ from app.models.models import Signal, SignalTag, TechTheme, Vocab
 from app.services.agent_citations import assert_citations_usable  # noqa: F401 — patch proposals
 from app.services.agent_contract import CitationLedger, PatchFieldChange
 from app.platform.audit import record_correction
-from app.services.tagging import get_or_create_vocab
+from app.domains.tagging.service import get_or_create_vocab
 from app.domains.evidence.tagging_guard import PROTECTED_SUGGESTION_FIELDS, assert_expected_signal_revision, human_corrected_fields
 
 

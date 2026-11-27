@@ -13,7 +13,7 @@ from app.schemas.schemas import LandingPointCreate, LandingPointOut, LandingPoin
 from app.platform.audit import record_correction
 from app.services.demand_validation import validate_confirmed_demand
 from app.domains.landing.serialization import landing_point_out as _to_out
-from app.services.tagging import get_or_create_vocab
+from app.domains.tagging.service import get_or_create_vocab
 
 router = APIRouter(
     prefix="/landing-points",

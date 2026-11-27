@@ -4,7 +4,7 @@ import pytest
 
 pytestmark = pytest.mark.no_db
 
-from app.services.tagging import suggest_tags_from_snapshot, text_for_tagging
+from app.domains.tagging.service import suggest_tags_from_snapshot, text_for_tagging
 
 
 def test_text_for_tagging_strips_markdown_links_and_urls():

@@ -73,7 +73,7 @@
 
 - [ ] P1 · 部分实现（入库和建议接口已调用内网模型生成环节、类型和技术标签，仍待统一重算、候选解释、语义精排与真实网关验收）· 依赖 BE-03（持久修改保护）。
 - 来源：Word §2.2–2.3；REQ-TAG-04/05/06、REQ-DEM-03；WBS 1.3.3/1.3.4。
-- 入口：[tagging.py](app/services/tagging.py)、[judgment.py](app/services/judgment.py)、[llm.py](app/services/llm.py)、[config.py](app/core/config.py)；新增 embedding/rerank 服务。
+- 入口：[tagging.py](app/domains/tagging/service.py)、[judgment.py](app/domains/evidence/judgment.py)、[llm.py](app/services/llm.py)、[config.py](app/core/config.py)；新增 embedding/rerank 服务。
 - 采用已有计划的 TF-IDF + TextRank 召回、标题加权、embedding 近义合并、rerank 精排；保留离线规则/jieba 回退，标签数量随内容变化。
 - 网关批量最多 16、限制并发、超时和退避；校验空响应、索引、向量维度和有限数值。无配置时返回不可用状态和降级理由。
 - 已交付独立语义网关与索引校验：chat、embedding、rerank 分别读取 `CHAT_*`、`EMBEDDING_*`、`RERANK_*` 的 URL/key/model，旧 `LLM_*`/`MAAS_*` 已移除；实际网关 embedding 返回 4096 维，rerank 正常；embedding 按 `data[].index` 排序后返回。
@@ -284,6 +284,7 @@
 - 2026-11-27 再切片：`tagging_guard.py` → `app/domains/evidence/tagging_guard.py`（4 处导入）；`refcodes.py` → `app/domains/vocab/refcodes.py`，新增 `vocab` 限界上下文（12 处导入，含 seed/schemas/conftest；`0002_canonical_codes` 只改导入路径，无 SQL/模式变化）。证据：`lint-imports` 两处配置各 3 kept，`pytest` 44 passed，`alembic heads` 0027，全量收集 624 条。
 - 2026-11-27 再切片：`judgment.py`（环节/类型判定与主题排序）与 `doc_structure.py`（Markdown 章节与图块定位）迁入 `app/domains/evidence/`，共 12 处导入；两者已无 services 依赖。证据：`lint-imports` 两处配置各 3 kept，`pytest` 56 passed，全量收集 624 条。
 - 2026-11-27 再切片：修正审计写入器 `audit.py` 迁入 `app/platform/audit.py`（只依赖 core.identity 与模型），11 处导入（API 8、services 2、脚本 1）；`record_correction` 作为横切基础设施归平台层，审计策略仍由调用方决定。证据：`lint-imports` 两处配置各 3 kept，`pytest` 59 passed（战略/主题/主题命名/信号摄取），全量收集 624 条。
+- 2026-11-27 再切片：标签建议与词表助手 `tagging.py` 迁入 `app/domains/tagging/service.py`（新增 tagging 上下文），21 处导入（API 5、services 6、domains 1、脚本 2、用例 7）；闭集词表仍留在 `app/domains/vocab/refcodes.py`。证据：`lint-imports` 两处配置各 3 kept，`pytest` 51 passed / 1 skipped（标签/技术标签/文档关键词/去重/摄取），全量收集 624 条。
 - [ ] OpenAPI 路径快照：[tests/test_openapi_snapshot.py](tests/test_openapi_snapshot.py) + [tests/snapshots/openapi_paths.json](tests/snapshots/openapi_paths.json)；路由变更须同步快照（`OPENAPI_UPDATE_SNAPSHOT=1`）。
 - [ ] 迁移顺序建议：`core`/`db`/`models` → `platform`；采集/信号/需求等垂直切片按 WBS 迁入 `domains`；共享摄取逻辑取代 API 私有函数互调（对齐 BE-01）。
 - 验收：import-linter 通过；OpenAPI 快照测试通过；无新增 `platform`→`api`/`domains` 违规；领域迁移切片有对应 pytest 证据。

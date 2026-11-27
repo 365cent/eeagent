@@ -19,7 +19,7 @@ from app.services.skills import (
     apply_skill_rules,
     load_skill_registry,
 )
-from app.services.tagging import suggest_tags, text_for_tagging
+from app.domains.tagging.service import suggest_tags, text_for_tagging
 
 THRESHOLDS = {"overall": 70.0, "stage": 90.0, "other": 80.0}
 

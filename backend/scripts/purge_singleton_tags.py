@@ -36,7 +36,7 @@ if sys.platform == 'win32':
 
 from app.db.base import SessionLocal  # noqa: E402
 from app.models.models import DemandPoint, SignalTag, Vocab  # noqa: E402
-from app.services.tagging import is_low_quality_tag  # noqa: E402
+from app.domains.tagging.service import is_low_quality_tag  # noqa: E402
 
 NOISE_WORDS = {
     'the', 'and', 'all', 'when', 'full', 'format', 'close', 'share',

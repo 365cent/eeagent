@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 import app.models as m
 from app.core.config import get_settings
 from app.domains.vocab.refcodes import REF_CODES
-from app.services.tagging import get_or_create_vocab
+from app.domains.tagging.service import get_or_create_vocab
 
 SEED_DOMAINS = ["软件", "硬件", "通信", "电源与能源管理", "工具"]
 

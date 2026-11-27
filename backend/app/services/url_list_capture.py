@@ -15,7 +15,7 @@ from app.domains.capture.submission import _submission_fingerprint
 from app.domains.evidence.channel import _infer_channel_code
 from app.models.models import CaptureJob, PanoramaImportBatch, PanoramaImportUrl
 from app.platform.objectstore import save_bytes, sha256_bytes
-from app.services.tagging import normalize_url
+from app.domains.tagging.service import normalize_url
 
 logger = logging.getLogger(__name__)
 

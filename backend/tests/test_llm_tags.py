@@ -100,7 +100,7 @@ async def test_test_model_custom_output_args_roundtrip(monkeypatch):
 
 async def test_empty_chat_model_returns_none_then_jieba_fallback(monkeypatch):
     """No resolvable chat model → None; jieba path still works."""
-    from app.services.tagging import suggest_tags
+    from app.domains.tagging.service import suggest_tags
 
     async def no_chat_model():
         return None

@@ -97,7 +97,7 @@ from app.services.studio import (
     parse_studio_payload,
     strip_report_markdown,
 )
-from app.services.tagging import (
+from app.domains.tagging.service import (
     get_or_create_vocab,
     normalize_url,
     sha256_text,

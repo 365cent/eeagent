@@ -44,7 +44,7 @@ from app.services.llm_usage import (
     usage_without_result,
 )
 from app.domains.vocab.refcodes import codes, labels, normalize
-from app.services.tagging import is_low_quality_tag
+from app.domains.tagging.service import is_low_quality_tag
 
 logger = logging.getLogger(__name__)
 

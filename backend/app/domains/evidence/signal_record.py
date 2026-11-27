@@ -20,7 +20,7 @@ from app.platform.objectstore import save_body
 from app.domains.evidence.signal_duplicate import disambiguate_title_for_url
 from app.services.signal_sources import ensure_primary_source
 from app.services.skills import apply_skill_rules
-from app.services.tagging import (
+from app.domains.tagging.service import (
     TAG_FINAL_MAX,
     get_or_create_vocab,
     normalize_url,

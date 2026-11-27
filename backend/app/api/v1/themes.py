@@ -20,7 +20,7 @@ from app.schemas.schemas import (
 )
 from app.platform.audit import record_correction
 from app.services.tag_clustering import build_theme_cluster_report
-from app.services.tagging import get_or_create_vocab  # noqa: F401 (shared helper)
+from app.domains.tagging.service import get_or_create_vocab  # noqa: F401 (shared helper)
 from app.services.theme_naming import suggest_theme_name
 
 router = APIRouter(

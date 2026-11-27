@@ -9,7 +9,7 @@ import pytest
 
 from app.services import signal_dedup
 from app.services.signal_dedup import fingerprint, group_signals, keep_priority
-from app.services.tagging import normalize_url
+from app.domains.tagging.service import normalize_url
 from tests.support import (
     DEMAND_STEP_KEYS,
     assign_signal_theme,

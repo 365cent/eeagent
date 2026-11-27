@@ -6,7 +6,7 @@ from app.db.base import get_db
 from app.core.identity import OperatorIdentity, get_operator_identity
 from app.models.models import RefCode, SignalTag, Vocab
 from app.schemas.schemas import RefCodeOut, VocabCreate, VocabOut, VocabUsageOut
-from app.services.tagging import get_or_create_vocab
+from app.domains.tagging.service import get_or_create_vocab
 
 router = APIRouter(tags=["vocab"])
 

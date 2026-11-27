@@ -7,7 +7,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import Signal, SignalSource
-from app.services.tagging import normalize_url
+from app.domains.tagging.service import normalize_url
 
 
 async def ensure_primary_source(db: AsyncSession, signal: Signal) -> SignalSource:
