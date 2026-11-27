@@ -4,6 +4,11 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 ## 2026-11-27
 
+### REQ→测试映射实跑（2026-11-27）
+
+- 按 `docs/acceptance-records/req-test-map.md` 点名实跑 19 个后端测试模块（映射里 20 个路径全部存在；`support.py` 是共享 helper，不是测试模块）：**254 passed**（206.4s，exit 0）。
+- 清单复核：映射未变，75 个 REQ 中 51 个至少被一个测试文件点名，24 个仍无测试（AGT-01…06、DEM-04/05/07/12、DOC-01…05、MAP-04/07…11、STR-02/03、UI-01）。该映射只说明“有测试声称覆盖”，不等于验收通过；AT 用例仍需各自记录运行。
+
 ### 客户端发布制品一致性（OPS-07 预检）
 
 - 三处副本对齐：`deploy/downloads/capture.exe`、`client/dist/capture.exe` 与 `:8000` 的 `client-download?platform=windows` 取回内容均为 8,700,416 B、SHA-256 `f9cb4da3…`；`client/dist/capture.exe version` 自报 `capture v0.1.5`，与 `capture.exe.json` 及隔离 API 的 `version` 一致。
