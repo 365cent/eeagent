@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.models import Signal, SignalTag, TechTheme
 from app.domains.evidence.signal_host import signal_host
-from app.services.demand_agent import DemandAgentDeps, run_demand_agent_chat, signal_to_bot
+from app.domains.demand.agent import DemandAgentDeps, run_demand_agent_chat, signal_to_bot
 from app.platform.llm_gateway import (
     LLMNoModelError,
     LLMNotConfiguredError,

@@ -4,7 +4,7 @@ import uuid
 
 import pytest
 
-from app.services.demand_agent import SignalBotBrief, signal_to_bot
+from app.domains.demand.agent import SignalBotBrief, signal_to_bot
 from tests.support import assign_signal_theme, create_signal, create_theme
 
 pytestmark = pytest.mark.anyio
@@ -91,7 +91,7 @@ async def test_demand_assistant_messages_survives_bot_mapping(client, monkeypatc
         assert all(bot.excerpt for bot in deps.bots)
         return "编组内两条信号已综合。", "test-model"
 
-    monkeypatch.setattr("app.services.demand_draft.run_demand_agent_chat", _fake_chat)
+    monkeypatch.setattr("app.domains.demand.draft.run_demand_agent_chat", _fake_chat)
 
     r = await client.post(
         "/api/v1/demands/assistant/messages",
@@ -143,7 +143,7 @@ async def test_demand_assistant_returns_502_on_llm_upstream(client, monkeypatch)
     async def _raise_upstream(*_a, **_k):
         raise LLMUpstreamError(554, "auto: edge busy")
 
-    monkeypatch.setattr("app.services.demand_draft.run_demand_agent_chat", _raise_upstream)
+    monkeypatch.setattr("app.domains.demand.draft.run_demand_agent_chat", _raise_upstream)
 
     r = await client.post(
         "/api/v1/demands/assistant/messages",

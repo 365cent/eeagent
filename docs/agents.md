@@ -118,7 +118,7 @@ Prompt 正文见 `llm_prompts.VISION_CAPTION_PROMPT`（`PROMPT_REVISION` 随文�
 
 ### 需求点草稿（demand draft）
 
-**实现位置：** [`backend/app/services/demand_draft.py`](../backend/app/services/demand_draft.py)。
+**实现位置：** [`backend/app/domains/demand/draft.py`](../backend/app/domains/demand/draft.py)。
 
 **当前（摘录）：**
 

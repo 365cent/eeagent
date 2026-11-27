@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from app.services import demand_agent as mod
+from app.domains.demand import agent as mod
 pytestmark = [pytest.mark.no_db, pytest.mark.anyio]
 
 
