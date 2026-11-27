@@ -88,4 +88,20 @@ test.describe('client downloads (FE-01)', () => {
 
     expect(failed, 'no /api/v1 request may fail on the downloads page').toEqual([])
   })
+
+  test('an unreachable release list shows the error state, not a fake one', async ({ page }) => {
+    await divertApiOrigin(page, process.env.EEA_PW_API_ORIGIN)
+    // Registered after divertApiOrigin: Playwright runs the newest matching route first.
+    await page.route('**/api/v1/capture/client-releases', (route) => route.abort())
+
+    await page.goto('/downloads')
+    const card = page.locator('.ant-card', { hasText: '采集客户端' })
+    // React Query retries before it settles on the error branch.
+    await expect(card.getByText('暂时无法读取发布列表，请检查 API 连接后重试。')).toBeVisible({
+      timeout: 25_000,
+    })
+    // An error must never be papered over with rows or links.
+    await expect(card.locator('tbody tr.ant-table-row')).toHaveCount(0)
+    await expect(page.getByRole('link', { name: /^下载 (exe|dmg)$/ })).toHaveCount(0)
+  })
 })
