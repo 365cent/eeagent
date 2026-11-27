@@ -9,6 +9,7 @@ This record keeps evidence for implementation slices removed from the remaining-
 - 三处副本对齐：`deploy/downloads/capture.exe`、`client/dist/capture.exe` 与 `:8000` 的 `client-download?platform=windows` 取回内容均为 8,700,416 B、SHA-256 `f9cb4da3…`；`client/dist/capture.exe version` 自报 `capture v0.1.5`，与 `capture.exe.json` 及隔离 API 的 `version` 一致。
 - 发现并修正一处真实不一致：v0.1.4/v0.1.5 不是经 `scripts/release.ps1` 产出的，`client/dist/SHA256SUMS` 仍写 v0.1.2 的 `f8bd3e52…`，按现有字节校验会失败。重写后逐行复核通过（capture.exe `f9cb4da3…`、留存 zip `966c9e3a…`）。
 - 未重新构建 exe：客户端源码有并发未提交改动，重建会把未完成代码打进制品；本次只修正清单与记录，不动字节。
+- API 侧护栏：`_artifact_version` 只在 sidecar 自带的 `sha256` 与旁边字节一致时才采用其中的版本，半拷贝发布（新 exe + 旧 sidecar）会显示 `—` 而不是错版本，版本化文件名的回退保持不变。新增 2 个用例，`pytest -q tests/test_capture_client_download.py` → **11 passed**（34.6s）；`lint-imports` → **3 kept, 0 broken**。
 - 仍未做：`10.215.35.10` 上传与发布窗口（OPS-07），以及 Linux/nginx 下载路径（OPS-06）。
 
 ### 客户端下载页浏览器校验（FE-01 切片）

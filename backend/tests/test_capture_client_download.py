@@ -132,3 +132,32 @@ async def test_no_sidecar_and_plain_name_reports_no_version(client, tmp_path, mo
     releases = (await client.get("/api/v1/capture/client-releases")).json()
 
     assert releases[0]["version"] is None
+
+
+async def test_sidecar_digest_matching_the_bytes_keeps_the_version(client, tmp_path, monkeypatch):
+    payload = b"new build"
+    _publish_windows(tmp_path, payload)
+    (tmp_path / "capture.exe.json").write_text(
+        '{"version": "v0.1.5", "sha256": "' + hashlib.sha256(payload).hexdigest() + '"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(capture_api, "_client_dist_dir", lambda: tmp_path)
+
+    releases = (await client.get("/api/v1/capture/client-releases")).json()
+
+    assert releases[0]["version"] == "v0.1.5"
+
+
+async def test_sidecar_from_another_build_is_not_shown_as_the_version(client, tmp_path, monkeypatch):
+    # A publish that copied only the exe leaves the previous sidecar behind.
+    _publish_windows(tmp_path, b"new build")
+    (tmp_path / "capture.exe.json").write_text(
+        '{"version": "v0.1.2", "sha256": "' + hashlib.sha256(b"old build").hexdigest() + '"}',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(capture_api, "_client_dist_dir", lambda: tmp_path)
+
+    releases = (await client.get("/api/v1/capture/client-releases")).json()
+
+    assert releases[0]["sha256"] == hashlib.sha256(b"new build").hexdigest()
+    assert releases[0]["version"] is None

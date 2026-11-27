@@ -116,6 +116,11 @@ def _artifact_version(path: Path) -> str | None:
     The published file is a plain `capture.exe`, so the version cannot come from
     the name. A sidecar written by the release script (``capture.exe.json``) is
     the source of truth; a versioned legacy filename is the fallback.
+
+    A sidecar that carries the digest it was written for is only trusted while
+    that digest still matches the bytes beside it. A publish that copied the exe
+    but left an older sidecar would otherwise label the new build with the old
+    version, so a mismatch falls back to the filename (usually: no version).
     """
     sidecar = path.with_name(path.name + ".json")
     if sidecar.is_file():
@@ -123,9 +128,14 @@ def _artifact_version(path: Path) -> str | None:
             meta = json.loads(sidecar.read_text(encoding="utf-8"))
         except (OSError, ValueError):
             meta = {}
-        version = meta.get("version") if isinstance(meta, dict) else None
-        if isinstance(version, str) and version.strip():
-            return version.strip()
+        if isinstance(meta, dict):
+            expected = meta.get("sha256")
+            stale = False
+            if isinstance(expected, str) and expected.strip():
+                stale = expected.strip().lower() != _artifact_sha256(path)
+            version = meta.get("version")
+            if not stale and isinstance(version, str) and version.strip():
+                return version.strip()
     match = _VERSION_IN_NAME.search(path.name)
     return f"v{match.group(1)}" if match else None
 
