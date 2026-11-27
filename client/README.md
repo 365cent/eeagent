@@ -23,6 +23,8 @@ unzip -q go.zip -d .toolchain
 go build -trimpath -ldflags "-s -w -H=windowsgui" -o dist/capture.exe ./cmd/capture
 ```
 
+Windows GUI 构建需要 CGO 与 MinGW-w64 gcc（本机用 w64devkit 2.11 / GCC 16.2 验证）；缺少 gcc 时 `cmd/capture`（Fyne）无法链接。
+
 发布（二进制 + zip + SHA256SUMS，`dist/` 已 gitignore）：
 
 ```powershell

@@ -10,6 +10,8 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Fix: `auto` now falls back to the injected core when the extension fails to load (previously it fell back only when staging failed); explicit `extension` still fails, but the message points at `auto`/`embedded`. `config.example.json` defaults to `auto` and the README table matches.
 - Evidence: `go test ./internal/capture ./internal/application ./internal/config` -> 3 ok (capture 130.7 s).
 - Runtime check: a temp CLI built from the same source (`CGO_ENABLED=0`, no Fyne) with `capture_archive=auto` fell back after the extension load failure and uploaded example.com (5 KB, signal 91684da6..., archived and deleted). The packaged v0.1.1 still predates the fix. A Windows build runner must repackage before the browser re-check; the local dist config stays `embedded` so the current binary keeps working.
+- Windows GUI build: w64devkit 2.11 (GCC 16.2) was installed locally and `CGO_ENABLED=1 go build ./cmd/capture` succeeded. A `v0.1.2-dev` GUI binary with `capture_archive=auto` fell back from the blocked extension and uploaded example.com (5 KB, signal `4bef8097...`, archived and deleted).
+- `scripts/release.ps1 -Version v0.1.2` produced `capture-v0.1.2-windows-amd64.zip` (5,116,519 B) and `capture.exe`; `SHA256SUMS` verifies (exe `f8bd3e52...`, zip `966c9e3a...`) and `capture.exe version` reports `capture v0.1.2`. The artifact stays in the local dist; publishing it to the download page/server is OPS.
 
 ### Skipped Playwright cases run against an isolated API (FE-12 / BE-16 evidence)
 
