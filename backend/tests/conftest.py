@@ -193,7 +193,7 @@ def pytest_collection_modifyitems(session: pytest.Session, config: pytest.Config
 def _clear_caption_cache():
     """Vision captions are cached on disk; a test must not seed the next one."""
     try:
-        from app.services.caption_cache import cache_root
+        from app.platform.caption_cache import cache_root
     except Exception:
         yield
         return

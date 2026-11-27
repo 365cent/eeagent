@@ -16,7 +16,7 @@ from app.domains.evidence.document_pipeline import (
 from app.domains.evidence.signal_record import create_signal_record
 from app.models.models import Document, Signal
 from app.schemas.schemas import DocumentRawOut
-from app.services.body_excerpt import lead_excerpt_from_markdown
+from app.domains.evidence.body_excerpt import lead_excerpt_from_markdown
 from app.domains.evidence.doc_summary import build_document_body_summary, excerpt_from_canonical
 from app.platform.objectstore import load_bytes, sha256_bytes
 

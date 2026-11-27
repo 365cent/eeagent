@@ -4,7 +4,7 @@ import pytest
 
 pytestmark = pytest.mark.no_db
 
-from app.services.body_excerpt import lead_excerpt_from_markdown
+from app.domains.evidence.body_excerpt import lead_excerpt_from_markdown
 
 
 EDN_NAV = """# 蔚来 ET9 架构

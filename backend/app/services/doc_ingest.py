@@ -35,7 +35,7 @@ from typing import Awaitable, Callable
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings, model_chain
-from app.services.caption_cache import load_caption, store_caption
+from app.platform.caption_cache import load_caption, store_caption
 from app.platform.llm_gateway import resolve_vision_model
 from app.platform.llm_prompts import VISION_CAPTION_PROMPT as _CAPTION_PROMPT
 from app.platform.llm_usage import (

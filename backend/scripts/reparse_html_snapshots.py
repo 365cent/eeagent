@@ -10,7 +10,7 @@ from sqlalchemy import select
 
 from app.db.base import SessionLocal
 from app.models.models import Signal
-from app.services.body_excerpt import resolve_signal_excerpt
+from app.domains.evidence.body_excerpt import resolve_signal_excerpt
 from app.services.html_snapshot import enrich_snapshot_figures, parse_html_snapshot
 from app.platform.objectstore import load_bytes, save_body
 from app.domains.tagging.service import sha256_text

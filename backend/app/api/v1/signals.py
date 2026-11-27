@@ -56,7 +56,7 @@ from app.services.signal_dedup import (
     DuplicateGroup,
     scan_duplicates,
 )
-from app.services.body_excerpt import resolve_signal_excerpt
+from app.domains.evidence.body_excerpt import resolve_signal_excerpt
 from app.services.html_snapshot import (
     enrich_snapshot_figures,
     figure_data_urls,

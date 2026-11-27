@@ -722,7 +722,7 @@ def test_real_efuse_word_has_seven_images_and_eight_insertions():
 
 async def test_caption_figure_serves_the_second_call_from_cache(tmp_path, monkeypatch):
     """Duplicate captures of the same image must not call the gateway twice."""
-    from app.services import caption_cache
+    from app.platform import caption_cache
 
     monkeypatch.setattr(caption_cache, "cache_root", lambda directory=None: tmp_path)
     settings = doc_ingest.get_settings().model_copy(update={"chat_base_url": "https://example.test"})

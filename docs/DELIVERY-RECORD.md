@@ -54,7 +54,9 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence for the ninth move: `lint-imports` 3 kept against both configs; `pytest tests/test_caption_cache.py tests/test_llm_usage.py tests/test_llm_gateway_models.py tests/test_agent_workflow.py tests/test_signal_assistant.py` → 54 passed (30.3 s); `py_compile` clean on the moved modules and `api/v1/signals.py`; collection is 628 tests.
 - Tenth move: the business suggestion layer `llm.py` → `app/domains/semantic/llm.py`, creating the `semantic` context. After the platform work it imported only `app.platform.*` plus the `vocab` and `tagging` domains, so the move adds no new coupling; eight files updated. `tagging.service` and `evidence.signal_record` now read it as a domain sibling.
 - Evidence for the tenth move: `lint-imports` 3 kept against both configs; `pytest tests/test_llm_tags.py tests/test_tech_tag_pipeline.py tests/test_signals_ingest.py tests/test_themes.py` → 52 passed (46.5 s); `py_compile` clean; collection is 628 tests.
-- Remaining BE-17 work: `app.services` still holds `doc_ingest`, `body_excerpt`, `caption_cache`, `doc_pdf_preview` and the agent/capture orchestration modules; each needs its own slice.
+- Eleventh move: `body_excerpt.py` → `app/domains/evidence/body_excerpt.py` (imports only the semantic and tagging domains plus models; seven call sites) and `caption_cache.py` → `app/platform/caption_cache.py` (imports core config and the platform prompt revision; four call sites). Both were dependency-clean for their target layers.
+- Evidence for the eleventh move: `lint-imports` 3 kept against both configs; `pytest tests/test_body_excerpt.py tests/test_caption_cache.py tests/test_document_ingest.py tests/test_signals_ingest.py` → 57 passed (39.7 s); `py_compile` clean; collection is 628 tests.
+- Remaining BE-17 work: `app.services` still holds `doc_ingest`, `doc_pdf_preview`, `pptx_deck_preview` and the agent/capture orchestration modules; each needs its own slice.
 
 ### Full backend regression after the BE-17 moves (BE-16 evidence)
 
