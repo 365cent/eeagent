@@ -9,12 +9,16 @@ pytestmark = pytest.mark.no_db
 THEME_PATHS = {
     "/api/v1/themes",
     "/api/v1/themes/cluster-report",
+    "/api/v1/themes/cluster-report/recompute",
+    "/api/v1/themes/cluster-report/status",
     "/api/v1/themes/name-suggestion",
     "/api/v1/themes/{theme_id}",
 }
 THEME_METHODS = {
     "/api/v1/themes": {"get", "post"},
     "/api/v1/themes/cluster-report": {"get"},
+    "/api/v1/themes/cluster-report/recompute": {"post"},
+    "/api/v1/themes/cluster-report/status": {"get"},
     "/api/v1/themes/name-suggestion": {"post"},
     "/api/v1/themes/{theme_id}": {"get", "patch", "delete"},
 }
