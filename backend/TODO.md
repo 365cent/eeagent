@@ -280,6 +280,7 @@
 - [ ] 约定目录：`app/platform`（配置、DB、身份、对象存储）、`app/domains/<bounded-context>`（用例与实体）、`app/api`（路由与 DTO 映射）；保留 `app/schemas` 直至领域 DTO 收敛。
 - [ ] 保持 `uv run lint-imports` 的 platform→domains/services/API、services→API、domains→API 契约通过（见 [pyproject.toml](pyproject.toml) 与 [tests/contracts.ini](tests/contracts.ini)），继续消除业务写入和路由私有函数互调。
 - 2026-11-27 切片：对象存储从 `app/services/objectstore.py` 迁到 `app/platform/objectstore.py`（BE-17 目标中的“对象存储归 platform”），30 处导入同步更新；平台契约收紧为同时禁止导入 `app.services`。证据：`lint-imports`（两处配置各 3 kept）、`pytest` 47 passed（对象存储/文档/快照相关用例）。
+- 2026-11-27 续切片：`useragent.py` → `app/platform/useragent.py`（会话域与用例共 2 处导入），`signal_duplicate.py` → `app/domains/evidence/signal_duplicate.py`（证据域两处与 `signal_dedup` 共 3 处导入）；重复采集标题规则归证据域。证据：`lint-imports` 两处配置各 3 kept，`pytest` 49 passed，全量收集仍 624 条。
 - [ ] OpenAPI 路径快照：[tests/test_openapi_snapshot.py](tests/test_openapi_snapshot.py) + [tests/snapshots/openapi_paths.json](tests/snapshots/openapi_paths.json)；路由变更须同步快照（`OPENAPI_UPDATE_SNAPSHOT=1`）。
 - [ ] 迁移顺序建议：`core`/`db`/`models` → `platform`；采集/信号/需求等垂直切片按 WBS 迁入 `domains`；共享摄取逻辑取代 API 私有函数互调（对齐 BE-01）。
 - 验收：import-linter 通过；OpenAPI 快照测试通过；无新增 `platform`→`api`/`domains` 违规；领域迁移切片有对应 pytest 证据。

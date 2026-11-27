@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import AccessLog
 from app.schemas.schemas import SessionOut
-from app.services.useragent import simplify_ua
+from app.platform.useragent import simplify_ua
 
 DEDUPE_WINDOW = timedelta(minutes=10)
 

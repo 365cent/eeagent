@@ -17,7 +17,7 @@ from app.models.models import Signal, SignalTag
 from app.services.judgment import judge_stage
 from app.services.llm import suggest_tags_with_llm
 from app.platform.objectstore import save_body
-from app.services.signal_duplicate import disambiguate_title_for_url
+from app.domains.evidence.signal_duplicate import disambiguate_title_for_url
 from app.services.signal_sources import ensure_primary_source
 from app.services.skills import apply_skill_rules
 from app.services.tagging import (

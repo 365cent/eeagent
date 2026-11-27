@@ -39,7 +39,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.models.models import Signal, SignalTag
-from app.services.signal_duplicate import (
+from app.domains.evidence.signal_duplicate import (
     strip_duplicate_title_suffix,
     title_indicates_duplicate_url,
 )

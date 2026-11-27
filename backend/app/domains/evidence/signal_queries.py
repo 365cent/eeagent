@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 
 from app.models.models import DemandPoint, Signal, SignalTag
 from app.schemas.schemas import SignalBase, SignalDetail, SignalOut, ThemeOut
-from app.services.signal_duplicate import title_indicates_duplicate_url
+from app.domains.evidence.signal_duplicate import title_indicates_duplicate_url
 
 
 async def find_signal(db: AsyncSession, signal_id: uuid.UUID) -> Signal | None:

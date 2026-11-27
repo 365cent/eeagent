@@ -36,7 +36,9 @@ This record keeps evidence for implementation slices removed from the remaining-
 - `app/services/objectstore.py` → `app/platform/objectstore.py`; 30 imports across API, domains, services, scripts and tests now point at the new module. No behaviour change: the file still imports only `app.core.config` and keeps the lexical containment and concurrency rules from the 2026-11-26 slice.
 - The platform contract is stricter: `platform-isolation` now forbids `app.domains`, `app.services` and `app.api`, not just the first and last. `pyproject.toml` and `tests/contracts.ini` stay in sync.
 - Evidence: `lint-imports` 3 kept / 0 broken against both configs; `pytest tests/test_objectstore_concurrency.py tests/test_missing_objects.py tests/test_documents_raw.py tests/test_signals_ingest.py tests/test_pptx_deck_preview.py tests/test_capture_job_retention.py tests/test_openapi_snapshot.py` → 47 passed (34.1 s). The OpenAPI path snapshot is unchanged, as expected for a module move.
-- Remaining BE-17 work: the bulk of `app.services` still sits beside `app/domains`, and domains still import services modules such as `doc_ingest`, `llm` and `judgment`; those migrations need their own slices.
+- Two more pure modules left `app.services`: `useragent.py` → `app/platform/useragent.py` (session domain + its test) and `signal_duplicate.py` → `app/domains/evidence/signal_duplicate.py` (both evidence callers and `signal_dedup`), 5 import sites in total. The duplicate-title rule now lives entirely inside the evidence domain.
+- Evidence for the second move: `lint-imports` 3 kept against both configs; `pytest tests/test_useragent.py tests/test_signal_dedup.py tests/test_signals_ingest.py` → 49 passed (35.3 s); `pytest --collect-only -q` still collects 624 tests.
+- Remaining BE-17 work: most of `app.services` still sits beside `app/domains`, and domains still import services such as `doc_ingest`, `llm`, `judgment` and `tagging_guard`; each needs its own slice.
 
 ## 2026-11-26
 
