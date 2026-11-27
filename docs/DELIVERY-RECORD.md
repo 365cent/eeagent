@@ -4,6 +4,11 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 ## 2026-11-27
 
+### 全量后端回归恢复绿色（2026-11-27）
+
+- `test_db_schema` 的期望清单补入 `eea_theme_cluster_run`（迁移 0028 已发布的表）；OpenAPI 契约补入聚类新增的 `themes/cluster-report/status`（GET）与 `themes/cluster-report/recompute`（POST）。
+- `pytest -q` → **650 passed, 2 skipped**（377.8s，exit 0）。此前一次全量在同一棵树上是 646 passed / 1 failed，失败项即上述主题路由契约；修复后复跑全绿。
+
 ### REQ→测试映射实跑（2026-11-27）
 
 - 按 `docs/acceptance-records/req-test-map.md` 点名实跑 19 个后端测试模块（映射里 20 个路径全部存在；`support.py` 是共享 helper，不是测试模块）：**254 passed**（206.4s，exit 0）。
