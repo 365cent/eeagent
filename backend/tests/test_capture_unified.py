@@ -128,7 +128,8 @@ async def test_document_file_upload_creates_derived_signal(client, monkeypatch):
     assert body["document"]["ingest_status"] == "parsed"
     sig = body["signal"]
     assert sig["document_id"] == body["document"]["id"]
-    assert sig["title"] == "deck"  # filename stem (S1-3 document defaults)
+    # 34245e0: the document's own heading wins over the file name.
+    assert sig["title"] == "白皮书"
     assert sig["url"].startswith("eea://document/")
     assert sig["published_at"]
     assert sig["event_date_text"]

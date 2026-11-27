@@ -82,6 +82,7 @@
 - **FE-09（2026-11-27，拒绝与改判）**：新增 `pnpm pw:rejudge`（`tests/e2e/strategy-rejudge.spec.ts`）：第 2 步拒绝后第 3/4 步只显示「被滤除」且无评分输入；改回通过后 4/4/3/4/5 得 20/25，分类定稿 v1；第 3 步「修改」把护城河 3→4 后出现「上次已生成版本，当前依据待复核」，重填分类定稿得到 v2，接口回读 [1,2]、20/21、仅一条 current。需 `EEA_PW_REJUDGE_LP` 指定可丢弃的未扫描落脚点，且会留下漏斗/版本行；实测 1 passed（13.7s），跑后已还原座舱落脚点。剩余：真实业务材料复核与 Linux 验收。
 - **FE-11（2026-11-27，文档研究浏览器）**：新增 `pnpm pw:research`（`tests/e2e/document-research.spec.ts`）：章节/图块数量与服务端一致、默认章节显示正文、定位图块写 `doc_figure` 且图片真实加载、待复核显式标注、刷新后深链接仍聚焦、章节树跳转写 `doc_chunk`。修复无章节归属的图块刷新后丢失焦点。实测 1 passed（14.7s），typecheck 0，build 通过。剩余：助手引用跳转需真实网关，Linux 数字归 OPS。
 - **BE-17（2026-11-27，平台/域归位）**：对象存储、UA、审计、模型运行时（`model_speed`/`hedged_model`/`semantic_api`/`embedding_cache`）迁入 `app/platform/`；`signal_duplicate`/`tagging_guard`/`judgment`/`doc_structure`/`doc_summary`/`signal_sources` 迁入 `app/domains/evidence/`；`refcodes` → `app/domains/vocab/`，`tagging` → `app/domains/tagging/`；平台契约收紧为禁止导入 `app.domains`/`app.services`/`app.api`。证据：`lint-imports` 两处配置均 3 kept，`pytest` 各切片共 47 + 49 + 44 + 56 + 59 + 51 + 60 + 48 passed，`alembic heads` 0027，全量收集 624 条。
+- **BE-16（2026-11-27，全量回归）**：BE-17 迁移后全量 `pytest -q` → 626 passed / 2 skipped（628 条，416s）。修一处与“标题取自文档”冲突的陈旧断言，并新增 `tests/test_document_title.py`（4 passed）锁定标题规则；重跑全量通过。
 - 上述均为组件切片；父任务验收、目标平台证据和真实业务样本仍按子清单保持开放。
 
 ## 下一项具体任务

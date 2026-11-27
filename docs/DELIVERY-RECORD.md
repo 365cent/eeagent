@@ -52,6 +52,13 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence for the eighth move: `lint-imports` 3 kept against both configs; `pytest tests/test_hedged_model.py tests/test_model_speed.py tests/test_llm_gateway_models.py tests/test_agent_rag_semantic.py tests/test_semantic_document_keywords.py` → 48 passed, 1 skipped (20.0 s); collection still 624 tests.
 - Remaining BE-17 work: `app.services` still holds `doc_ingest`, `llm`, `llm_gateway`, `llm_usage`, `body_excerpt` and related modules; each needs its own slice.
 
+### Full backend regression after the BE-17 moves (BE-16 evidence)
+
+- Ran the whole backend suite after the eight layering moves: `pytest -q` → **626 passed, 2 skipped** in 416 s (628 collected; the two skips are the live-gateway cases).
+- One failure surfaced and was a stale expectation, not a regression: `test_capture_unified::test_document_file_upload_creates_derived_signal` still asserted the filename stem (`deck`) while commit `34245e0` deliberately prefers the document's own heading. The test now expects `白皮书`.
+- Added `tests/test_document_title.py` to pin the rule the stale test got wrong: a scanner-style filename yields to the Markdown heading, a meaningful filename is kept over a noisy cover, a missing filename falls back to the heading, and no title at all falls back to `文档 <sha8>` (4 passed).
+- The final full run includes the new file; `lint-imports` stayed at 3 kept through the same tree.
+
 ## 2026-11-26
 
 ### Deploy to 10.215.35.10 (hzh2admin) + capture-client download page
