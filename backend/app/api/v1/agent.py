@@ -25,7 +25,7 @@ from app.schemas.agent import (
     AgentSessionOut,
     AgentSkillsStatusOut,
 )
-from app.services.skills import load_skill_registry
+from app.domains.skills.service import load_skill_registry
 from app.domains.agent.events import format_sse, format_sse_payload, list_events_after
 from app.domains.agent.patches import apply_confirmed_patch, get_owned_patch, reject_patch
 from app.domains.agent.runtime import cancel_run, execute_user_message, get_owned_session

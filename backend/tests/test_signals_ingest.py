@@ -315,10 +315,10 @@ async def test_business_skill_rules_override_fallbacks_and_record_basis(
         ],
     }
     (tmp_path / "pack.json").write_text(json.dumps(pack, ensure_ascii=False), encoding="utf-8")
-    from app.services.skills import load_skill_registry
+    from app.domains.skills.service import load_skill_registry
 
     registry = load_skill_registry(tmp_path)
-    monkeypatch.setattr("app.services.skills.load_skill_registry", lambda root=None: registry)
+    monkeypatch.setattr("app.domains.skills.service.load_skill_registry", lambda root=None: registry)
 
     sig = await create_signal(
         client,

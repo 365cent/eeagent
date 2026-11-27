@@ -5,8 +5,8 @@ from pathlib import Path
 
 import pytest
 
-from app.services.skill_eval import evaluate_gold_set
-from app.services.skills import (
+from app.domains.skills.eval import evaluate_gold_set
+from app.domains.skills.service import (
     SkillRegistry,
     apply_skill_rules,
     baseline_mode,
@@ -179,7 +179,7 @@ def test_evaluate_gold_set_baseline_is_explicit():
 def test_skill_eval_cli_json():
     backend = Path(__file__).resolve().parents[1]
     proc = subprocess.run(
-        [sys.executable, "-m", "app.services.skill_eval", "--json"],
+        [sys.executable, "-m", "app.domains.skills.eval", "--json"],
         cwd=backend,
         capture_output=True,
         text=True,
