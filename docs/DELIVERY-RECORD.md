@@ -28,6 +28,7 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Client artifact: `deploy/downloads/capture.exe` is v0.1.4 (sha256 `39682ed2...`), matching `capture.exe.json` and `SHA256SUMS`; `client/dist/capture.exe` is the same build（此后已换为 v0.1.5，见上方“客户端发布制品一致性（OPS-07 预检）”）。
 - The new client-releases `version` field is covered by `test_version_comes_from_the_release_sidecar`; the long-running dev API on :8000 predates that code, so it needs a restart before the page can show the version.
 - 同日 e2e 复跑（:8000 + :3000，Playwright 复用宿主 Edge，只读用例）：`pnpm pw:smoke` → **2 passed**（26.8s，追溯页真实关系/空态与无效落脚点深链接）、`pnpm pw:refcodes` → **1 passed**（24.2s，字典加载失败可重试且不谎报信号缺失）、`pnpm pw:roles` → **3 passed**（1.2s，无 skip，开发操作者非管理员，负向拒绝真实执行）。
+- 降级路径实跑（网关 chat 模型当日不可用，非模拟）：`/llm/status` 报 `Qwen3.6-35B` 且无速率样本，`/signals/{id}/tag-suggestions` 返回 `source=embedding-rerank` 与 `degraded_reason`「对话模型暂不可用…」；`pnpm pw:degraded` → **1 passed**（42.3s，未跳过）——页面原样显示该理由，且降级下人工修正仍能保存。该用例按设计会写一条 `PW degraded suggestions …` 草稿信号到开发库。
 
 ### Local backup/restore drill (OPS-05 evidence)
 
