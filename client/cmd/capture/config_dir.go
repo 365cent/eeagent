@@ -28,8 +28,8 @@ func resolveConfigDir() (string, error) {
 	if _, err := os.Stat(filepath.Join(exeDir, "config.json")); err == nil {
 		return exeDir, nil
 	}
-	if wd, err := os.Getwd(); err == nil {
-		return wd, nil
-	}
+	// Nothing configured anywhere: keep data next to the binary. A double-click
+	// runs with the exe folder as cwd anyway, and a shortcut with a strange
+	// "start in" must not drop the browser profile into System32.
 	return exeDir, nil
 }

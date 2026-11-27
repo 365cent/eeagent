@@ -37,13 +37,28 @@ const (
 )
 
 // Run shows the window and blocks until it closes.
-func Run(cfg config.Config, dir string) int {
+func Run(cfg config.Config, dir string) (code int) {
 	runtime.LockOSThread()
+	// A panic before the first window exists is invisible in a -H=windowsgui
+	// build; turn it into a dialog so "double-click did nothing" is diagnosable.
+	defer func() {
+		if r := recover(); r != nil {
+			_, _ = win.HWND(0).MessageBox(fmt.Sprintf("采集客户端启动失败：\n%v", r), winTitle, co.MB_OK|co.MB_ICONERROR)
+			code = 1
+		}
+	}()
 	if err := win.OleInitialize(); err != nil {
 		win.HWND(0).MessageBox("OLE 初始化失败："+err.Error(), winTitle, co.MB_ICONERROR)
 		return 1
 	}
 	defer win.OleUninitialize()
+
+	// Double-clicking again while an instance is already up (minimised, behind
+	// the editor) used to open a second window nobody noticed. Bring the running
+	// one forward instead: one queue, one browser profile, one visible result.
+	if focusExistingWindow() {
+		return 0
+	}
 
 	app := newApp(cfg, dir)
 	drainCtx, stopDrain := context.WithCancel(context.Background())
@@ -52,7 +67,7 @@ func Run(cfg config.Config, dir string) int {
 		defer app.drainWG.Done()
 		app.runServerImportDrain(drainCtx)
 	}()
-	code := app.wnd.RunAsMain()
+	code = app.wnd.RunAsMain()
 	stopDrain()
 	app.drainWG.Wait()
 	app.rt.Close()
@@ -125,6 +140,11 @@ func newApp(cfg config.Config, dir string) *appState {
 		engineChrome: strings.EqualFold(cfg.CaptureEngine, "chrome"),
 		headlessOn:   cfg.Headless,
 		jobs:         make(map[int]queue.Job),
+	}
+	if cfg.StartupNotice != "" {
+		// main had to fall back to defaults; say so on the status line rather
+		// than opening a window that silently ignores the user's config.
+		app.notice = cfg.StartupNotice
 	}
 
 	wnd := ui.NewMain(ui.OptsMain().
@@ -264,6 +284,22 @@ func (a *appState) events() {
 			_ = a.page.DeleteObject()
 		}
 	})
+}
+
+// focusExistingWindow restores the window of an already running client and
+// reports whether one was found.
+func focusExistingWindow() bool {
+	hwnd, ok := win.FindWindow(win.ClassNameStr(winClass), "")
+	if !ok || hwnd == 0 {
+		return false
+	}
+	// A background process may not raise a window on its own; this is the
+	// documented escape hatch and is best-effort only.
+	_ = win.AllowSetForegroundWindow(0xFFFF_FFFF) // ASFW_ANY
+	_ = hwnd.ShowWindowAsync(co.SW_RESTORE)
+	_ = hwnd.BringWindowToTop()
+	hwnd.SetForegroundWindow()
+	return true
 }
 
 func (a *appState) click(pt win.POINT) {

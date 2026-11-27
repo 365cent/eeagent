@@ -20,13 +20,17 @@ func main() {
 
 	dir, err := resolveConfigDir()
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "config dir: %v\n", err)
+		reportFatalStartup("无法确定配置目录，采集客户端未能启动：\n" + err.Error())
 		os.Exit(1)
 	}
 	cfg, err := config.Load(dir)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "config: %v\n", err)
-		os.Exit(1)
+		// A broken config.json used to end the process before any window could
+		// appear, which reads as "double-click does nothing". Start with the
+		// built-in defaults and say so in the window instead.
+		fmt.Fprintln(os.Stderr, "config:", err)
+		cfg = config.Default()
+		cfg.StartupNotice = "配置文件读取失败，已用默认配置启动：" + err.Error()
 	}
 	os.Exit(ui.Run(cfg, dir))
 }

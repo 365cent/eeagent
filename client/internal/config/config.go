@@ -40,6 +40,10 @@ type Config struct {
 	AuthTokenEnv            string `json:"auth_token_env"`
 	AuthTokenFile           string `json:"auth_token_file"`
 	AuthTokenCredential     string `json:"auth_token_credential"`
+	// StartupNotice is runtime-only: main sets it when config.json could not be
+	// read, so the window can say why it started with defaults instead of the
+	// process vanishing silently on a double-click.
+	StartupNotice string `json:"-"`
 }
 
 // Default returns the settings used when config.json is absent.
