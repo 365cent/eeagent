@@ -1,7 +1,7 @@
 'use client'
 
 import { memo } from 'react'
-import { Button, Card, Flex, Space, Tag, Tooltip, Typography } from 'antd'
+import { Button, Card, Flex, Space, Spin, Tag, Tooltip, Typography } from 'antd'
 import { CheckOutlined, MergeCellsOutlined } from '@ant-design/icons'
 import type { ThemeClusterProposal } from '@/lib/api/types'
 import type { TagCluster, TopicCreationTier, TopicInduction } from '@/lib/topic-clustering'
@@ -13,6 +13,8 @@ export type TopicCandidateCardProps = {
   cluster: TagCluster
   induction: TopicInduction
   displayName: string
+  /** A clustering pass is running: the AI title for this card is not ready yet. */
+  namePending?: boolean
   stageLabel: string | null
   index: number
   active: boolean
@@ -31,6 +33,7 @@ export type TopicCandidateCardProps = {
 export const TopicCandidateCard = memo(function TopicCandidateCard({
   proposal,
   displayName,
+  namePending = false,
   stageLabel,
   index,
   active,
@@ -92,6 +95,13 @@ export const TopicCandidateCard = memo(function TopicCandidateCard({
           </Space>
           <Text strong className="topic-candidate-title">
             {displayName}
+            {namePending ? (
+              <Spin
+                size="small"
+                className="topic-candidate-title-loading"
+                aria-label="AI 主题名生成中"
+              />
+            ) : null}
           </Text>
           <Text type="secondary" className="topic-candidate-meta">
             {proposal.signal_count} 条聚类 · {reliableCount} 条可计证据 · {reliableSources} 来源可计 · 凝聚度{' '}

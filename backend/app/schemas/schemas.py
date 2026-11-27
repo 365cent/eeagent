@@ -154,6 +154,10 @@ class ThemeClusterProposal(BaseModel):
     signal_count: int
     source_count: int
     value_chain_stage_code: str | None
+    ai_name: str | None = Field(
+        default=None,
+        description="LLM topic title from the cluster tags and member summaries; None when naming failed (the page then keeps its own title)",
+    )
 
 
 class SignalNeighborOut(BaseModel):

@@ -175,6 +175,12 @@ async def run_queued_reports() -> int:
 
         async with _session() as db:
             report = await build_theme_cluster_report(db)
+        # Titles come from the model when it answers; a failure leaves ai_name
+        # empty and the page keeps its own tag/title wording.
+        from app.domains.theme.cluster_naming import name_cluster_report
+
+        async with _session() as db:
+            await name_cluster_report(db, report)
         async with _session() as db:
             await db.execute(
                 update(ThemeClusterRun)

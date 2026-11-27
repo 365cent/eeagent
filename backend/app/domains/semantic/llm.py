@@ -33,6 +33,7 @@ from app.platform.llm import gateway_openai_provider
 from app.platform.llm_gateway import configured_chat_model, resolve_chat_model
 from app.platform.llm_prompts import (
     CANDIDATE_TAG_RULES,
+    CLUSTER_NAME_RULES,
     EXCERPT_RULES,
     TAG_SUGGESTION_RULES,
     THEME_NAME_RULES,
@@ -336,6 +337,54 @@ async def suggest_theme_name_with_llm(brief: str) -> LLMThemeName | None:
         return result.output
     except Exception as exc:  # noqa: BLE001 — naming must fall back to the tag title
         logger.warning("LLM 主题名建议失败，回退标签名: %s: %s", type(exc).__name__, exc)
+        return None
+
+
+class LLMClusterName(BaseModel):
+    """One AI topic title for a tag cluster."""
+
+    key: str
+    name: str
+
+    @field_validator("name", mode="after")
+    @classmethod
+    def _clean_name(cls, v: str) -> str:
+        v = re.sub(r"\s+", " ", v).strip().strip("\"'「」")
+        if len(v) < 4:
+            raise ValueError("cluster name too short")
+        return v[:60]
+
+
+class LLMClusterNames(BaseModel):
+    """Batched titles: one entry per cluster key the model could name."""
+
+    names: list[LLMClusterName]
+
+
+async def _build_cluster_name_agent() -> Agent[None, LLMClusterNames] | None:
+    model_id = await _chat_model_id()
+    if not model_id:
+        return None
+    return Agent(
+        OpenAIChatModel(model_id, provider=gateway_openai_provider()),
+        output_type=LLMClusterNames,
+        system_prompt=CLUSTER_NAME_RULES,
+        model_settings={"timeout": 30},
+    )
+
+
+async def name_clusters_with_llm(brief: str) -> LLMClusterNames | None:
+    """Titles for every cluster in one call, or None when the model is unusable."""
+    if not get_settings().chat_base_url_normalized:
+        return None
+    try:
+        agent = await _build_cluster_name_agent()
+        if agent is None:
+            return None
+        result = await _run_logged(agent, brief, "cluster_name")
+        return result.output
+    except Exception as exc:  # noqa: BLE001 — the page keeps its own titles
+        logger.warning("LLM 聚类命名失败，保留标签标题: %s: %s", type(exc).__name__, exc)
         return None
 
 

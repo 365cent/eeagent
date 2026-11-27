@@ -301,6 +301,8 @@ export type ThemeClusterProposal = {
   signal_count: number
   source_count: number
   value_chain_stage_code: string | null
+  /** LLM topic title from the cluster tags + member summaries; null when naming failed. */
+  ai_name?: string | null
 }
 
 export type SignalNeighborOut = {

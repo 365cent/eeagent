@@ -1790,6 +1790,25 @@ mark.evidence-tts-highlight {
   margin-top: 2px;
 }
 
+.import-unified-client-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: stretch;
+}
+
+.capture-client-claim {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.capture-client-claim-hint {
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .import-unified-file-input {
   position: absolute;
   width: 1px;
@@ -2078,6 +2097,12 @@ mark.evidence-tts-highlight {
   font-size: 15px !important;
   line-height: 1.45;
   display: block;
+}
+
+/* AI title still being generated after a reclustering pass. */
+.topic-candidate-title-loading {
+  margin-left: 8px;
+  vertical-align: -2px;
 }
 
 .topic-candidate-meta {
@@ -2435,7 +2460,7 @@ mark.evidence-tts-highlight {
   background: color-mix(in srgb, #1677ff 7%, var(--eea-surface-elevated));
 }
 
-.topic-form-dock .topic-name-ai {
+.topic-name-ai {
   height: 22px;
   padding-inline: 2px 4px;
   font-size: 12px;

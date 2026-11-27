@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { App as AntApp, Button, Card, Col, Flex, Input, Modal, Row, Typography } from 'antd'
-import { CheckOutlined, ReloadOutlined } from '@ant-design/icons'
-import { createTheme, putSignalTheme } from '@/lib/api/eea-api'
+import { CheckOutlined, ReloadOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { createTheme, putSignalTheme, suggestThemeName } from '@/lib/api/eea-api'
 import { EeaApiError, eeaErrorMessage } from '@/lib/api/client'
 import { TopicCandidateCard } from '@/components/topics/topic-candidate-card'
 import { TopicClusterStage, type ClusterStagePhase } from '@/components/topics/topic-cluster-stage'
@@ -63,6 +63,7 @@ export function TopicCreateAutoPanel({ onNavigate }: { onNavigate: NavigateFn })
     invalidateAll,
   } = useTopicClusterCandidates()
   const [namingCluster, setNamingCluster] = useState<{ cluster: TagCluster; name: string } | null>(null)
+  const [namingAi, setNamingAi] = useState(false)
   const [pending, setPending] = useState(false)
   const [replayToken, setReplayToken] = useState(0)
   const [phase, setPhase] = useState<ClusterStagePhase>('scatter')
@@ -78,7 +79,11 @@ export function TopicCreateAutoPanel({ onNavigate }: { onNavigate: NavigateFn })
       const attribution = proposal.shared_tags.length
         ? proposal.shared_tags
         : proposal.tag_distribution.map((item) => item.tag)
-      const displayName = proposeNaturalTopicName(cluster.signals, attribution, stageLabel)
+      // The AI title wins when the last clustering pass managed to name this
+      // cluster; the tag/title name stays as the fallback.
+      const displayName =
+        (proposal.ai_name && proposal.ai_name.trim()) ||
+        proposeNaturalTopicName(cluster.signals, attribution, stageLabel)
       const induction = induceTopicFromCluster(cluster, themeTagMap)
       const evidence = topicClusterEvidenceStats(cluster)
       return { proposal, cluster, stageLabel, displayName, induction, evidence }
@@ -205,6 +210,27 @@ export function TopicCreateAutoPanel({ onNavigate }: { onNavigate: NavigateFn })
     } finally {
       setPending(false)
     }
+  }
+
+  const modalSignalIds = useMemo(() => {
+    if (!namingCluster) return []
+    return reliableClusterSignals(namingCluster.cluster).map((signal) => signal.id)
+  }, [namingCluster])
+
+  const generateModalName = () => {
+    if (namingAi || modalSignalIds.length === 0) return
+    setNamingAi(true)
+    suggestThemeName(modalSignalIds)
+      .then((result) => {
+        const next = result.working_name.trim()
+        if (next) {
+          setNamingCluster((prev) => (prev ? { ...prev, name: next.slice(0, 120) } : null))
+        }
+      })
+      .catch((err) => {
+        messageApi.error(eeaErrorMessage(err, '主题名生成失败'))
+      })
+      .finally(() => setNamingAi(false))
   }
 
   const beginEstablishFlow = async (
@@ -345,6 +371,7 @@ export function TopicCreateAutoPanel({ onNavigate }: { onNavigate: NavigateFn })
                     cluster={cluster}
                     induction={induction}
                     displayName={displayName}
+                    namePending={Boolean(clusterReport?.pending)}
                     stageLabel={stageLabel}
                     index={index}
                     active={activeKey === proposal.key}
@@ -384,12 +411,28 @@ export function TopicCreateAutoPanel({ onNavigate }: { onNavigate: NavigateFn })
         cancelText="取消"
       >
         <Input
+          className="topic-name-field"
+          placeholder="主题工作名"
           value={namingCluster?.name ?? ''}
           onChange={(event) =>
             setNamingCluster((prev) => (prev ? { ...prev, name: event.target.value } : null))
           }
           maxLength={120}
           showCount
+          suffix={
+            <Button
+              className="topic-name-ai"
+              type="link"
+              size="small"
+              icon={<ThunderboltOutlined />}
+              loading={namingAi}
+              disabled={modalSignalIds.length === 0}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={generateModalName}
+            >
+              AI
+            </Button>
+          }
         />
       </Modal>
     </Card>
