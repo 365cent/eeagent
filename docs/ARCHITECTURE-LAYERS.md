@@ -1,6 +1,6 @@
 # 分层架构与契约校验 / Layered architecture & contracts
 
-更新：2026-11-26。与 [DOC-03](TODO.md#doc-03-架构数据和接口同步) 同步；实现任务见 [BE-17](../backend/TODO.md#be-17-领域分层与依赖边界)、[FE-13](../frontend/TODO.md#fe-13-领域特性与-workspace-拆分)、[CC-07](../client/TODO.md#cc-07-客户端分层与-http-复用)。运行时契约以 OpenAPI 与数据库 migration 为准，本文描述代码组织与回归门禁，不含凭据或环境秘密。
+更新：2026-11-27。与 [DOC-03](TODO.md#doc-03-架构数据和接口同步) 同步；实现任务见 [BE-17](../backend/TODO.md#be-17-领域分层与依赖边界)、[FE-13](../frontend/TODO.md#fe-13-领域特性与-workspace-拆分)、[CC-07](../client/TODO.md#cc-07-客户端分层与-http-复用)。运行时契约以 OpenAPI 与数据库 migration 为准，本文描述代码组织与回归门禁，不含凭据或环境秘密。
 
 ## 总览 / Overview
 
@@ -14,17 +14,17 @@ HTTP 面统一为 `/api/v1`（见 `GET /openapi.json`）。采集默认 `POST /a
 
 ## Backend — `app/platform` 与 `app/domains`
 
-**目标（BE-17）**：路由层只做编排与 DTO 映射；配置、DB、身份、对象存储、LLM 网关等横切能力在 `app/platform`；按 bounded context 的业务用例逐步迁入 `app/domains/<name>`。过渡期 `app/services` 与 `app/schemas` 仍承载大部分逻辑，迁移按垂直切片推进（采集/证据等已出现 `domains/capture`、`domains/evidence` 等首批模块）。
+**目标（BE-17）**：路由层只做编排与 DTO 映射；配置、DB、身份、对象存储、LLM 网关等横切能力在 `app/platform`；按 bounded context 的业务用例迁入 `app/domains/<name>`。截至 2026-11-27，`app/services` 只剩三个兼容入口（`orphan_maintenance`、`panorama_review_report`、`skill_eval`）与 `__init__.py`；业务实现位于 `app/platform`、`app/domains/*`（agent、capture、demand、evidence、imports、landing、report、semantic、session、skills、standards、strategy、studio、tagging、theme、trace、vocab）或 `app/api`；`app/schemas` 仍为共享 DTO。
 
 | 目录 | 职责 |
 | --- | --- |
 | `app/platform` | HTTP 辅助、错误形态、LLM 网关横切；配置/身份在 `app/core`，DB session 在 `app/db` |
 | `app/domains/<ctx>` | 领域实体、用例、与上下文相关的纯业务逻辑 |
 | `app/api` / `app/api/v1` | FastAPI 路由、请求/响应 DTO、依赖注入与权限门 |
-| `app/services` | 遗留服务层（逐步下沉到 domains 或 platform） |
+| `app/services` | 兼容入口 shim（保留既有 `python -m` 命令），不再承载业务逻辑 |
 | `app/schemas` | 共享 Pydantic 模型（待与各领域 DTO 收敛） |
 
-**依赖方向（应遵守）**：`api` → `domains` / `services` → `platform`；`platform` 不得依赖 `api` 或 `domains`；`services` 不得依赖 `api`（消除对 `app.api.v1` 的反向导入是 BE-17 收尾项之一）。
+**依赖方向（应遵守）**：`api` → `domains` / `services` → `platform`；`platform` 不得依赖 `domains`、`services` 或 `api`；`services` 与 `domains` 不得依赖 `api`。
 
 ## Frontend — `features` 与 `views`
 
@@ -46,20 +46,20 @@ cd backend && uv run lint-imports
 
 当前契约（3 条，全部为硬门禁）：
 
-1. **Platform must not import domains or API**：`app.platform` 禁止导入 `app.domains`、`app.api`。
+1. **Platform must not import domains, services or API**：`app.platform` 禁止导入 `app.domains`、`app.services`、`app.api`。
 2. **Services must not import API**：`app.services` 禁止导入 `app.api`。
 3. **Domains must not import API**：`app.domains` 禁止导入 `app.api`。
 
 违反即 CI/本地回归失败；新增契约前须先清现存违规导入（见 BE-17）。
 
-## 迁移与数据模型（2026-11-26）
+## 迁移与数据模型（2026-11-27）
 
 运行时 schema 以 Alembic 迁移为准，文档不手抄列类型。
 
 | 项 | 当前值 | 校验方式 |
 | --- | --- | --- |
-| 迁移头 | `0026_maintenance_run` | `uv run alembic heads` |
-| 修订链 | `0001_init` … `0026`，全部为加法修订，不改已发布迁移 | 发布前 `alembic downgrade -1` + `upgrade head` |
+| 迁移头 | `0027_capture_job_progress` | `uv run alembic heads` |
+| 修订链 | `0001_init` … `0027`，全部为加法修订，不改已发布迁移 | 发布前 `alembic downgrade -1` + `upgrade head` |
 | 业务表 | 32 张 `eea_*` 表（含 `eea_signal_studio_artifact`、`eea_signal_source`、`eea_stored_object_orphan`、`eea_maintenance_run`） | [test_db_schema.py](../backend/tests/test_db_schema.py) 精确集合断言 |
 | 视图 | `eea_v_tech_theme_metrics`、`eea_v_tech_theme_display_tags` | 同上 |
 | 测试库 | 专用 `eea_test`，与开发库 `eea` 分离 | `backend/tests/conftest.py` 会话互斥锁 |

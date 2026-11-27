@@ -83,6 +83,7 @@
 - **FE-11（2026-11-27，文档研究浏览器）**：新增 `pnpm pw:research`（`tests/e2e/document-research.spec.ts`）：章节/图块数量与服务端一致、默认章节显示正文、定位图块写 `doc_figure` 且图片真实加载、待复核显式标注、刷新后深链接仍聚焦、章节树跳转写 `doc_chunk`。修复无章节归属的图块刷新后丢失焦点。实测 1 passed（14.7s），typecheck 0，build 通过。剩余：助手引用跳转需真实网关，Linux 数字归 OPS。
 - **BE-17（2026-11-27，平台/域归位）**：对象存储、UA、审计、模型运行时、LLM 平台层、`caption_cache`、`files`（`suffix_for`）、文档预览三件套、URL 抓取与 Pydantic AI 装配迁入 `app/platform/`；证据域的 duplicate/guard/judgment/structure/summary/sources/body_excerpt/`doc_ingest`/`figure_recaption`/`signal_dedup`/`html_snapshot`/`signal_recaption` 迁入 `app/domains/evidence/`；`refcodes` → `vocab`，`tagging` → `tagging`，`llm.py` → `app/domains/semantic/`，`chain_report` 对 → `app/domains/report/`，需求/功能卡校验归 `demand`/`landing` 域，主题与标签聚类归 `theme`/`tagging` 域，工作室生成与产物归 `studio` 域，战略漏斗归 `strategy` 域，研究 Agent 十模块归 `agent` 域，需求助手与草稿归 `demand` 域，全景导入族归 `capture` 域（复核报告 CLI 保留 shim），采集编排/清理/维护归 `capture` 域、采集令牌归 platform（维护 CLI 保留 shim）；技能加载与评估归 `skills` 域（评估 CLI 保留 shim），`app/services` 仅余兼容入口；平台契约禁止导入 `app.domains`/`app.services`/`app.api`。证据：`lint-imports` 两处配置均 3 kept，`pytest` 各切片全绿（最新 31 passed），`alembic heads` 0027，全量收集 628 条。
 - **BE-16（2026-11-27，全量回归）**：BE-17 迁移后全量 `pytest -q` → 626 passed / 2 skipped（628 条，416s）。修一处与“标题取自文档”冲突的陈旧断言，并新增 `tests/test_document_title.py`（4 passed）锁定标题规则；重跑全量通过。
+- **BE-16（2026-11-27，迁移后全量回归）**：BE-17 十五→二十六切片（对象存储至技能域，`app/services` 仅余三个兼容 shim）后全量 `pytest -q` → **626 passed / 2 skipped**（309.9s，628 条，exit 0）；`lint-imports` 两处配置各 3 kept。
 - 上述均为组件切片；父任务验收、目标平台证据和真实业务样本仍按子清单保持开放。
 
 ## 下一项具体任务

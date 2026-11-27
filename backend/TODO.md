@@ -42,7 +42,7 @@
 
 - [ ] P0 · 部分实现 · 依赖 BE-01。
 - 来源：Word §2.1–2.2、图2-1-1/2-1-2/2-2；REQ-SIG-03…11；WBS 1.3.2。
-- 入口：[signals.py](app/api/v1/signals.py)、[schemas.py](app/schemas/schemas.py)、[html_snapshot.py](app/services/html_snapshot.py)。
+- 入口：[signals.py](app/api/v1/signals.py)、[schemas.py](app/schemas/schemas.py)、[html_snapshot.py](app/domains/evidence/html_snapshot.py)。
 - 统一 metadata、采集时间、实际事件时间与发布时间语义；未知日期不补成当天（`event_date_text`/`event_date_precision` 已在共享 `create_signal_record` 写入）。保留原文、原链接与派生正文；正文修补留版本/审计。
 - 已交付正文修补审计切片：`PATCH /signals/{id}` 的 `body_text` 保存新对象，并在 `CorrectionAudit` 记录旧/新 object key 与 SHA-256；旧正文对象仍可读取。
 - 2026-11-24 重复信号扫描/清理切片：`GET /signals/duplicates` 改按 `article_url_key` 分组（保留内容型 query，追踪参数按 host 剔除：`utm_*`/`spm` 全局，微信/百度包装参数仅在对应 host，空值参数保留）；同一 `url_normalized` 且带 `(重复采集 #n)` 标题但 URL 键不同的对报告为 `url_suspect`（恒非 identical，人工裁决；若标题后缀被改掉则有意不合并——重命名是人工决定，错合不可恢复）；`POST /signals/duplicates/cleanup` 服务端重算分组，绝不删空一组、跳过存在 Agent 待确认变更或被已确认需求引用为证据的信号（REQ-DEM-03）并逐条审计。候选行由 SQL 预筛（仅重复 `url_normalized`/`body_sha256`）加载，万级信号实测见 `scripts/probe_dedup_scan_cost.py`。证据：[signal_dedup.py](app/services/signal_dedup.py)、[test_signal_dedup.py](tests/test_signal_dedup.py) 21 passed，提交 `e334993`+`83090a8`，见[交付记录](../docs/DELIVERY-RECORD.md#2026-11-24)。待验：真实库扫描结果核对。
@@ -59,7 +59,7 @@
 
 - [ ] P0 · 部分实现 · 依赖 OPS-03；不阻塞身份接口之外的纯函数开发。
 - 来源：Word §2.2–2.4；REQ-RULE-02、REQ-AGT-02/04；WBS 1.3.3、1.7.1。
-- 入口：[audit.py](app/services/audit.py)、[session.py](app/api/v1/session.py)、[models.py](app/models/models.py)。
+- 入口：[audit.py](app/platform/audit.py)、[session.py](app/api/v1/session.py)、[models.py](app/models/models.py)。
 - 统一服务端 operator subject/role；研究者与方法论/词表管理员权限由服务器角色映射决定。IP 访问日志不充当身份认证。
 - 已交付主题写入身份与审计切片：创建/修改/删除均使用服务端 operator；记录 created、working_name、value_chain_stage_code、deleted 的前后值与操作者。
 - 对分类、标签、主题、需求复核、映射发布、落脚点角色、标准与战略变更记录原值/新值/人员/时间/理由；保存机器值及模型、规则、skill 版本和分数来源。
@@ -73,7 +73,7 @@
 
 - [ ] P1 · 部分实现（入库和建议接口已调用内网模型生成环节、类型和技术标签，仍待统一重算、候选解释、语义精排与真实网关验收）· 依赖 BE-03（持久修改保护）。
 - 来源：Word §2.2–2.3；REQ-TAG-04/05/06、REQ-DEM-03；WBS 1.3.3/1.3.4。
-- 入口：[tagging.py](app/domains/tagging/service.py)、[judgment.py](app/domains/evidence/judgment.py)、[llm.py](app/services/llm.py)、[config.py](app/core/config.py)；新增 embedding/rerank 服务。
+- 入口：[tagging.py](app/domains/tagging/service.py)、[judgment.py](app/domains/evidence/judgment.py)、[llm.py](app/domains/semantic/llm.py)、[config.py](app/core/config.py)；新增 embedding/rerank 服务。
 - 采用已有计划的 TF-IDF + TextRank 召回、标题加权、embedding 近义合并、rerank 精排；保留离线规则/jieba 回退，标签数量随内容变化。
 - 网关批量最多 16、限制并发、超时和退避；校验空响应、索引、向量维度和有限数值。无配置时返回不可用状态和降级理由。
 - 已交付独立语义网关与索引校验：chat、embedding、rerank 分别读取 `CHAT_*`、`EMBEDDING_*`、`RERANK_*` 的 URL/key/model，旧 `LLM_*`/`MAAS_*` 已移除；实际网关 embedding 返回 4096 维，rerank 正常；embedding 按 `data[].index` 排序后返回。
@@ -91,7 +91,7 @@
 
 - [ ] P1 · 部分实现 · 主题归集/来源计数依赖 BE-03、BE-04；自动建议接入 BE-06，手工维护可先交付。
 - 来源：Word §2.3、图2-3、表1；REQ-SIG-08、REQ-DEM-02/03/05/08/14/15；WBS 1.3.4。
-- 入口：[themes.py](app/api/v1/themes.py)、[judgment.py](app/services/judgment.py)、主题指标视图迁移、[test_themes.py](tests/test_themes.py)。
+- 入口：[themes.py](app/api/v1/themes.py)、[judgment.py](app/domains/evidence/judgment.py)、主题指标视图迁移、[test_themes.py](tests/test_themes.py)。
 - 以技术对象、底层能力、变化方向输出结构化归集依据（wave-1：`aggregation_structured_basis` + 自动归集一致性门控）；相似度和次优差值用于候选筛选，不能替代业务论证。单一信号当前最多一个主题。
 - 自动归集仅处理未确认字段且须通过对象/能力/变化方向一致性规则；并列/证据不足返回理由，保留手动指派与移出。文档信号在新抽取能力验收前保持人工指定。
 - 新增信号的可追溯来源关联，包含主 URL 与补充 URL、规范化 URL、出处；迁移现有主链接，支持去重，禁止为了计数制造 URL。
@@ -200,7 +200,7 @@
 
 - [ ] P1 · 部分实现 · 依赖 BE-01、BE-04、BE-03。
 - 来源：实施计划 §7.1 REQ-DOC-01…05；Word 七图；WBS 1.3.11、1.4.5。
-- 入口：[doc_ingest.py](app/services/doc_ingest.py)、[doc_summary.py](app/domains/evidence/doc_summary.py)、[documents.py](app/api/v1/documents.py)。
+- 入口：[doc_ingest.py](app/domains/evidence/doc_ingest.py)、[doc_summary.py](app/domains/evidence/doc_summary.py)、[documents.py](app/api/v1/documents.py)。
 - 保留原始哈希、解析器/模型版本、页数/图数/错误；图块保存原件索引、出现位置、caption/OCR、识别置信度及 review 状态。
 - OOXML 按实际文档引用顺序映射图，区别 7 张不同图片和 8 次插入；PPT 正文/notes 与 master 装饰区分；PDF 缺 OCR 时明确失败/待复核。
 - PPTX **预览** vendored [`deckpeek`](vendor/deckpeek/deckpeek.py)（[`docs/research/2026-11-10-deckpeek-pptx-preview-reference.md`](../../docs/research/2026-11-10-deckpeek-pptx-preview-reference.md)）：Linux 结构 HTML + 可选 LibreOffice→PDF→PNG 胶片条；Windows 侧 COM 底图仍可选。
@@ -306,10 +306,11 @@
 - 2026-11-27 再切片：全景导入族 `panorama_workbook/import/import_graph/import_hooks/import_signals` 与 `url_list_capture` 迁入 `app/domains/capture/`（`url_list.py`）；`panorama_review_report` 实现迁入域内、原路径保留薄 shim，`python -m app.services.panorama_review_report` 运维命令不变。`api/v1/capture.py`、`api/v1/imports.py`、`capture/ingest.py`、`capture_jobs` 与 4 个用例更新（含 2 处模块式导入）。证据：`lint-imports` 两处配置各 3 kept，`pytest` 33 passed（全景导入/复核门/导入集成/URL 列表/采集/OpenAPI 快照），全量收集 628 条。
 - 2026-11-27 再切片：采集编排 `capture_jobs.py` → `app/domains/capture/jobs.py`、终态清理 `capture_job_retention.py` → `retention.py`、孤立对象 `orphan_objects.py`、维护命令 `orphan_maintenance.py` 同迁 `app/domains/capture/`；维护命令原路径保留 shim（`python -m app.services.orphan_maintenance` 与 Compose ops profile 不变，win32 selector 策略在 shim 内先设置）。采集令牌 `capture_tokens.py` → `app/platform/capture_tokens.py`（只依赖 core.identity 与模型）。`worker.py`、`main.py`、`api/v1/capture.py`、`api/v1/capture_tokens.py`、`core/capture_identity.py` 与 7 个用例更新。证据：`lint-imports` 两处配置各 3 kept，`pytest` 60 passed（采集任务/并发/保留/幂等/令牌/维护/统一采集/全景导入/OpenAPI 快照）；shim 干跑输出 `scanned=0 pruned_orphans=0 terminal_jobs_pruned=0`，全量收集 628 条。
 - 2026-11-27 再切片（收尾）：技能加载器 `skills.py` → `app/domains/skills/service.py`、金标评估 `skill_eval.py` → `app/domains/skills/eval.py`；`app/services/skill_eval.py` 保留 shim，`python -m app.services.skill_eval` 命令与既有调用不变。至此 `app/services` 只剩三个兼容入口（`orphan_maintenance`、`panorama_review_report`、`skill_eval`）与 `__init__.py`，业务实现全部位于 `app/platform`、`app/domains` 或 `app/api`。证据：`lint-imports` 两处配置各 3 kept，`pytest` 31 passed（技能评估/信号摄取/OpenAPI 快照），shim 运行 `--json` 输出报告，全量收集 628 条。
+- 2026-11-27 全量回归（BE-17 十五→二十六切片后）：`pytest -q` → **626 passed / 2 skipped**（309.9s，628 条，exit 0），无失败、无新增跳过；`lint-imports` 两处配置各 3 kept。
 - [ ] OpenAPI 路径快照：[tests/test_openapi_snapshot.py](tests/test_openapi_snapshot.py) + [tests/snapshots/openapi_paths.json](tests/snapshots/openapi_paths.json)；路由变更须同步快照（`OPENAPI_UPDATE_SNAPSHOT=1`）。
 - [ ] 迁移顺序建议：`core`/`db`/`models` → `platform`；采集/信号/需求等垂直切片按 WBS 迁入 `domains`；共享摄取逻辑取代 API 私有函数互调（对齐 BE-01）。
 - 验收：import-linter 通过；OpenAPI 快照测试通过；无新增 `platform`→`api`/`domains` 违规；领域迁移切片有对应 pytest 证据。
 
 ## 原任务编号迁移
 
-旧 T0/T1/T2 → BE-04；T3/T4 → BE-05；T5 → BE-13/16；T6 → BE-12。旧 P0-1 → OPS-01…08；P0-2/P0-3 → DOC-02、BE-13；P0-4 → BE-01、FE-02、CC-02。旧 B1–B6/W2/W4 → BE-01/02/12/16；旧 S1-3 → BE-12、FE-02。旧“§八 工作室生成”已有代码见 services/studio.py 与 tests/test_signal_studio.py；新增完整报告见 BE-15。这些别名仅供旧注释定位，不代表新任务已完成。
+旧 T0/T1/T2 → BE-04；T3/T4 → BE-05；T5 → BE-13/16；T6 → BE-12。旧 P0-1 → OPS-01…08；P0-2/P0-3 → DOC-02、BE-13；P0-4 → BE-01、FE-02、CC-02。旧 B1–B6/W2/W4 → BE-01/02/12/16；旧 S1-3 → BE-12、FE-02。旧“§八 工作室生成”已有代码见 domains/studio/service.py 与 tests/test_signal_studio.py；新增完整报告见 BE-15。这些别名仅供旧注释定位，不代表新任务已完成。
