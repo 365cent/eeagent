@@ -58,7 +58,7 @@
 ## OPS-05 备份、恢复与回退基础
 
 - [ ] P0 · 未开始 · 依赖 OPS-01/04、BE-16、DOC-02 恢复目标。
-- 2026-11-27 本地备份/恢复演练（Windows 便携 PostgreSQL，非生产）：`probe_migrations.py` 复跑通过（空库→head 0027、downgrade -3 再升级数据存活、0022 带数据升级存活）；另建 `eea_ops_drill`（迁移+`app.seed`+一行信号），`pg_dump -Fc` 出 75,943B（sha256 `a1e87940…`），`pg_restore` 到 `eea_ops_restore` 后校验 revision/信号数/词表数与 drill 行一致，随后删除两库与 dump。对象侧同机演练：`.pg/objects`（784 文件/1.47GB）`tar -czf` 得 785,301,982B（sha256 `a3aa7be1…`），解包后 784 个文件的 SHA-256 全量清单一致。未演练：Docker 卷内 tar、加密与异地保留、RPO/RTO；这些仍待 OPS-05 预生产。
+- 2026-11-27 本地备份/恢复演练（Windows 便携 PostgreSQL，非生产）：`probe_migrations.py` 复跑通过（空库→head 0027、downgrade -3 再升级数据存活、0022 带数据升级存活）；另建 `eea_ops_drill`（迁移+`app.seed`+一行信号），`pg_dump -Fc` 出 75,943B（sha256 `a1e87940…`），`pg_restore` 到 `eea_ops_restore` 后校验 revision/信号数/词表数与 drill 行一致，随后删除两库与 dump。对象侧同机演练：`.pg/objects`（784 文件/1.47GB）`tar -czf` 得 785,301,982B（sha256 `a3aa7be1…`），解包后 784 个文件的 SHA-256 全量清单一致。端到端恢复：在临时库+临时对象目录上起隔离 API 创建一条 HTML 信号（body 301B/snapshot 550B），`pg_dump -Fc`（76,865B，sha256 `57610652…`）并把对象目录复制到新库/新目录后，第二个隔离 API 返回的 body/snapshot 字节、对象键与 body_sha256 完全一致（signal `4ec76f35…`）。未演练：Docker 卷内 tar、加密与异地保留、RPO/RTO；这些仍待 OPS-05 预生产。
 - 来源：证据留存、版本历史；WBS 1.6.2、1.7.2。
 - 定义数据库、原始 HTML/文件、图块、报告、配置和所需秘密的备份边界；文件可追溯至数据库对象键。
 - 在受控写入窗口或一致性机制下备份数据库与对象目录，生成清单/校验和；备份加密保存在独立位置并限制读取权限。

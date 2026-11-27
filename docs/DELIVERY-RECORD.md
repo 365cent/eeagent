@@ -8,6 +8,7 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 - On the Windows portable PostgreSQL (not production): `probe_migrations.py` re-ran clean (fresh upgrade to 0027; downgrade -3 and upgrade with a row surviving; upgrade from 0022 with data surviving).
 - Created `eea_ops_drill` (migrate + `app.seed` + one signal), `pg_dump -Fc` produced 75,943 B (sha256 `a1e87940...`), restored it into `eea_ops_restore`, and asserted the Alembic revision, signal count, ref-code count and the drill row. Both databases and the dump were removed.
+- End-to-end restore: on scratch DB/object dirs, an isolated API created an HTML signal (body 301 B, snapshot 550 B); `pg_dump -Fc` (76,865 B, sha256 `57610652...`) plus a copy of the object directory into a new database/directory. A second isolated API returned byte-identical body/snapshot with the same object keys and `body_sha256`. All scratch databases and directories were removed.
 - Not exercised: the in-container Docker volume path (the same tar/extract was exercised outside Docker), encryption, off-site retention and RPO/RTO; those stay with OPS-05 in pre-production.
 - Object side: `tar -czf` of `backend/.pg/objects` (784 files, 1.47 GB) produced a 785,301,982 B archive (sha256 `a3aa7be1...`); extracting it reproduced all 784 file hashes. The archive was removed afterwards.
 
