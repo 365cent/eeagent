@@ -83,7 +83,7 @@ from app.services.llm_gateway import (
     resolve_chat_model,
     studio_generation_slot,
 )
-from app.services.objectstore import load_body, load_bytes, save_body, save_bytes
+from app.platform.objectstore import load_body, load_bytes, save_body, save_bytes
 from app.services.refcodes import codes, normalize as normalize_ref_code
 from app.services.llm_prompts import evidence_assistant_system
 from app.services.signal_studio_store import (

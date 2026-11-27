@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from app.services.objectstore import _object_path, load_bytes, save_bytes
+from app.platform.objectstore import _object_path, load_bytes, save_bytes
 
 pytestmark = pytest.mark.no_db
 
@@ -26,7 +26,7 @@ def test_concurrent_identical_saves_publish_one_file():
 
 
 def test_publish_accepts_a_concurrent_identical_winner(monkeypatch):
-    import app.services.objectstore as store
+    import app.platform.objectstore as store
 
     existing = save_bytes(DATA, folder="signals", ext="html")
 
@@ -42,7 +42,7 @@ def test_publish_accepts_a_concurrent_identical_winner(monkeypatch):
 
 
 def test_publish_retries_transient_permission_error(monkeypatch):
-    import app.services.objectstore as store
+    import app.platform.objectstore as store
 
     data = DATA + b"retry"
     calls = {"count": 0}

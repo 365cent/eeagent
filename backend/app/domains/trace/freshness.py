@@ -8,7 +8,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import DemandPoint, Document, Signal
-from app.services.objectstore import load_bytes
+from app.platform.objectstore import load_bytes
 
 
 def _aware(dt: datetime | None) -> datetime | None:

@@ -39,7 +39,7 @@ from app.db.base import get_db
 from app.models.models import CaptureClientClaim, CaptureJob, Document, PanoramaImportBatch, Signal
 from app.schemas.schemas import CaptureJobOut, CaptureResult
 from app.services.doc_ingest import normalize_document_mime
-from app.services.objectstore import save_bytes
+from app.platform.objectstore import save_bytes
 from app.services.refcodes import codes, normalize as normalize_ref_code
 from app.services.url_fetch import FetchError, fetch_url
 from app.domains.capture.ingest import ingest_capture_payload

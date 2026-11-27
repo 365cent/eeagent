@@ -37,7 +37,7 @@ from app.schemas.schemas import (
 from app.services.agent_rag import ensure_document_index
 from app.services.audit import record_correction
 from app.services.figure_recaption import recaption_figure, recaption_pending_figures
-from app.services.objectstore import load_body
+from app.platform.objectstore import load_body
 from app.services.tagging import suggest_tags, suggest_tech_tags, text_for_tagging
 from app.domains.evidence.document_pipeline import (
     doc_limits,
@@ -57,7 +57,7 @@ from starlette.concurrency import run_in_threadpool
 
 logger = logging.getLogger(__name__)
 
-from app.services.objectstore import load_bytes, sha256_bytes
+from app.platform.objectstore import load_bytes, sha256_bytes
 from app.services.pptx_deck_preview import (
     PptxDeckPreviewError,
     PptxDeckPreviewUnavailableError,

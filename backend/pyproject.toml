@@ -52,10 +52,10 @@ dev = [
 root_package = "app"
 
 [[tool.importlinter.contracts]]
-name = "Platform must not import domains or API"
+name = "Platform must not import domains, services or API"
 type = "forbidden"
 source_modules = ["app.platform"]
-forbidden_modules = ["app.domains", "app.api"]
+forbidden_modules = ["app.domains", "app.services", "app.api"]
 
 [[tool.importlinter.contracts]]
 name = "Services must not import API"

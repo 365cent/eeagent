@@ -18,7 +18,7 @@ from app.models.models import Document, Signal
 from app.schemas.schemas import DocumentRawOut
 from app.services.body_excerpt import lead_excerpt_from_markdown
 from app.services.doc_summary import build_document_body_summary, excerpt_from_canonical
-from app.services.objectstore import load_bytes, sha256_bytes
+from app.platform.objectstore import load_bytes, sha256_bytes
 
 
 def canonical_markdown(document: Document) -> str:

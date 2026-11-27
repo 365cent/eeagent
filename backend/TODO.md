@@ -18,7 +18,7 @@
 - 已交付幂等和持久任务首个实现切片；实现与检查证据见[交付记录](../docs/DELIVERY-RECORD.md#be-01--capture-idempotency-and-durable-worker-slice)。BE-01 验收仍未完成。
 - 摄取和结果查询迁入共享 evidence 领域；仍需验证完整的事务边界、失败恢复及各入口行为一致性。
 - 来源：Word §2.1、表A；REQ-SIG-01/02/07/10/11；WBS 1.3.2。
-- 入口：[capture.py](app/api/v1/capture.py)、[signals.py](app/api/v1/signals.py)、[documents.py](app/api/v1/documents.py)、[objectstore.py](app/services/objectstore.py)。
+- 入口：[capture.py](app/api/v1/capture.py)、[signals.py](app/api/v1/signals.py)、[documents.py](app/api/v1/documents.py)、[objectstore.py](app/platform/objectstore.py)。
 - 把路由之间互调私有函数改为共享摄取服务，统一空文件、MIME/扩展名、大小限制、渠道识别、来源 URL、文档哈希和异常处理。
 - 统一入口沿用 multipart 的 url/file；URL + HTML 文件合法。仅 URL 的公网抓取在生产默认禁用，返回终端采集指引；开发/明确内网抓取单独配置。
 - `0007` 为同步入口提供可选 `submission_id`；`0008` 为异步入口提供必需 `submission_id`。相同 ID 与相同请求重放既有任务/信号，不同请求复用 ID 返回 409。Capture 现在接受 `channel_code`，`.html/.htm/.xhtml` 扩展名均正确识别。
@@ -275,10 +275,11 @@
 
 ## BE-17 领域分层与依赖边界
 
-- [ ] P0 · 未开始 · 依赖无；与 BE-16 的契约检查互补，不阻塞既有路由交付。
+- [ ] P0 · 部分实现 · 依赖无；与 BE-16 的契约检查互补，不阻塞既有路由交付。
 - 目标：HTTP 仅编排；平台横切能力归 `app/platform`；业务能力逐步迁入 `app/domains/*`；削减 `app.services` → `app.api` 反向依赖。
 - [ ] 约定目录：`app/platform`（配置、DB、身份、对象存储）、`app/domains/<bounded-context>`（用例与实体）、`app/api`（路由与 DTO 映射）；保留 `app/schemas` 直至领域 DTO 收敛。
-- [ ] 保持 `uv run lint-imports` 的 platform→domains/API、services→API、domains→API 契约通过（见 [pyproject.toml](pyproject.toml) 与 [tests/contracts.ini](tests/contracts.ini)），继续消除业务写入和路由私有函数互调。
+- [ ] 保持 `uv run lint-imports` 的 platform→domains/services/API、services→API、domains→API 契约通过（见 [pyproject.toml](pyproject.toml) 与 [tests/contracts.ini](tests/contracts.ini)），继续消除业务写入和路由私有函数互调。
+- 2026-11-27 切片：对象存储从 `app/services/objectstore.py` 迁到 `app/platform/objectstore.py`（BE-17 目标中的“对象存储归 platform”），30 处导入同步更新；平台契约收紧为同时禁止导入 `app.services`。证据：`lint-imports`（两处配置各 3 kept）、`pytest` 47 passed（对象存储/文档/快照相关用例）。
 - [ ] OpenAPI 路径快照：[tests/test_openapi_snapshot.py](tests/test_openapi_snapshot.py) + [tests/snapshots/openapi_paths.json](tests/snapshots/openapi_paths.json)；路由变更须同步快照（`OPENAPI_UPDATE_SNAPSHOT=1`）。
 - [ ] 迁移顺序建议：`core`/`db`/`models` → `platform`；采集/信号/需求等垂直切片按 WBS 迁入 `domains`；共享摄取逻辑取代 API 私有函数互调（对齐 BE-01）。
 - 验收：import-linter 通过；OpenAPI 快照测试通过；无新增 `platform`→`api`/`domains` 违规；领域迁移切片有对应 pytest 证据。

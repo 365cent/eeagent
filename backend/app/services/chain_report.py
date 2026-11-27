@@ -21,7 +21,7 @@ from app.models.models import (
     VehicleFunction,
 )
 from app.services.chain_report_pdf import render_markdown_to_pdf_bytes
-from app.services.objectstore import save_bytes
+from app.platform.objectstore import save_bytes
 
 
 async def create_chain_report(

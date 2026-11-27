@@ -12,7 +12,7 @@ from app.domains.evidence.signal_record import create_signal_record
 from app.models.models import Signal
 from app.services.body_excerpt import resolve_signal_excerpt
 from app.services.html_snapshot import enrich_snapshot_figures, parse_html_snapshot
-from app.services.objectstore import save_bytes
+from app.platform.objectstore import save_bytes
 from app.services.refcodes import codes, normalize as normalize_ref_code
 
 

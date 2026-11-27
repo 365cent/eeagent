@@ -8,7 +8,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import CaptureJob, PanoramaImportUrl
-from app.services.objectstore import delete_object, object_mtime
+from app.platform.objectstore import delete_object, object_mtime
 
 TERMINAL_STATUSES = ("succeeded", "failed", "cancelled")
 

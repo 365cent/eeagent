@@ -17,7 +17,7 @@ from app.services import semantic_api
 from app.services.agent_citations import make_chunk_citation, make_figure_citation
 from app.services.agent_contract import AgentCitation
 from app.services.doc_structure import split_markdown_sections
-from app.services.objectstore import load_body
+from app.platform.objectstore import load_body
 
 logger = logging.getLogger(__name__)
 

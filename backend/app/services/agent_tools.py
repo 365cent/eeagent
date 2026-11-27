@@ -35,7 +35,7 @@ from app.services.agent_rag import _chunk_citation, search_document_chunks
 from app.services.body_excerpt import text_for_tagging
 from app.services.judgment import judge_signal_type, judge_stage, rank_theme_overlaps
 from app.services.llm import suggest_tags_with_llm
-from app.services.objectstore import load_body
+from app.platform.objectstore import load_body
 from app.services.tagging import suggest_tech_tags
 from app.services.tagging_guard import human_corrected_fields
 

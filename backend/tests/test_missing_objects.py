@@ -10,7 +10,7 @@ from sqlalchemy import select
 from app.db.base import SessionLocal
 from app.models.agent_models import DocumentFigure
 from app.models.models import Document
-from app.services.objectstore import delete_object
+from app.platform.objectstore import delete_object
 from tests.support import create_signal
 from tests.test_capture import ARCHIVE_HTML
 

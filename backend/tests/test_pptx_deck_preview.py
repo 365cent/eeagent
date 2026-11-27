@@ -12,7 +12,7 @@ from app.services.pptx_deck_preview import (
     inject_deck_preview_base_href,
     pptx_deck_preview_supported,
 )
-from app.services.objectstore import load_bytes
+from app.platform.objectstore import load_bytes
 
 
 def _mini_pptx() -> bytes:

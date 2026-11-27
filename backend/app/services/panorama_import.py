@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domains.capture.submission import _submission_fingerprint
 from app.models.models import CaptureJob, PanoramaImportBatch, PanoramaImportUrl, Signal
-from app.services.objectstore import save_bytes, sha256_bytes
+from app.platform.objectstore import save_bytes, sha256_bytes
 from app.services.panorama_workbook import PanoramaWorkbook, parse_panorama_workbook
 
 logger = logging.getLogger(__name__)

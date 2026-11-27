@@ -16,7 +16,7 @@ from app.domains.evidence.theme_match import match_theme
 from app.models.models import Signal, SignalTag
 from app.services.judgment import judge_stage
 from app.services.llm import suggest_tags_with_llm
-from app.services.objectstore import save_body
+from app.platform.objectstore import save_body
 from app.services.signal_duplicate import disambiguate_title_for_url
 from app.services.signal_sources import ensure_primary_source
 from app.services.skills import apply_skill_rules

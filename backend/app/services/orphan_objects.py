@@ -8,7 +8,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.models import StoredObjectOrphan
-from app.services.objectstore import load_bytes
+from app.platform.objectstore import load_bytes
 
 
 @dataclass(frozen=True)

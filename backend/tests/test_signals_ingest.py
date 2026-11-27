@@ -4,7 +4,7 @@ REQ-TAG-01/02/03/04/05, sig-local-collect-submit, CONV-CLOSED-VOCAB)."""
 
 import pytest
 
-from app.services.objectstore import load_body
+from app.platform.objectstore import load_body
 from tests.support import DEFAULT_SIGNAL, SUPPLY_CHAIN_BODY, create_signal
 
 pytestmark = pytest.mark.anyio

@@ -21,7 +21,7 @@ from app.models.models import Document
 from app.services.doc_ingest import Figure, caption_figure
 from app.services.doc_structure import split_markdown_sections
 from app.services.llm_gateway import resolve_vision_model
-from app.services.objectstore import load_bytes, save_bytes, sha256_bytes
+from app.platform.objectstore import load_bytes, save_bytes, sha256_bytes
 
 
 def _figure_patterns(figure_index: int) -> tuple[re.Pattern[str], re.Pattern[str], re.Pattern[str]]:

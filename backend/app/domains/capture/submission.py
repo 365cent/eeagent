@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from app.services.objectstore import sha256_bytes
+from app.platform.objectstore import sha256_bytes
 
 _HTML_SUFFIXES = {".html", ".htm", ".xhtml"}
 

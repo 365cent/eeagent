@@ -10,7 +10,7 @@ import psycopg
 import pytest
 
 from app.core.config import get_settings
-from app.services.objectstore import load_bytes
+from app.platform.objectstore import load_bytes
 
 pytestmark = pytest.mark.anyio
 

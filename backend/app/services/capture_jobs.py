@@ -24,7 +24,7 @@ from sqlalchemy import and_, or_, select, update
 from app.core.config import get_settings
 from app.db.base import SessionLocal
 from app.models.models import CaptureJob, PanoramaImportBatch, Signal
-from app.services.objectstore import load_bytes
+from app.platform.objectstore import load_bytes
 from app.services.url_fetch import FetchError, RetryableFetchError, fetch_url
 
 logger = logging.getLogger(__name__)
