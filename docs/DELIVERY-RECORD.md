@@ -70,6 +70,8 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence for the seventeenth move: `lint-imports` 3 kept against both configs; `pytest tests/test_chain_reports.py tests/test_openapi_snapshot.py` → 6 passed (16.4 s); collection is 628 tests.
 - Eighteenth move: `demand_validation.py` → `app/domains/demand/validation.py` and `function_validation.py` → `app/domains/landing/validation.py`. Both needed only the models and the standard library; five API modules plus `panorama_import_graph` updated their imports, and both contexts already existed.
 - Evidence for the eighteenth move: `lint-imports` 3 kept against both configs; `pytest tests/test_demands.py tests/test_landing_points.py tests/test_functions.py tests/test_panorama_import.py tests/test_openapi_snapshot.py` → 79 passed (63.1 s); collection is 628 tests.
+- Nineteenth move: `theme_naming.py` → `app/domains/theme/naming.py`, `theme_clustering.py` → `app/domains/theme/clustering.py` and `tag_clustering.py` → `app/domains/tagging/clustering.py`. The three only used the models, evidence helpers, vocab and the semantic LLM layer; `api/v1/themes.py` and three test modules (including two monkeypatch targets) updated.
+- Evidence for the nineteenth move: `lint-imports` 3 kept against both configs; `pytest tests/test_themes.py tests/test_theme_naming.py tests/test_tag_clustering.py tests/test_openapi_snapshot.py` → 31 passed (22.1 s); collection is 628 tests.
 - Remaining BE-17 work: `app.services` holds the agent, capture, demand, strategy and reporting orchestration modules, plus `studio`/`skills`/`theme_*`; each needs its own slice.
 
 ### Full backend regression after the BE-17 moves (BE-16 evidence)

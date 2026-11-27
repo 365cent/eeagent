@@ -195,7 +195,7 @@ async def test_theme_name_suggestion_uses_tag_name_when_llm_is_down(client, monk
     async def _no_llm(_brief: str):
         return None
 
-    monkeypatch.setattr("app.services.theme_naming.suggest_theme_name_with_llm", _no_llm)
+    monkeypatch.setattr("app.domains.theme.naming.suggest_theme_name_with_llm", _no_llm)
     signal = await create_signal(
         client,
         title="低压网络多来源行业观察样本",
@@ -225,7 +225,7 @@ async def test_theme_name_suggestion_keeps_model_name(client, monkeypatch):
     async def _llm(_brief: str):
         return _Name()
 
-    monkeypatch.setattr("app.services.theme_naming.suggest_theme_name_with_llm", _llm)
+    monkeypatch.setattr("app.domains.theme.naming.suggest_theme_name_with_llm", _llm)
     signal = await create_signal(
         client,
         title="低压网络多来源行业观察样本二",

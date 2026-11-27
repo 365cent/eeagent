@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.services.theme_naming import fallback_working_name, majority_stage
+from app.domains.theme.naming import fallback_working_name, majority_stage
 
 
 @pytest.mark.no_db

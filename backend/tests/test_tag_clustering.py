@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.services.tag_clustering import TagSignal, cluster_tag_signals
+from app.domains.tagging.clustering import TagSignal, cluster_tag_signals
 from tests.support import assign_signal_theme, create_signal, create_theme, set_signal_tags
 
 
@@ -227,7 +227,7 @@ async def test_cluster_report_uses_live_unassigned_tags(client):
 @pytest.mark.no_db
 def test_document_urls_count_one_source_per_document():
     """`eea://document/<id>` must not collapse every upload into one source."""
-    from app.services.tag_clustering import cluster_source_host, document_source_key
+    from app.domains.tagging.clustering import cluster_source_host, document_source_key
 
     a = document_source_key("eea://document/9a20400c-4e07-4fc4-9592-787119bde1f1")
     b = document_source_key("eea://document/6a4ada10-600c-4c04-a7a1-6a1eb182969e")
