@@ -14,7 +14,7 @@ from app.schemas.schemas import (
     StrategyFunnelOut,
     StrategyFunnelPatch,
 )
-from app.services.strategy_funnel import finalize_funnel, get_funnel_response, patch_funnel
+from app.domains.strategy.funnel import finalize_funnel, get_funnel_response, patch_funnel
 
 router = APIRouter(
     prefix="/strategy",

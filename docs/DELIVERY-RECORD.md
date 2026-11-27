@@ -74,6 +74,8 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence for the nineteenth move: `lint-imports` 3 kept against both configs; `pytest tests/test_themes.py tests/test_theme_naming.py tests/test_tag_clustering.py tests/test_openapi_snapshot.py` → 31 passed (22.1 s); collection is 628 tests.
 - Twentieth move: `studio.py` → `app/domains/studio/service.py` and `signal_studio_store.py` → `app/domains/studio/store.py`. The pair only used the schemas, `platform.llm_prompts` and the models; `api/v1/signals.py` was the only caller.
 - Evidence for the twentieth move: `lint-imports` 3 kept against both configs; `pytest tests/test_signal_studio.py tests/test_openapi_snapshot.py tests/test_signals_ingest.py` → 33 passed (29.3 s); collection is 628 tests.
+- Twenty-first move: `strategy_funnel.py` → the new `app/domains/strategy/funnel.py`. It only used the models, `platform.audit`, the schemas and `core.identity`; `api/v1/strategy.py` and `api/v1/overview.py` updated.
+- Evidence for the twenty-first move: `lint-imports` 3 kept against both configs; `pytest tests/test_strategy.py tests/test_trace_audit_overview.py tests/test_openapi_snapshot.py` → 42 passed (41.0 s); collection is 628 tests.
 - Remaining BE-17 work: `app.services` holds the agent, capture, demand, strategy and reporting orchestration modules, plus `studio`/`skills`/`theme_*`; each needs its own slice.
 
 ### Full backend regression after the BE-17 moves (BE-16 evidence)

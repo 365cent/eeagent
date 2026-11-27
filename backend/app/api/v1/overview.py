@@ -25,7 +25,7 @@ from app.schemas.schemas import (
     OverviewStrategyFunnelCounts,
     OverviewWeeklyNew,
 )
-from app.services.strategy_funnel import _current_step
+from app.domains.strategy.funnel import _current_step
 
 router = APIRouter(tags=["overview"])
 
