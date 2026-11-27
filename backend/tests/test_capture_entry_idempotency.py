@@ -16,7 +16,7 @@ from sqlalchemy import func, select
 
 from app.db.base import SessionLocal
 from app.models.models import Signal
-from app.services.capture_jobs import claim_next_job, make_worker_id, run_claimed_job
+from app.domains.capture.jobs import claim_next_job, make_worker_id, run_claimed_job
 from tests.test_capture import ARCHIVE_HTML
 
 pytestmark = pytest.mark.anyio

@@ -11,7 +11,7 @@ from sqlalchemy import select
 from app.core.config import get_settings
 from app.db.base import SessionLocal
 from app.models.models import CaptureJob, PanoramaImportBatch, PanoramaImportUrl
-from app.services.capture_job_retention import prune_terminal_capture_jobs
+from app.domains.capture.retention import prune_terminal_capture_jobs
 from app.platform.objectstore import load_bytes, put_object
 
 pytestmark = pytest.mark.anyio

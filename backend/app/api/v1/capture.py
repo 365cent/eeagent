@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse
 
 from app.core.capture_identity import assert_capture_job_access, get_capture_identity
 from app.core.identity import OperatorIdentity
-from app.services.orphan_objects import record_orphan_object, resolve_orphan_object
+from app.domains.capture.orphan_objects import record_orphan_object, resolve_orphan_object
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession

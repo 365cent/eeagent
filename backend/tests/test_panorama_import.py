@@ -145,7 +145,7 @@ async def test_client_submit_queues_worker_without_server_fetch(client):
 
     import asyncio
 
-    from app.services.capture_jobs import run_claimed_job, make_worker_id
+    from app.domains.capture.jobs import run_claimed_job, make_worker_id
 
     await asyncio.sleep(0.05)
     worker = make_worker_id()
@@ -222,7 +222,7 @@ async def test_reclaim_stale_client_captures(client):
 
     from app.db.base import SessionLocal
     from app.models.models import CaptureJob
-    from app.services.capture_jobs import reclaim_stale_client_captures
+    from app.domains.capture.jobs import reclaim_stale_client_captures
     from sqlalchemy import select
 
     unique = __import__("uuid").uuid4().hex
@@ -251,7 +251,7 @@ async def test_batch_closes_when_last_url_fails_after_a_success(client):
 
     from app.db.base import SessionLocal
     from app.models.models import CaptureJob
-    from app.services.capture_jobs import make_worker_id, run_claimed_job
+    from app.domains.capture.jobs import make_worker_id, run_claimed_job
 
     unique = uuid.uuid4().hex
     ok_url = f"https://example.com/panorama-ok-{unique}"
@@ -309,7 +309,7 @@ async def test_waiting_client_jobs_expire_when_batch_is_idle(client):
 
     from app.db.base import SessionLocal
     from app.models.models import PanoramaImportBatch
-    from app.services.capture_jobs import expire_waiting_client_jobs
+    from app.domains.capture.jobs import expire_waiting_client_jobs
 
     unique = uuid.uuid4().hex
     source_url = f"https://example.com/panorama-timeout-{unique}"
@@ -341,7 +341,7 @@ async def test_waiting_client_jobs_survive_a_recent_batch(client):
 
     from app.db.base import SessionLocal
     from app.models.models import PanoramaImportBatch
-    from app.services.capture_jobs import expire_waiting_client_jobs
+    from app.domains.capture.jobs import expire_waiting_client_jobs
 
     unique = uuid.uuid4().hex
     source_url = f"https://example.com/panorama-fresh-{unique}"

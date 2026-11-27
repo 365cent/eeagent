@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.services.capture_tokens import generate_capture_token, hash_capture_token
+from app.platform.capture_tokens import generate_capture_token, hash_capture_token
 
 pytestmark = pytest.mark.anyio
 

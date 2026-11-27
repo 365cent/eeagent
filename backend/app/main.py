@@ -60,7 +60,7 @@ def create_app() -> FastAPI:
                 "no",
             )
             if embed and os.environ.get("EEA_DEV_API_ONLY", "").lower() not in ("1", "true", "yes"):
-                from app.services.capture_jobs import worker_loop
+                from app.domains.capture.jobs import worker_loop
 
                 worker_task = asyncio.create_task(worker_loop(worker_stop), name="eea-capture-worker")
             yield

@@ -15,7 +15,7 @@ bootstrap_environment()
 if sys.platform == "win32":
     asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
 
-from app.services.capture_jobs import worker_loop
+from app.domains.capture.jobs import worker_loop
 from app.db.base import engine
 
 

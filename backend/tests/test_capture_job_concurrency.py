@@ -11,7 +11,7 @@ from sqlalchemy import func, select
 
 from app.db.base import SessionLocal
 from app.models.models import CaptureJob, Signal
-from app.services.capture_jobs import (
+from app.domains.capture.jobs import (
     _mark_failed,
     _mark_succeeded,
     claim_next_job,

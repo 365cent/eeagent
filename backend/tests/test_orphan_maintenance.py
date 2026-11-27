@@ -8,8 +8,8 @@ from sqlalchemy import select
 
 from app.db.base import SessionLocal
 from app.models.models import CaptureJob, MaintenanceRun, StoredObjectOrphan
-from app.services.orphan_maintenance import _run
-from app.services.orphan_objects import prune_resolved_orphans
+from app.domains.capture.orphan_maintenance import _run
+from app.domains.capture.orphan_objects import prune_resolved_orphans
 
 pytestmark = pytest.mark.anyio
 

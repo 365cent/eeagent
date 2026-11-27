@@ -7,7 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.base import get_db
 from app.core.config import get_settings
 from app.core.identity import OperatorIdentity, get_operator_identity
-from app.services.capture_tokens import resolve_capture_token
+from app.platform.capture_tokens import resolve_capture_token
 
 
 def resolve_capture_bearer(token: str) -> OperatorIdentity | None:

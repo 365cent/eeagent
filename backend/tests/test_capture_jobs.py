@@ -7,7 +7,7 @@ import uuid
 
 import pytest
 
-from app.services.capture_jobs import claim_next_job, make_worker_id, run_claimed_job
+from app.domains.capture.jobs import claim_next_job, make_worker_id, run_claimed_job
 from tests.test_capture import ARCHIVE_HTML
 
 pytestmark = pytest.mark.anyio
@@ -191,7 +191,7 @@ async def test_cancel_running_job_creates_no_signal(client, monkeypatch):
 
     hold = asyncio.Event()
 
-    from app.services import capture_jobs as cj
+    from app.domains.capture import jobs as cj
 
     real_set_stage = cj._set_stage
 
