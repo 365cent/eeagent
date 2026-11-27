@@ -11,7 +11,7 @@ async def test_assistant_requires_llm_config(client, monkeypatch):
     sig = await create_signal(client, body_text="48V 区域控制器与 eFuse 配电架构。")
 
     async def _boom(*_a, **_k):
-        from app.services.llm_gateway import LLMNotConfiguredError
+        from app.platform.llm_gateway import LLMNotConfiguredError
 
         raise LLMNotConfiguredError()
 

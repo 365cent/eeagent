@@ -7,7 +7,7 @@ import types
 import httpx
 import pytest
 
-import app.services.llm_gateway as gw
+import app.platform.llm_gateway as gw
 from app.core.config import get_settings
 from app.platform import semantic_api
 
@@ -401,7 +401,7 @@ async def test_ranking_change_is_logged(monkeypatch, caplog):
     await gw.build_chat_model_chain()
     await model_speed.record_success("beta-model", output_tokens=50, seconds=1.0)
 
-    with caplog.at_level(logging.INFO, logger="app.services.llm_gateway"):
+    with caplog.at_level(logging.INFO, logger="app.platform.llm_gateway"):
         sequence = await gw.build_chat_model_chain()
 
     assert sequence[0] == "beta-model"

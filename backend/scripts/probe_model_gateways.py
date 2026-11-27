@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from app.core.config import get_settings
-from app.services import llm_gateway
+from app.platform import llm_gateway
 from app.platform import semantic_api
 
 

@@ -111,7 +111,7 @@ async def test_demand_assistant_messages_survives_bot_mapping(client, monkeypatc
 def test_upstream_from_pydantic_ai_maps_554():
     from pydantic_ai.exceptions import ModelHTTPError, ModelServerError
 
-    from app.services.llm_gateway import upstream_from_pydantic_ai
+    from app.platform.llm_gateway import upstream_from_pydantic_ai
 
     err = ModelHTTPError.for_category(ModelServerError, status_code=554, model_name="auto", body="edge busy")
     mapped = upstream_from_pydantic_ai(err)
@@ -120,7 +120,7 @@ def test_upstream_from_pydantic_ai_maps_554():
 
 
 async def test_demand_assistant_returns_502_on_llm_upstream(client, monkeypatch):
-    from app.services.llm_gateway import LLMUpstreamError
+    from app.platform.llm_gateway import LLMUpstreamError
 
     theme = await create_theme(client)
     sig_a = await create_signal(

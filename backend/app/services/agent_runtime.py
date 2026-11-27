@@ -25,7 +25,7 @@ from app.services.agent_workflow import (
     run_agent_turn,
     EventSink,
 )
-from app.services.llm_gateway import LLMNotConfiguredError, LLMNoModelError, LLMUpstreamError
+from app.platform.llm_gateway import LLMNotConfiguredError, LLMNoModelError, LLMUpstreamError
 
 
 # Replay on reconnect only needs durable events; see `execute_user_message`.

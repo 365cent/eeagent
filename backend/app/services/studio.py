@@ -25,7 +25,7 @@ from app.schemas.schemas import (
     StudioMindmapNode,
     StudioMindmapPayload,
 )
-from app.services.llm_prompts import studio_messages
+from app.platform.llm_prompts import studio_messages
 
 #: The quote of an audio segment must appear verbatim in the snapshot body;
 #: compare on whitespace-collapsed text so line wraps don't cause false misses.

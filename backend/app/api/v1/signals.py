@@ -75,7 +75,7 @@ from app.domains.evidence.signal_sources import add_supplementary_url, list_sour
 from app.services.signal_recaption import recaption_signal_article
 from app.domains.evidence.tagging_guard import assert_expected_signal_revision, human_corrected_fields
 from app.services.llm import suggest_tags_with_llm
-from app.services.llm_gateway import (
+from app.platform.llm_gateway import (
     LLMNoModelError,
     LLMNotConfiguredError,
     LLMUpstreamError,
@@ -85,7 +85,7 @@ from app.services.llm_gateway import (
 )
 from app.platform.objectstore import load_body, load_bytes, save_body, save_bytes
 from app.domains.vocab.refcodes import codes, normalize as normalize_ref_code
-from app.services.llm_prompts import evidence_assistant_system
+from app.platform.llm_prompts import evidence_assistant_system
 from app.services.signal_studio_store import (
     get_studio_artifact,
     list_studio_artifacts,
@@ -1047,7 +1047,7 @@ async def tag_suggestions(
         suggest_tech_tags(s.title, tag_body),
         suggest_tags_with_llm(s.title, llm_body[:6000]),
     )
-    from app.services import llm_gateway
+    from app.platform import llm_gateway
     from app.platform import semantic_api
 
     stage = (

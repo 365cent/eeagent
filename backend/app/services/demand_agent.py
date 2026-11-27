@@ -21,7 +21,7 @@ from app.models.models import Signal
 from app.domains.evidence.signal_host import signal_host
 from app.services.pydantic_agent import build_model
 from app.core.config import get_settings
-from app.services.llm_gateway import (
+from app.platform.llm_gateway import (
     LLMNoModelError,
     LLMNotConfiguredError,
     LLMUpstreamError,
@@ -29,7 +29,7 @@ from app.services.llm_gateway import (
     resolve_chat_model,
     upstream_from_pydantic_ai,
 )
-from app.services.llm_usage import (
+from app.platform.llm_usage import (
     http_status_of,
     log_llm_call,
     usage_from_agent_result,
@@ -140,7 +140,7 @@ async def get_demand_agent() -> Agent[DemandAgentDeps, str]:
     @agent.instructions
     async def demand_instructions(ctx: RunContext[DemandAgentDeps]) -> str:
         catalog = bots_context_markdown(ctx.deps.bots)
-        from app.services.llm_prompts import DEMAND_COORDINATOR_RULES
+        from app.platform.llm_prompts import DEMAND_COORDINATOR_RULES
 
         return (
             f"{DEMAND_COORDINATOR_RULES}\n"

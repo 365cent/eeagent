@@ -1,7 +1,7 @@
 """Caption cache: keyed on image bytes, requested model and prompt revision."""
 
 from app.services.caption_cache import load_caption, store_caption
-from app.services.llm_prompts import PROMPT_REVISION
+from app.platform.llm_prompts import PROMPT_REVISION
 
 
 def test_roundtrip_returns_the_stored_caption(tmp_path):

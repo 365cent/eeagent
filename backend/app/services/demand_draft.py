@@ -13,7 +13,7 @@ from sqlalchemy.orm import selectinload
 from app.models.models import Signal, SignalTag, TechTheme
 from app.domains.evidence.signal_host import signal_host
 from app.services.demand_agent import DemandAgentDeps, run_demand_agent_chat, signal_to_bot
-from app.services.llm_gateway import (
+from app.platform.llm_gateway import (
     LLMNoModelError,
     LLMNotConfiguredError,
     LLMUpstreamError,
@@ -141,7 +141,7 @@ async def propose_demand_draft(
     if not use_llm or not hint:
         return base
 
-    from app.services.llm_prompts import DEMAND_DRAFT_SYSTEM, demand_draft_user_message
+    from app.platform.llm_prompts import DEMAND_DRAFT_SYSTEM, demand_draft_user_message
 
     catalog = "\n".join(
         f"- {s.id}: {s.title} ({signal_host(s)})"

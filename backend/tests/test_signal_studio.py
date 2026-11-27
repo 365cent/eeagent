@@ -163,7 +163,7 @@ async def test_studio_requires_llm_config(client, monkeypatch):
     sig = await _signal(client)
 
     async def boom(*_a, **_k):
-        from app.services.llm_gateway import LLMNotConfiguredError
+        from app.platform.llm_gateway import LLMNotConfiguredError
 
         raise LLMNotConfiguredError()
 

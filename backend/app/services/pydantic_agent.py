@@ -16,14 +16,14 @@ from pydantic_ai.models.openai import OpenAIChatModel
 from app.core.config import get_settings
 from app.platform.llm import build_chat_model
 from app.platform.hedged_model import HedgedChatModel
-from app.services.llm_gateway import (
+from app.platform.llm_gateway import (
     LLMNotConfiguredError,
     build_chat_model_chain,
     configured_chat_model,
     remember_chat_model,
 )
 
-from app.services.llm_prompts import LEGACY_CHAT_SYSTEM as DEFAULT_SYSTEM_PROMPT
+from app.platform.llm_prompts import LEGACY_CHAT_SYSTEM as DEFAULT_SYSTEM_PROMPT
 
 
 def build_model(

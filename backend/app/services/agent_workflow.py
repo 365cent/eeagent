@@ -38,8 +38,8 @@ from app.services.agent_tools import (
     suggest_theme_membership_tool,
 )
 from app.platform import model_speed
-from app.services.llm_gateway import LLMNotConfiguredError
-from app.services.llm_usage import (
+from app.platform.llm_gateway import LLMNotConfiguredError
+from app.platform.llm_usage import (
     http_status_of,
     log_llm_call,
     usage_from_agent_result,

@@ -5,7 +5,7 @@ from fastapi import APIRouter
 from app.core.config import get_settings
 from app.schemas.schemas import LlmSpeedOut, LlmStatusOut
 from app.platform import model_speed
-from app.services.llm_gateway import (
+from app.platform.llm_gateway import (
     configured_chat_model,
     last_attempt_budget,
     llm_configured,

@@ -12,7 +12,7 @@ from pydantic_ai import DeferredToolRequests
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.identity import OperatorIdentity
-from app.services.llm_prompts import DURABLE_AGENT_SYSTEM_INSTRUCTIONS
+from app.platform.llm_prompts import DURABLE_AGENT_SYSTEM_INSTRUCTIONS
 
 CitationKind = Literal["signal", "document_chunk", "document_figure"]
 

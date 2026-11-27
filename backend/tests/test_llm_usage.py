@@ -5,8 +5,8 @@ from contextlib import asynccontextmanager
 import httpx
 import pytest
 
-import app.services.llm_gateway as gw
-from app.services.llm_usage import usage_from_agent_result, usage_from_chat_payload
+import app.platform.llm_gateway as gw
+from app.platform.llm_usage import usage_from_agent_result, usage_from_chat_payload
 from tests.test_llm_gateway_models import _settings
 
 pytestmark = [pytest.mark.anyio, pytest.mark.no_db]

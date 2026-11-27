@@ -17,7 +17,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.services.llm_prompts import PROMPT_REVISION
+from app.platform.llm_prompts import PROMPT_REVISION
 
 logger = logging.getLogger("app.llm.usage")
 

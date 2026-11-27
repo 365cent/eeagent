@@ -193,7 +193,7 @@ async def test_sse_replay_order(client, monkeypatch):
 
 async def test_gateway_unconfigured_returns_failed_turn(client, monkeypatch):
     async def boom(**kwargs):
-        from app.services.llm_gateway import LLMNotConfiguredError
+        from app.platform.llm_gateway import LLMNotConfiguredError
 
         raise LLMNotConfiguredError("unset")
 

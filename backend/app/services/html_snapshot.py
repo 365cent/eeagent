@@ -535,7 +535,7 @@ def parse_html_snapshot(html: bytes | str, *, page_url: str | None = None) -> Ht
 async def _caption_snapshot_figures(figures: list) -> None:
     from app.core.config import get_settings
     from app.services.doc_ingest import caption_figure
-    from app.services.llm_gateway import resolve_vision_model
+    from app.platform.llm_gateway import resolve_vision_model
 
     settings = get_settings()
     try:

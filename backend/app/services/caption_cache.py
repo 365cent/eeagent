@@ -15,7 +15,7 @@ from pathlib import Path
 from pydantic import BaseModel, Field
 
 from app.core.config import get_settings
-from app.services.llm_prompts import PROMPT_REVISION
+from app.platform.llm_prompts import PROMPT_REVISION
 
 
 class CachedCaption(BaseModel):

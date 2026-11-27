@@ -30,14 +30,14 @@ from pydantic_ai.models.openai import OpenAIChatModel
 
 from app.core.config import get_settings
 from app.platform.llm import gateway_openai_provider
-from app.services.llm_gateway import configured_chat_model, resolve_chat_model
-from app.services.llm_prompts import (
+from app.platform.llm_gateway import configured_chat_model, resolve_chat_model
+from app.platform.llm_prompts import (
     CANDIDATE_TAG_RULES,
     EXCERPT_RULES,
     TAG_SUGGESTION_RULES,
     THEME_NAME_RULES,
 )
-from app.services.llm_usage import (
+from app.platform.llm_usage import (
     http_status_of,
     log_llm_call,
     usage_from_agent_result,

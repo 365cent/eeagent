@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from app.platform.http import open_async_http_client
-from app.services import llm_gateway
+from app.platform import llm_gateway
 
 PROMPT = "用一句话说明汽车电子电气架构（EEA）是什么。"
 SEMAPHORE = asyncio.Semaphore(2)
