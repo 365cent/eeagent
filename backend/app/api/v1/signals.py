@@ -86,12 +86,12 @@ from app.platform.llm_gateway import (
 from app.platform.objectstore import load_body, load_bytes, save_body, save_bytes
 from app.domains.vocab.refcodes import codes, normalize as normalize_ref_code
 from app.platform.llm_prompts import evidence_assistant_system
-from app.services.signal_studio_store import (
+from app.domains.studio.store import (
     get_studio_artifact,
     list_studio_artifacts,
     upsert_studio_artifact,
 )
-from app.services.studio import (
+from app.domains.studio.service import (
     StudioParseError,
     build_messages as build_studio_messages,
     parse_studio_payload,
