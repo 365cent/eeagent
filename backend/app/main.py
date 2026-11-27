@@ -52,6 +52,8 @@ def create_app() -> FastAPI:
     async def lifespan(_app: FastAPI):
         worker_stop = asyncio.Event()
         worker_task: asyncio.Task | None = None
+        cluster_stop = asyncio.Event()
+        cluster_task: asyncio.Task | None = None
         try:
             await asyncio.to_thread(start_launchdarkly, settings.launchdarkly_sdk_key)
             embed = settings.app_env != "production" and os.environ.get("EEA_CAPTURE_EMBEDDED", "1").lower() not in (
@@ -63,6 +65,12 @@ def create_app() -> FastAPI:
                 from app.domains.capture.jobs import worker_loop
 
                 worker_task = asyncio.create_task(worker_loop(worker_stop), name="eea-capture-worker")
+            # Queued clustering runs are computed by `python -m app.services.cluster_job`;
+            # this sweeper starts that job for runs any process queued (API, capture
+            # worker, CLI import) so a new signal yields a new graph unattended.
+            from app.services.cluster_runner import cluster_sweeper
+
+            cluster_task = asyncio.create_task(cluster_sweeper(cluster_stop), name="eea-cluster-sweeper")
             yield
         finally:
             try:
@@ -71,6 +79,13 @@ def create_app() -> FastAPI:
                     worker_task.cancel()
                     try:
                         await worker_task
+                    except asyncio.CancelledError:
+                        pass
+                if cluster_task is not None:
+                    cluster_stop.set()
+                    cluster_task.cancel()
+                    try:
+                        await cluster_task
                     except asyncio.CancelledError:
                         pass
             finally:

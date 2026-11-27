@@ -361,6 +361,25 @@ export type ThemeClusterReport = {
   clusters: ThemeClusterProposal[]
   neighbors: Record<string, SignalNeighborOut[]>
   tag_map: ThemeClusterMap | null
+  /** When the served snapshot was computed; null for the inline bootstrap. */
+  computed_at?: string | null
+  /** Run behind the snapshot, so the page can poll for the next one. */
+  run_id?: string | null
+  /** A background clustering pass is queued/running. */
+  pending?: boolean
+}
+
+/** Status of one background clustering pass. */
+export type ThemeClusterRunOut = {
+  run_id: string | null
+  status: 'idle' | 'queued' | 'running' | 'ready' | 'failed'
+  trigger: string | null
+  signal_count: number | null
+  cluster_count: number | null
+  error: string | null
+  requested_at: string | null
+  started_at: string | null
+  finished_at: string | null
 }
 
 export type AssistantChatTurn = {

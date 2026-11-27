@@ -75,6 +75,7 @@ _TRUNCATE_SQL = text(
     "eea_agent_session, eea_document_chunk, eea_document_figure, "
     "eea_maintenance_run, eea_chain_report, eea_embedding_cache, eea_signal_source, "
     "eea_stored_object_orphan, "
+    "eea_theme_cluster_run, "
     "eea_panorama_import_url, eea_panorama_import_batch, "
     "eea_access_log, eea_capture_client_claim, eea_capture_job, eea_document, eea_signal_tag, eea_signal, "
     "eea_correction_audit, "

@@ -225,6 +225,25 @@ class ThemeClusterReport(BaseModel):
     clusters: list[ThemeClusterProposal]
     neighbors: dict[str, list[SignalNeighborOut]]
     tag_map: ThemeClusterMap | None = None
+    # Filled from the stored snapshot so the page can show how fresh the graph
+    # is and whether a background pass is still running.
+    computed_at: datetime | None = None
+    run_id: uuid.UUID | None = None
+    pending: bool = False
+
+
+class ThemeClusterRunOut(BaseModel):
+    """Status of a background clustering pass (queued/running/ready/failed)."""
+
+    run_id: uuid.UUID | None = None
+    status: str
+    trigger: str | None = None
+    signal_count: int | None = None
+    cluster_count: int | None = None
+    error: str | None = None
+    requested_at: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
 
 
 class SignalCreate(RefCodeValidated):

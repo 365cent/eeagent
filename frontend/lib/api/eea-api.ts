@@ -55,6 +55,7 @@ import type {
   ThemeAggregatePreview,
   ThemeAssignmentPayload,
   ThemeClusterReport,
+  ThemeClusterRunOut,
   ThemeCreatePayload,
   ThemeDetail,
   ThemeNameSuggestion,
@@ -137,6 +138,16 @@ export function fetchThemes() {
 
 export function fetchThemeClusterReport() {
   return eeaFetch<ThemeClusterReport>('/themes/cluster-report')
+}
+
+/** Queue a fresh clustering pass; the Python job computes it in the background. */
+export function recomputeThemeClusterReport() {
+  return eeaFetch<ThemeClusterRunOut>('/themes/cluster-report/recompute', { method: 'POST' })
+}
+
+/** Status of the newest clustering pass (the page polls it after a recompute). */
+export function fetchThemeClusterRunStatus() {
+  return eeaFetch<ThemeClusterRunOut>('/themes/cluster-report/status')
 }
 
 export function suggestThemeName(signalIds: string[]) {

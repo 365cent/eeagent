@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
+from app.services.cluster_runner import enqueue_cluster_run
 from app.domains.evidence.event_dates import event_date_from_published
 from app.domains.evidence.theme_match import match_theme
 from app.models.models import Signal, SignalTag
@@ -235,5 +236,9 @@ async def create_signal_record(
         basis["conflicts"] = list(skill_decision.conflicts) + extra_conflicts
     sig.classification_basis = basis
     await ensure_primary_source(db, sig)
+    # A new signal invalidates the clustering graph. Queue one pass here (the
+    # enqueue is deduplicated) so the page picks up the new graph on its own
+    # instead of waiting for someone to press 重放聚类.
+    await enqueue_cluster_run(db, trigger="signal")
     await db.commit()
     return sig

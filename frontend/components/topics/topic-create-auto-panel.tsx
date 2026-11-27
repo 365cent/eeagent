@@ -58,6 +58,8 @@ export function TopicCreateAutoPanel({ onNavigate }: { onNavigate: NavigateFn })
     clusterReport,
     clusterReportLoading,
     clusterReportError,
+    recomputeClustering,
+    recomputeBusy,
     invalidateAll,
   } = useTopicClusterCandidates()
   const [namingCluster, setNamingCluster] = useState<{ cluster: TagCluster; name: string } | null>(null)
@@ -114,6 +116,16 @@ export function TopicCreateAutoPanel({ onNavigate }: { onNavigate: NavigateFn })
       window.clearTimeout(formedAt)
     }
   }, [stageSignature, stageClusters.length])
+
+  const replayClustering = async () => {
+    try {
+      await recomputeClustering()
+      setReplayToken((value) => value + 1)
+      messageApi.success('聚类已更新')
+    } catch (err) {
+      messageApi.error(eeaErrorMessage(err, '聚类更新失败'))
+    }
+  }
 
   const assignToTheme = async (cluster: TagCluster, themeId: string) => {
     const creation = topicCreationGate(cluster)
@@ -238,6 +250,11 @@ export function TopicCreateAutoPanel({ onNavigate }: { onNavigate: NavigateFn })
       <Paragraph type="secondary">
         当前留存信号按<strong>库内技术方向标签</strong>做成向量。标签先散开，再按余弦距离收成若干主题，确认后才写入。
       </Paragraph>
+      {clusterReport?.pending ? (
+        <Text type="secondary" className="topic-cluster-pending">
+          新信号已入库，聚类在后台更新…
+        </Text>
+      ) : null}
 
       <div className="topic-forge-metrics" aria-busy={clusterReportLoading}>
         <div>
@@ -267,8 +284,14 @@ export function TopicCreateAutoPanel({ onNavigate }: { onNavigate: NavigateFn })
         replayToken={replayToken}
         actions={
           <>
-            <Button size="small" icon={<ReloadOutlined />} onClick={() => setReplayToken((value) => value + 1)}>
-              重放聚类
+            <Button
+              size="small"
+              icon={<ReloadOutlined />}
+              loading={recomputeBusy}
+              disabled={recomputeBusy}
+              onClick={() => void replayClustering()}
+            >
+              {recomputeBusy ? '聚类更新中…' : '重放聚类'}
             </Button>
             <Button
               size="small"

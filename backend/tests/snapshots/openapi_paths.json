@@ -87,6 +87,8 @@
   "/api/v1/sync-stamp",
   "/api/v1/themes",
   "/api/v1/themes/cluster-report",
+  "/api/v1/themes/cluster-report/recompute",
+  "/api/v1/themes/cluster-report/status",
   "/api/v1/themes/name-suggestion",
   "/api/v1/themes/{theme_id}",
   "/api/v1/trace/landing-points/{lp_id}",

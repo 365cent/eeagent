@@ -21,6 +21,34 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base import Base
 
 
+class ThemeClusterRun(Base):
+    """One background clustering pass over the retained-tag corpus.
+
+    The report used to be computed inside the request, so a new signal only
+    appeared after a reload and "重放聚类" merely replayed the same snapshot.
+    A signal insert queues a run, a subprocess computes it (see
+    app/services/cluster_job.py), and the API serves the stored payload together
+    with its run status.
+    """
+
+    __tablename__ = "eea_theme_cluster_run"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    trigger: Mapped[str] = mapped_column(Text, nullable=False, default="signal")
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="queued")
+    payload: Mapped[dict | None] = mapped_column(JSONB)
+    signal_count: Mapped[int | None] = mapped_column(Integer)
+    cluster_count: Mapped[int | None] = mapped_column(Integer)
+    error: Mapped[str | None] = mapped_column(Text)
+    requested_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    __table_args__ = (Index("ix_theme_cluster_run_requested_at", "requested_at"),)
+
+
 class RefCode(Base):
     # No explicit UniqueConstraint("domain", "code") here: the composite
     # PRIMARY KEY (domain, code) below already guarantees uniqueness, and a

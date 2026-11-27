@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func, select, text, update
@@ -7,9 +8,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.identity import OperatorIdentity, get_operator_identity
 from app.db.base import get_db
 from app.platform.launchdarkly import DEMAND_EXTRACTION, require_feature, track_workflow_success
-from app.models.models import DemandPoint, Signal, TechTheme
+from app.models.models import DemandPoint, Signal, TechTheme, ThemeClusterRun
 from app.schemas.schemas import (
     ThemeClusterReport,
+    ThemeClusterRunOut,
     ThemeCreate,
     ThemeDetail,
     ThemeMetrics,
@@ -20,6 +22,15 @@ from app.schemas.schemas import (
 )
 from app.platform.audit import record_correction
 from app.domains.tagging.clustering import build_theme_cluster_report
+from app.services.cluster_runner import (
+    READY,
+    enqueue_cluster_run,
+    latest_run,
+    pending_run,
+    ready_run,
+    run_summary,
+    spawn_cluster_job,
+)
 from app.domains.tagging.service import get_or_create_vocab  # noqa: F401 (shared helper)
 from app.domains.theme.naming import suggest_theme_name
 
@@ -110,11 +121,53 @@ async def theme_name_suggestion(payload: ThemeNameSuggestionIn, db: AsyncSession
 
 @router.get("/cluster-report", response_model=ThemeClusterReport)
 async def theme_cluster_report(db: AsyncSession = Depends(get_db)):
-    """Tag distribution and cosine clusters over live unassigned tech tags.
+    """Snapshot of the background clustering report.
 
     Declared before ``/{theme_id}`` so the static path is not parsed as an id.
+    A stored run is served as-is so a new signal never forces a request to wait
+    for sklearn; the first request on a fresh install still computes once and
+    stores the result, so the page is never empty.
     """
-    return await build_theme_cluster_report(db)
+    stored = await ready_run(db)
+    if stored is not None and isinstance(stored.payload, dict):
+        report = ThemeClusterReport.model_validate(stored.payload)
+        report.computed_at = stored.finished_at or stored.started_at or stored.requested_at
+        report.run_id = stored.id
+        report.pending = await pending_run(db) is not None
+        return report
+
+    report = await build_theme_cluster_report(db)
+    now = datetime.now(timezone.utc)
+    snapshot = ThemeClusterRun(
+        trigger="bootstrap",
+        status=READY,
+        payload=report.model_dump(mode="json"),
+        signal_count=report.sample_size,
+        cluster_count=len(report.clusters),
+        started_at=now,
+        finished_at=now,
+    )
+    db.add(snapshot)
+    await db.commit()
+    await db.refresh(snapshot)
+    report.computed_at = snapshot.finished_at
+    report.run_id = snapshot.id
+    return report
+
+
+@router.post("/cluster-report/recompute", response_model=ThemeClusterRunOut)
+async def recompute_theme_cluster_report(db: AsyncSession = Depends(get_db)):
+    """Queue a fresh pass and start the background Python job right away."""
+    await enqueue_cluster_run(db, trigger="manual")
+    await db.commit()
+    await spawn_cluster_job()
+    return ThemeClusterRunOut(**run_summary(await latest_run(db)))
+
+
+@router.get("/cluster-report/status", response_model=ThemeClusterRunOut)
+async def theme_cluster_run_status(db: AsyncSession = Depends(get_db)):
+    """Poll the newest pass; the page uses it to replace the graph when ready."""
+    return ThemeClusterRunOut(**run_summary(await latest_run(db)))
 
 
 @router.get("/{theme_id}", response_model=ThemeDetail)
