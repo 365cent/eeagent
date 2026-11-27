@@ -10,6 +10,7 @@ This record keeps evidence for implementation slices removed from the remaining-
 - 发现并修正一处真实不一致：v0.1.4/v0.1.5 不是经 `scripts/release.ps1` 产出的，`client/dist/SHA256SUMS` 仍写 v0.1.2 的 `f8bd3e52…`，按现有字节校验会失败。重写后逐行复核通过（capture.exe `f9cb4da3…`、留存 zip `966c9e3a…`）。
 - 未重新构建 exe：客户端源码有并发未提交改动，重建会把未完成代码打进制品；本次只修正清单与记录，不动字节。
 - API 侧护栏：`_artifact_version` 只在 sidecar 自带的 `sha256` 与旁边字节一致时才采用其中的版本，半拷贝发布（新 exe + 旧 sidecar）会显示 `—` 而不是错版本，版本化文件名的回退保持不变。新增 2 个用例，`pytest -q tests/test_capture_client_download.py` → **11 passed**（34.6s）；`lint-imports` → **3 kept, 0 broken**。
+- 发布说明补齐 [deploy/downloads/README.md](../deploy/downloads/README.md)：说明 `dist/SHA256SUMS` 覆盖的是带版本号的 zip，不能原样复制到发布目录（`sha256sum -c` 会在缺失文件上失败），校验和应在 `deploy/downloads` 内按实际发布文件重新生成；并写明「新 exe + 旧 sidecar/清单」这一半拷贝发布正是要避免的失败模式。
 - 仍未做：`10.215.35.10` 上传与发布窗口（OPS-07），以及 Linux/nginx 下载路径（OPS-06）。
 
 ### 客户端下载页浏览器校验（FE-01 切片）
