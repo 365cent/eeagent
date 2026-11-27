@@ -200,7 +200,7 @@
 
 - [ ] P1 · 部分实现 · 依赖 BE-01、BE-04、BE-03。
 - 来源：实施计划 §7.1 REQ-DOC-01…05；Word 七图；WBS 1.3.11、1.4.5。
-- 入口：[doc_ingest.py](app/services/doc_ingest.py)、[doc_summary.py](app/services/doc_summary.py)、[documents.py](app/api/v1/documents.py)。
+- 入口：[doc_ingest.py](app/services/doc_ingest.py)、[doc_summary.py](app/domains/evidence/doc_summary.py)、[documents.py](app/api/v1/documents.py)。
 - 保留原始哈希、解析器/模型版本、页数/图数/错误；图块保存原件索引、出现位置、caption/OCR、识别置信度及 review 状态。
 - OOXML 按实际文档引用顺序映射图，区别 7 张不同图片和 8 次插入；PPT 正文/notes 与 master 装饰区分；PDF 缺 OCR 时明确失败/待复核。
 - PPTX **预览** vendored [`deckpeek`](vendor/deckpeek/deckpeek.py)（[`docs/research/2026-11-10-deckpeek-pptx-preview-reference.md`](../../docs/research/2026-11-10-deckpeek-pptx-preview-reference.md)）：Linux 结构 HTML + 可选 LibreOffice→PDF→PNG 胶片条；Windows 侧 COM 底图仍可选。
@@ -285,6 +285,7 @@
 - 2026-11-27 再切片：`judgment.py`（环节/类型判定与主题排序）与 `doc_structure.py`（Markdown 章节与图块定位）迁入 `app/domains/evidence/`，共 12 处导入；两者已无 services 依赖。证据：`lint-imports` 两处配置各 3 kept，`pytest` 56 passed，全量收集 624 条。
 - 2026-11-27 再切片：修正审计写入器 `audit.py` 迁入 `app/platform/audit.py`（只依赖 core.identity 与模型），11 处导入（API 8、services 2、脚本 1）；`record_correction` 作为横切基础设施归平台层，审计策略仍由调用方决定。证据：`lint-imports` 两处配置各 3 kept，`pytest` 59 passed（战略/主题/主题命名/信号摄取），全量收集 624 条。
 - 2026-11-27 再切片：标签建议与词表助手 `tagging.py` 迁入 `app/domains/tagging/service.py`（新增 tagging 上下文），21 处导入（API 5、services 6、domains 1、脚本 2、用例 7）；闭集词表仍留在 `app/domains/vocab/refcodes.py`。证据：`lint-imports` 两处配置各 3 kept，`pytest` 51 passed / 1 skipped（标签/技术标签/文档关键词/去重/摄取），全量收集 624 条。
+- 2026-11-27 再切片：`doc_summary.py`（无 app 依赖）与 `signal_sources.py`（只依赖模型与 tagging 域）迁入 `app/domains/evidence/`，4 处导入；README/TODO/研究笔记中的路径同步更新。证据：`lint-imports` 两处配置各 3 kept，`pytest` 60 passed（文档信号/信号摄取/文档摄取），全量收集 624 条。
 - [ ] OpenAPI 路径快照：[tests/test_openapi_snapshot.py](tests/test_openapi_snapshot.py) + [tests/snapshots/openapi_paths.json](tests/snapshots/openapi_paths.json)；路由变更须同步快照（`OPENAPI_UPDATE_SNAPSHOT=1`）。
 - [ ] 迁移顺序建议：`core`/`db`/`models` → `platform`；采集/信号/需求等垂直切片按 WBS 迁入 `domains`；共享摄取逻辑取代 API 私有函数互调（对齐 BE-01）。
 - 验收：import-linter 通过；OpenAPI 快照测试通过；无新增 `platform`→`api`/`domains` 违规；领域迁移切片有对应 pytest 证据。

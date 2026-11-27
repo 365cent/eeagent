@@ -3,7 +3,7 @@
 **日期**：2026-11-10  
 **参考物**：[`reference-will-deleted/deckpeek-src/src/deckpeek.py`](../../reference-will-deleted/deckpeek-src/src/deckpeek.py)（自 [`deckpeek-src-20261028.zip`](../../reference-will-deleted/deckpeek-src-20261028.zip) 解压）  
 **关联需求**：REQ-DOC-01…05、BE-12、FE-11  
-**EEA 现状入口**：[`backend/app/services/doc_ingest.py`](../../backend/app/services/doc_ingest.py)、[`backend/app/services/doc_summary.py`](../../backend/app/services/doc_summary.py)、证据详情「解析快照」[`frontend/views/dashboard/workspace.tsx`](../../frontend/views/dashboard/workspace.tsx)
+**EEA 现状入口**：[`backend/app/services/doc_ingest.py`](../../backend/app/services/doc_ingest.py)、[`backend/app/domains/evidence/doc_summary.py`](../../backend/app/domains/evidence/doc_summary.py)、证据详情「解析快照」[`frontend/views/dashboard/workspace.tsx`](../../frontend/views/dashboard/workspace.tsx)
 
 ---
 
@@ -69,7 +69,7 @@ flowchart LR
 **对齐原则（处理）**
 
 - 继续以 [`doc_ingest.extract_figures`](../../backend/app/services/doc_ingest.py) 的 **slide rel 顺序**为图块 `figure_index` 与 Vision 顺序的权威来源（与 deckpeek 的「按页形状 walk」互补：前者管**证据图块**，后者管**可选结构预览**）。
-- 幻灯片标题/Notes 摘要逻辑保持 [`doc_summary.py`](../../backend/app/services/doc_summary.py)；deckpeek 的 `data-desc` 可作为 **Agent 引用形状** 的远期格式（REQ-AGT-03），不替代 canonical。
+- 幻灯片标题/Notes 摘要逻辑保持 [`doc_summary.py`](../../backend/app/domains/evidence/doc_summary.py)；deckpeek 的 `data-desc` 可作为 **Agent 引用形状** 的远期格式（REQ-AGT-03），不替代 canonical。
 
 **对齐原则（预览）**
 

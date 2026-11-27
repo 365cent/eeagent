@@ -46,6 +46,8 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence for the fifth move: `lint-imports` 3 kept against both configs; `pytest tests/test_strategy.py tests/test_themes.py tests/test_theme_naming.py tests/test_signals_ingest.py` → 59 passed (54.3 s); collection still 624 tests.
 - Sixth move: `tagging.py` → `app/domains/tagging/service.py`, creating the `tagging` context for tag suggestions, URL normalisation and vocabulary creation. The closed reference vocabulary stays in `app/domains/vocab/refcodes.py`. Twenty-one import sites updated across five API modules, six services, one domain module, two scripts and seven tests.
 - Evidence for the sixth move: `lint-imports` 3 kept against both configs; `pytest tests/test_tagging_text.py tests/test_tech_tag_pipeline.py tests/test_semantic_document_keywords.py tests/test_signal_dedup.py tests/test_signals_ingest.py` → 51 passed, 1 skipped (27.8 s, the skip is a live-gateway case); collection still 624 tests.
+- Seventh move: `doc_summary.py` (no app imports) and `signal_sources.py` (models plus the tagging domain) joined `app/domains/evidence/`; four import sites updated, and the README, backend TODO and the deckpeek research note now point at the new path.
+- Evidence for the seventh move: `lint-imports` 3 kept against both configs; `pytest tests/test_document_signals.py tests/test_signals_ingest.py tests/test_document_ingest.py` → 60 passed (66.6 s); collection still 624 tests.
 - Remaining BE-17 work: most of `app.services` still sits beside `app/domains`, and domains still import services such as `doc_ingest`, `llm` and `body_excerpt`; each needs its own slice.
 
 ## 2026-11-26

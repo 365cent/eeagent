@@ -198,7 +198,7 @@ async def test_signal_detail_exposes_linked_demand_points(client):
 
 
 async def test_doc_summary_builder_shapes():
-    from app.services.doc_summary import build_document_body_summary
+    from app.domains.evidence.doc_summary import build_document_body_summary
 
     out = build_document_body_summary("deck.pptx", _DECK_MD)
     assert out.startswith("来源文档：deck.pptx")

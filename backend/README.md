@@ -92,7 +92,7 @@ curl -X POST http://127.0.0.1:8000/api/v1/signals/capture \
 `POST /signals` 传 `document_id`（替代手填 title/url/body）即走文档来源路径：
 
 - `title` 默认取文档文件名主干；`url` 默认 `eea://document/{id}`；`published_at` 默认文档上传时间（显式传入优先）
-- `body_text` 默认为**服务端生成的摘要**（`app/services/doc_summary.py`：文件名 + 章节/幻灯片标题 + 讲稿摘录，≤4000 字），**不**把整份 canonical Markdown 灌入正文
+- `body_text` 默认为**服务端生成的摘要**（`app/domains/evidence/doc_summary.py`：文件名 + 章节/幻灯片标题 + 讲稿摘录，≤4000 字），**不**把整份 canonical Markdown 灌入正文
 - **跳过自动归集**：`tech_theme_id` 保持 null、不做 jieba 词频兜底打标（LLM 建议标签仍写入）；`POST /signals/{id}/auto-aggregate` 对文档来源信号返回 409
 - 主题只能经人工 `PUT /signals/{id}/theme` 指定或移出（`tech_theme_id: null` 即清空误归集，审计留痕）——这是对历史误归集信号的运维修复路径
 - `SignalDetail.linked_demand_points`：该信号主题来源的需求点列表（无主题时 `[]`，前端来源栏「关联需求」直接消费）
