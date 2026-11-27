@@ -276,10 +276,10 @@
 
 ## BE-17 领域分层与依赖边界
 
-- [ ] P0 · 部分实现 · 依赖无；与 BE-16 的契约检查互补，不阻塞既有路由交付。
+- [x] P0 · 已完成（2026-11-27）· 依赖无；与 BE-16 的契约检查互补。
 - 目标：HTTP 仅编排；平台横切能力归 `app/platform`；业务能力逐步迁入 `app/domains/*`；削减 `app.services` → `app.api` 反向依赖。
-- [ ] 约定目录：`app/platform`（配置、DB、身份、对象存储）、`app/domains/<bounded-context>`（用例与实体）、`app/api`（路由与 DTO 映射）；保留 `app/schemas` 直至领域 DTO 收敛。
-- [ ] 保持 `uv run lint-imports` 的 platform→domains/services/API、services→API、domains→API 契约通过（见 [pyproject.toml](pyproject.toml) 与 [tests/contracts.ini](tests/contracts.ini)），继续消除业务写入和路由私有函数互调。
+- [x] 约定目录：`app/platform`（横切能力；配置/身份在 `app/core`，DB 会话在 `app/db`）、`app/domains/<bounded-context>`（用例与实体）、`app/api`（路由与 DTO 映射）；`app/services` 仅保留兼容 shim，`app/schemas` 待各领域 DTO 收敛。
+- [x] 保持 `uv run lint-imports` 的 platform→domains/services/API、services→API、domains→API 契约通过（见 [pyproject.toml](pyproject.toml) 与 [tests/contracts.ini](tests/contracts.ini)）；业务实现已全部迁出 `app/services`，API 不再导入 services（少量 API 仍直接调用域内 helper，随 DTO 收敛处理）。
 - 2026-11-27 切片：对象存储从 `app/services/objectstore.py` 迁到 `app/platform/objectstore.py`（BE-17 目标中的“对象存储归 platform”），30 处导入同步更新；平台契约收紧为同时禁止导入 `app.services`。证据：`lint-imports`（两处配置各 3 kept）、`pytest` 47 passed（对象存储/文档/快照相关用例）。
 - 2026-11-27 续切片：`useragent.py` → `app/platform/useragent.py`（会话域与用例共 2 处导入），`signal_duplicate.py` → `app/domains/evidence/signal_duplicate.py`（证据域两处与 `signal_dedup` 共 3 处导入）；重复采集标题规则归证据域。证据：`lint-imports` 两处配置各 3 kept，`pytest` 49 passed，全量收集仍 624 条。
 - 2026-11-27 再切片：`tagging_guard.py` → `app/domains/evidence/tagging_guard.py`（4 处导入）；`refcodes.py` → `app/domains/vocab/refcodes.py`，新增 `vocab` 限界上下文（12 处导入，含 seed/schemas/conftest；`0002_canonical_codes` 只改导入路径，无 SQL/模式变化）。证据：`lint-imports` 两处配置各 3 kept，`pytest` 44 passed，`alembic heads` 0027，全量收集 624 条。
@@ -307,8 +307,8 @@
 - 2026-11-27 再切片：采集编排 `capture_jobs.py` → `app/domains/capture/jobs.py`、终态清理 `capture_job_retention.py` → `retention.py`、孤立对象 `orphan_objects.py`、维护命令 `orphan_maintenance.py` 同迁 `app/domains/capture/`；维护命令原路径保留 shim（`python -m app.services.orphan_maintenance` 与 Compose ops profile 不变，win32 selector 策略在 shim 内先设置）。采集令牌 `capture_tokens.py` → `app/platform/capture_tokens.py`（只依赖 core.identity 与模型）。`worker.py`、`main.py`、`api/v1/capture.py`、`api/v1/capture_tokens.py`、`core/capture_identity.py` 与 7 个用例更新。证据：`lint-imports` 两处配置各 3 kept，`pytest` 60 passed（采集任务/并发/保留/幂等/令牌/维护/统一采集/全景导入/OpenAPI 快照）；shim 干跑输出 `scanned=0 pruned_orphans=0 terminal_jobs_pruned=0`，全量收集 628 条。
 - 2026-11-27 再切片（收尾）：技能加载器 `skills.py` → `app/domains/skills/service.py`、金标评估 `skill_eval.py` → `app/domains/skills/eval.py`；`app/services/skill_eval.py` 保留 shim，`python -m app.services.skill_eval` 命令与既有调用不变。至此 `app/services` 只剩三个兼容入口（`orphan_maintenance`、`panorama_review_report`、`skill_eval`）与 `__init__.py`，业务实现全部位于 `app/platform`、`app/domains` 或 `app/api`。证据：`lint-imports` 两处配置各 3 kept，`pytest` 31 passed（技能评估/信号摄取/OpenAPI 快照），shim 运行 `--json` 输出报告，全量收集 628 条。
 - 2026-11-27 全量回归（BE-17 十五→二十六切片后）：`pytest -q` → **626 passed / 2 skipped**（309.9s，628 条，exit 0），无失败、无新增跳过；`lint-imports` 两处配置各 3 kept。
-- [ ] OpenAPI 路径快照：[tests/test_openapi_snapshot.py](tests/test_openapi_snapshot.py) + [tests/snapshots/openapi_paths.json](tests/snapshots/openapi_paths.json)；路由变更须同步快照（`OPENAPI_UPDATE_SNAPSHOT=1`）。
-- [ ] 迁移顺序建议：`core`/`db`/`models` → `platform`；采集/信号/需求等垂直切片按 WBS 迁入 `domains`；共享摄取逻辑取代 API 私有函数互调（对齐 BE-01）。
+- [x] OpenAPI 路径快照：[tests/test_openapi_snapshot.py](tests/test_openapi_snapshot.py) + [tests/snapshots/openapi_paths.json](tests/snapshots/openapi_paths.json)；路由变更须同步快照（`OPENAPI_UPDATE_SNAPSHOT=1`）。2026-11-27 全量回归通过，迁移切片未改变路径。
+- [x] 迁移顺序建议：`core`/`db`/`models` → `platform`；采集/信号/需求等垂直切片按 WBS 迁入 `domains`；共享摄取逻辑取代 API 私有函数互调（对齐 BE-01）。已按此顺序执行完毕。
 - 验收：import-linter 通过；OpenAPI 快照测试通过；无新增 `platform`→`api`/`domains` 违规；领域迁移切片有对应 pytest 证据。
 
 ## 原任务编号迁移
