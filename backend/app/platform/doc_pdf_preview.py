@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from app.domains.evidence.doc_ingest import suffix_for
+from app.platform.files import suffix_for
 
 _OFFICE_SUFFIXES = frozenset({".doc", ".docx", ".ppt", ".pptx", ".xls", ".xlsx", ".xlsm"})
 

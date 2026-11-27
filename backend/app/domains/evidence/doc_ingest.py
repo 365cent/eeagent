@@ -35,6 +35,7 @@ from typing import Awaitable, Callable
 from starlette.concurrency import run_in_threadpool
 
 from app.core.config import get_settings, model_chain
+from app.platform.files import suffix_for
 from app.platform.caption_cache import load_caption, store_caption
 from app.platform.llm_gateway import resolve_vision_model
 from app.platform.llm_prompts import VISION_CAPTION_PROMPT as _CAPTION_PROMPT
@@ -59,16 +60,6 @@ _EXT_MIME = {
     ".bmp": "image/bmp",
     ".tif": "image/tiff",
     ".tiff": "image/tiff",
-}
-_MIME_EXT = {
-    "image/png": ".png",
-    "image/jpeg": ".jpg",
-    "image/webp": ".webp",
-    "application/pdf": ".pdf",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document": ".docx",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation": ".pptx",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": ".xlsx",
-    "application/vnd.ms-excel": ".xls",
 }
 
 _FILENAME_MIME = {
@@ -136,13 +127,6 @@ class IngestResult:
     def figure_count(self) -> int:
         return len(self.figures)
 
-
-def suffix_for(filename: str | None, mime: str | None) -> str:
-    if filename:
-        suffix = Path(filename).suffix.lower()
-        if suffix:
-            return suffix
-    return _MIME_EXT.get((mime or "").lower(), ".bin")
 
 
 def normalize_document_mime(filename: str | None, mime: str | None) -> str | None:

@@ -518,7 +518,8 @@ async def get_signal_figures(signal_id: uuid.UUID, db: AsyncSession = Depends(ge
         raise HTTPException(
             404, f"raw object {doc.object_key!r} missing from the object store"
         )
-    from app.domains.evidence.doc_ingest import extract_figures, normalize_document_mime, suffix_for
+    from app.domains.evidence.doc_ingest import extract_figures, normalize_document_mime
+    from app.platform.files import suffix_for
 
     mime = normalize_document_mime(doc.filename, doc.mime)
     suffix = suffix_for(doc.filename, mime)

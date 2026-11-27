@@ -4,8 +4,8 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from app.services.doc_pdf_preview import DocumentPreviewError, OfficePreviewUnavailableError
-from app.services.doc_pdf_preview import build_pdf_preview_bytes
+from app.platform.doc_pdf_preview import DocumentPreviewError, OfficePreviewUnavailableError
+from app.platform.doc_pdf_preview import build_pdf_preview_bytes
 
 logger = logging.getLogger(__name__)
 

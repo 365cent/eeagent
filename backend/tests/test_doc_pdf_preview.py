@@ -2,7 +2,7 @@ import pytest
 
 pytestmark = pytest.mark.no_db
 
-from app.services.doc_pdf_preview import (
+from app.platform.doc_pdf_preview import (
     OfficePreviewUnavailableError,
     build_pdf_preview_bytes,
     document_pdf_preview_supported,
@@ -22,6 +22,6 @@ def test_passthrough_pdf_bytes():
 
 
 def test_office_without_libreoffice_raises(monkeypatch):
-    monkeypatch.setattr("app.services.doc_pdf_preview._soffice_path", lambda: None)
+    monkeypatch.setattr("app.platform.doc_pdf_preview._soffice_path", lambda: None)
     with pytest.raises(OfficePreviewUnavailableError):
         build_pdf_preview_bytes(b"fake", "report.docx", None)

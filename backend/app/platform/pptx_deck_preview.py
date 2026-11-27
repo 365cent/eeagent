@@ -8,9 +8,9 @@ import tempfile
 from pathlib import Path
 
 from app.core.config import get_settings
-from app.domains.evidence.doc_ingest import suffix_for
+from app.platform.files import suffix_for
 from app.platform.objectstore import load_bytes, put_object
-from app.services.pptx_slide_render import render_pptx_slide_pngs
+from app.platform.pptx_slide_render import render_pptx_slide_pngs
 
 _DECKPEEK_SCRIPT = Path(__file__).resolve().parents[2] / "vendor/deckpeek/deckpeek.py"
 _BASE_TAG_RE = re.compile(r"<head(\s[^>]*)?>", re.IGNORECASE)

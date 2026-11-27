@@ -47,7 +47,7 @@ from app.domains.evidence.document_pipeline import (
     mib_label,
 )
 from app.domains.evidence.doc_ingest import ingest_document, normalize_document_mime
-from app.services.doc_pdf_preview import (
+from app.platform.doc_pdf_preview import (
     DocumentPreviewError,
     UnsupportedDocumentPreviewError,
     build_pdf_preview_bytes,
@@ -58,7 +58,7 @@ from starlette.concurrency import run_in_threadpool
 logger = logging.getLogger(__name__)
 
 from app.platform.objectstore import load_bytes, sha256_bytes
-from app.services.pptx_deck_preview import (
+from app.platform.pptx_deck_preview import (
     PptxDeckPreviewError,
     PptxDeckPreviewUnavailableError,
     build_pptx_deck_preview,

@@ -3,7 +3,7 @@ import io
 import pytest
 from pptx import Presentation
 
-from app.services.pptx_deck_preview import (
+from app.platform.pptx_deck_preview import (
     _sanitize_deckpeek_html_for_eea,
     build_pptx_deck_preview,
     deck_preview_cached,

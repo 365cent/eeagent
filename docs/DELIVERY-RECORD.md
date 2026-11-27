@@ -58,7 +58,9 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence for the eleventh move: `lint-imports` 3 kept against both configs; `pytest tests/test_body_excerpt.py tests/test_caption_cache.py tests/test_document_ingest.py tests/test_signals_ingest.py` → 57 passed (39.7 s); `py_compile` clean; collection is 628 tests.
 - Twelfth move: the document ingest pipeline `doc_ingest.py` → `app/domains/evidence/doc_ingest.py`. After the cache/platform work it imported only core config, platform modules and `doc_structure`, so the evidence domain now owns the whole ingest path. Eighteen files updated, including four `from app.services import doc_ingest` module imports and one comment in `core/config.py`.
 - Evidence for the twelfth move: `lint-imports` 3 kept against both configs; `pytest tests/test_document_ingest.py tests/test_document_signals.py tests/test_capture_unified.py tests/test_figure_recaption.py tests/test_document_structure.py` → 63 passed (36.1 s); `py_compile` clean; collection is 628 tests.
-- Remaining BE-17 work: `app.services` holds `doc_pdf_preview`, `pptx_deck_preview`, `pptx_slide_render` and the agent/capture orchestration modules; each needs its own slice.
+- Thirteenth move: the preview trio `doc_pdf_preview.py`, `pptx_slide_render.py` and `pptx_deck_preview.py` → `app/platform/`. The shared extension helper `suffix_for` was extracted to `app/platform/files.py` first, so preview code never imports the evidence domain (platform→domains is forbidden); `doc_ingest` and `api/v1/signals.py` now share that helper.
+- Evidence for the thirteenth move: `lint-imports` 3 kept against both configs; `pytest tests/test_doc_pdf_preview.py tests/test_pptx_deck_preview.py tests/test_pptx_slide_render.py tests/test_document_ingest.py` → 37 passed (28.8 s); `py_compile` clean after fixing one indentation slip in a function-local import; collection is 628 tests.
+- Remaining BE-17 work: `app.services` holds the agent, capture, demand, strategy and reporting orchestration modules; each needs its own slice.
 
 ### Full backend regression after the BE-17 moves (BE-16 evidence)
 
