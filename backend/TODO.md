@@ -271,6 +271,7 @@
 - 2026-11-26 迁移测试桩：`tests/test_capture_jobs.py` 的 `_set_stage` stub 未跟上 `progress` 参数，取消用例报 TypeError，已补参数。
 - 2026-11-26 REQ→测试映射：新增 `scripts/report_req_coverage.py`，从追溯表读取 75 条 REQ、扫描 backend/tests、frontend/tests 与 client 的测试文件，生成 `docs/acceptance-records/req-test-map.md`。当前 51 条至少被一个测试文件点名，24 条没有任何测试引用（AGT-01…06、DEM-04/05/07/12、DOC-01…05、MAP-04/07…11、STR-02/03、UI-01）。该映射只说明“有测试声称覆盖”，不等于验收通过；同一行为可能挂在别的 REQ 编号下（例如落差点的 TECH 用例覆盖部分 MAP 行为），需要 DOC-05 逐条判定。
 - 2026-11-27 全量回归：BE-17 的八次模块迁移后跑 `pytest -q` 全量 → **626 passed / 2 skipped**（416s，628 条）。唯一失败是 `test_capture_unified` 仍断言文件名作为标题，与 2026-11-26 “标题取自文档”的变更冲突；已改为文档标题「白皮书」，并新增 `tests/test_document_title.py` 锁定“扫描件文件名让位于文档标题、有意义文件名保留”的规则（4 passed），随后全量重跑通过。
+- 2026-11-27 全量回归（含并行 Agent/客户端改动）：`pytest -q` → **635 passed / 2 skipped**（464.7s，637 条，exit 0）；`go vet ./...` 与 `go test ./...` exit 0；`pnpm typecheck` 与 `pnpm build` exit 0；客户端产物 v0.1.4（`deploy/downloads/capture.exe` sha256 `39682ed2…`，sidecar `capture.exe.json` 与 `SHA256SUMS` 一致）。
 - 交付代码仓库层面的依赖锁定、启动/配置契约与组件验证证据；不把 macOS 检查描述为 Linux worker 或生产存储验收。
 - Linux 集成、离线 wheel 包、生产升级、备份/恢复及 10,000 条性能报告由 OPS-06 在 BE-16 后统一验收，避免 BE-16 ↔ OPS-02/05 循环依赖。
 - 验收：每条 traceability 用例有组件结果；迁移与接口契约检查齐全，严重缺陷清零；部署和恢复签收记录挂接 OPS-06。

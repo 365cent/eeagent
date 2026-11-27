@@ -4,6 +4,12 @@ This record keeps evidence for implementation slices removed from the remaining-
 
 ## 2026-11-27
 
+### Full-stack regression on the combined tree (BE-16 evidence)
+
+- After the client/download changes landed (`f4336cd`, `3c25e86`, `48d0744`), ran the combined tree: backend `pytest -q` -> **635 passed, 2 skipped** (464.7 s, 637 collected, exit 0); `go vet ./...` and `go test ./...` exit 0; frontend `pnpm typecheck` and `pnpm build` exit 0.
+- Client artifact: `deploy/downloads/capture.exe` is v0.1.4 (sha256 `39682ed2...`), matching `capture.exe.json` and `SHA256SUMS`; `client/dist/capture.exe` is the same build.
+- The new client-releases `version` field is covered by `test_version_comes_from_the_release_sidecar`; the long-running dev API on :8000 predates that code, so it needs a restart before the page can show the version.
+
 ### Local backup/restore drill (OPS-05 evidence)
 
 - On the Windows portable PostgreSQL (not production): `probe_migrations.py` re-ran clean (fresh upgrade to 0027; downgrade -3 and upgrade with a row surviving; upgrade from 0022 with data surviving).
