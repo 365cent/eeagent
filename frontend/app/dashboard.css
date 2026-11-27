@@ -1818,6 +1818,20 @@ mark.evidence-tts-highlight {
   line-height: 1.45;
 }
 
+/* Direct client builds: Windows .exe and macOS .dmg side by side, no archive. */
+.capture-client-downloads {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 12px;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.capture-client-downloads .capture-client-downloads-missing {
+  color: var(--eea-text-tertiary, #94a3b8);
+}
+
 .new-signal-import-form .import-form-actions {
   margin-top: auto;
   padding-top: 4px;

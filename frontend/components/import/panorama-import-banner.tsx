@@ -1,10 +1,10 @@
 'use client'
 
 import { CloudUploadOutlined } from '@ant-design/icons'
-import { Alert, Typography } from 'antd'
+import { Alert } from 'antd'
 import type { PanoramaImportBatchOut } from '@/lib/api/types'
 import { PANORAMA_IMPORT_STATUS_LABEL, panoramaImportAlertType } from '@/features/evidence/status'
-import { getCaptureClientDownloadUrl } from '@/lib/api/config'
+import { CaptureClientDownloads } from '@/components/import/capture-client-downloads'
 import { ImportBatchProgressBody } from '@/components/import/import-batch-progress-body'
 
 export function PanoramaImportBanner({
@@ -20,13 +20,9 @@ export function PanoramaImportBanner({
   const type = panoramaImportAlertType(batch.status)
   const showDownload = batch.status !== 'completed'
   const download = (
-    <Typography.Link
-      href={getCaptureClientDownloadUrl()}
-      download
-      style={{ display: 'inline-block', marginTop: 8 }}
-    >
-      没有客户端？下载 EEA Capture（Windows）
-    </Typography.Link>
+    <div style={{ marginTop: 8 }}>
+      <CaptureClientDownloads lead="没有客户端？" />
+    </div>
   )
 
   if (variant === 'panel') {

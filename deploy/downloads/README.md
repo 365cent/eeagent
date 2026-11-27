@@ -1,15 +1,30 @@
-﻿# Capture client downloads
+# Capture client downloads
 
-Publish a release here; nginx serves this directory at `/downloads/` and the
-app page `下载采集客户端` links to the files listed in its release table.
+The client ships **uncompressed** — there is no zip to unpack. Drop the build in
+this directory; the API lists it at `GET /api/v1/capture/client-releases` and
+serves it at `GET /api/v1/capture/client-download?platform=windows|macos`
+(`nginx` also exposes the directory at `/downloads/`). The import page links
+whatever is published here, so a platform with no file shows “暂未发布” instead
+of a dead link.
 
 ```bash
-# build on Windows, then copy both files here
-client/scripts/release.ps1 -Version v0.1.1
-scp client/dist/capture-v0.1.1-windows-amd64.zip deploy/downloads/
-scp client/dist/SHA256SUMS deploy/downloads/
+# Windows (build on Windows, Go >= 1.26)
+cd client
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/release.ps1 -Version v0.1.2
+cp dist/capture.exe ../deploy/downloads/capture-v0.1.2-windows-amd64.exe
+
+# macOS (.app + .dmg, must run on a Mac: Fyne needs cgo + the macOS SDK)
+cd client
+bash scripts/package-macos.sh v0.1.2
+cp dist/EEA-Capture-v0.1.2-macOS.dmg ../deploy/downloads/
+
+# checksums for whatever is published
+sha256sum capture-*-windows-amd64.exe EEA-Capture-*.dmg > SHA256SUMS
 ```
 
-macOS: the client UI is Fyne-based and needs cgo with the macOS SDK, so the
-binary must be built on a Mac (`go build ./cmd/capture`). No macOS artifact is
-published yet.
+The Windows binary alone is enough: its default `capture_archive=auto` uses the
+staged SingleFile extension when present and otherwise falls back to the
+embedded SingleFile core, so no `data/` folder has to travel with the exe.
+
+macOS still needs a Mac (or a macOS CI runner) to produce the `.dmg`; no macOS
+artifact exists in this repository yet.

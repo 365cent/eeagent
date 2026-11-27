@@ -61,23 +61,54 @@ def _client_dist_dir() -> Path:
     return Path(__file__).resolve().parents[3].parent / "client" / "dist"
 
 
-def _newest_client_artifact() -> Path | None:
+# The client is published uncompressed: a Windows .exe and a macOS .dmg.
+# A .app is a directory, so a disk image is the one-file form macOS users expect.
+_CLIENT_PLATFORMS: dict[str, tuple[str, str]] = {
+    "windows": ("capture-*-windows-amd64.exe", "application/vnd.microsoft.portable-executable"),
+    "macos": ("EEA-Capture-*.dmg", "application/x-apple-diskimage"),
+}
+
+
+def _client_artifact(platform: str) -> Path | None:
+    pattern, _media_type = _CLIENT_PLATFORMS[platform]
     dist = _client_dist_dir()
     if not dist.is_dir():
         return None
-    candidates = [path for path in dist.glob("capture-*-windows-*.zip") if path.is_file()]
+    candidates = [path for path in dist.glob(pattern) if path.is_file()]
     if not candidates:
         return None
     return max(candidates, key=lambda path: path.stat().st_mtime)
 
 
+@router.get("/client-releases", include_in_schema=False)
+async def list_client_releases() -> list[dict[str, object]]:
+    """Which client builds this server can hand out, so the page never shows a dead link."""
+    releases: list[dict[str, object]] = []
+    for platform in _CLIENT_PLATFORMS:
+        artifact = _client_artifact(platform)
+        if artifact is None:
+            continue
+        releases.append(
+            {
+                "platform": platform,
+                "filename": artifact.name,
+                "size_bytes": artifact.stat().st_size,
+                "download_url": f"/api/v1/capture/client-download?platform={platform}",
+            }
+        )
+    return releases
+
+
 @router.get("/client-download", include_in_schema=False)
-async def download_capture_client():
-    """Serve the newest Windows client build copied onto the server."""
-    artifact = _newest_client_artifact()
+async def download_capture_client(platform: str = "windows"):
+    """Serve one client build directly (no archive to unpack)."""
+    if platform not in _CLIENT_PLATFORMS:
+        raise HTTPException(404, f"unknown client platform {platform!r}")
+    artifact = _client_artifact(platform)
     if artifact is None:
-        raise HTTPException(404, "capture client build not found")
-    return FileResponse(artifact, filename=artifact.name, media_type="application/zip")
+        raise HTTPException(404, f"{platform} capture client build not found")
+    _pattern, media_type = _CLIENT_PLATFORMS[platform]
+    return FileResponse(artifact, filename=artifact.name, media_type=media_type)
 
 
 async def _signal_detail(db: AsyncSession, signal_id: uuid.UUID):

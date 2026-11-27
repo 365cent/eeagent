@@ -58,10 +58,16 @@ services:
 
   api:
     <<: *backend
+    volumes:
+      - objectstore:/var/lib/eea/objects
+      # Published client builds (capture.exe / EEA-Capture.dmg) served by
+      # /capture/client-download without repackaging them into an image.
+      - ./downloads:/srv/downloads:ro
     environment:
       <<: *backend-env
       DB_HOST: postgres
       DB_PORT: 5432
+      CAPTURE_CLIENT_DIST_DIR: /srv/downloads
       CAPTURE_SERVER_FETCH_ENABLED: "false"
       EEA_CAPTURE_EMBEDDED: "0"
       CORS_ORIGINS: ${CORS_ORIGINS:-}

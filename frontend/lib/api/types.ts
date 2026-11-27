@@ -465,6 +465,16 @@ export type OverviewStats = {
   panorama_import?: PanoramaImportBatchOut | null
 }
 
+export type CaptureClientPlatform = 'windows' | 'macos'
+
+/** One published capture-client build; the download is the exe/dmg itself. */
+export type CaptureClientRelease = {
+  platform: CaptureClientPlatform
+  filename: string
+  size_bytes: number
+  download_url: string
+}
+
 export type PanoramaImportBatchOut = {
   id: string
   sha256: string

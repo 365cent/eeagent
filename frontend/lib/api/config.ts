@@ -19,7 +19,12 @@ export function getEeaApiBase(): string {
   return DEFAULT_API_BASE
 }
 
-/** Server-hosted Windows capture client build (newest zip in client/dist). */
-export function getCaptureClientDownloadUrl(): string {
-  return getEeaApiBase() + '/capture/client-download'
+/** Which client builds this server can hand out (windows .exe, macOS .dmg). */
+export function getCaptureClientReleasesUrl(): string {
+  return getEeaApiBase() + '/capture/client-releases'
+}
+
+/** Direct client download - the executable/disk image itself, never a zip. */
+export function getCaptureClientDownloadUrl(platform: 'windows' | 'macos' = 'windows'): string {
+  return `${getEeaApiBase()}/capture/client-download?platform=${platform}`
 }

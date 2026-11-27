@@ -18,21 +18,21 @@ import (
 
 // Config mirrors config.json. Zero values are replaced by defaults on load.
 type Config struct {
-	APIBase            string `json:"api_base"`
-	AutoAPI            bool   `json:"auto_api"` // follow the LAN address when api_base is empty/loopback
-	CaptureEngine      string `json:"capture_engine"`
-	BrowserPath        string `json:"browser_path"`
-	UserDataDir        string `json:"user_data_dir"`
-	QueueDir                   string `json:"queue_dir"`
-	QueueHistoryRetentionDays  int    `json:"queue_history_retention_days"`
-	MaxParallel        int    `json:"max_parallel"`
-	MaxUploadMB        int    `json:"max_upload_mb"`
-	TimeoutSec         int    `json:"timeout_sec"`
-	UploadTimeout      int    `json:"upload_timeout_sec"`
-	ReadyTimeout       int    `json:"page_ready_timeout_sec"`
-	InteractiveTimeout int    `json:"interactive_timeout_sec"`
-	MinTextChars       int    `json:"min_text_chars"`
-	Headless           bool   `json:"headless"`
+	APIBase                   string `json:"api_base"`
+	AutoAPI                   bool   `json:"auto_api"` // follow the LAN address when api_base is empty/loopback
+	CaptureEngine             string `json:"capture_engine"`
+	BrowserPath               string `json:"browser_path"`
+	UserDataDir               string `json:"user_data_dir"`
+	QueueDir                  string `json:"queue_dir"`
+	QueueHistoryRetentionDays int    `json:"queue_history_retention_days"`
+	MaxParallel               int    `json:"max_parallel"`
+	MaxUploadMB               int    `json:"max_upload_mb"`
+	TimeoutSec                int    `json:"timeout_sec"`
+	UploadTimeout             int    `json:"upload_timeout_sec"`
+	ReadyTimeout              int    `json:"page_ready_timeout_sec"`
+	InteractiveTimeout        int    `json:"interactive_timeout_sec"`
+	MinTextChars              int    `json:"min_text_chars"`
+	Headless                  bool   `json:"headless"`
 	// capture_archive: auto | extension | embedded (auto prefers the store extension).
 	CaptureArchive          string `json:"capture_archive"`
 	SingleFileExtensionPath string `json:"singlefile_extension_path"`
@@ -45,20 +45,24 @@ type Config struct {
 // Default returns the settings used when config.json is absent.
 func Default() Config {
 	return Config{
-		APIBase:            "",
-		AutoAPI:            true,
-		CaptureEngine:      "edge",
-		UserDataDir:        filepath.Join("data", "browser-profile"),
+		APIBase:                   "",
+		AutoAPI:                   true,
+		CaptureEngine:             "edge",
+		UserDataDir:               filepath.Join("data", "browser-profile"),
 		QueueDir:                  filepath.Join("data", "capture-queue"),
 		QueueHistoryRetentionDays: 7,
-		MaxParallel:        2,
-		MaxUploadMB:        120,
-		TimeoutSec:         150,
-		UploadTimeout:      900,
-		ReadyTimeout:       25,
-		InteractiveTimeout: 180,
-		MinTextChars:       10,
-		CaptureArchive:     "extension",
+		MaxParallel:               2,
+		MaxUploadMB:               120,
+		TimeoutSec:                150,
+		UploadTimeout:             900,
+		ReadyTimeout:              25,
+		InteractiveTimeout:        180,
+		MinTextChars:              10,
+		// auto = use the bundled/staged extension when present, otherwise fall
+		// back to the embedded SingleFile core. That keeps a standalone
+		// capture.exe (no data/ folder beside it) able to capture, while a
+		// package with the extension still gets extension fidelity.
+		CaptureArchive: "auto",
 	}
 }
 

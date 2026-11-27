@@ -14,6 +14,7 @@ import { newUuid } from '@/lib/uuid'
 import type {
   AccessLogOut,
   AssessmentOut,
+  CaptureClientRelease,
   DemandOut,
   DocumentDetail,
   DocumentRawOut,
@@ -835,6 +836,11 @@ export function listAgentMemories() {
 
 export function deleteAgentMemory(memoryId: string) {
   return eeaFetch<void>(`/agent/memories/${encodeURIComponent(memoryId)}`, { method: 'DELETE' })
+}
+
+/** Client builds this server can hand out (windows .exe, macOS .dmg). */
+export function fetchCaptureClientReleases() {
+  return eeaFetch<CaptureClientRelease[]>('/capture/client-releases')
 }
 
 export type { AssistantChatTurn } from '@/lib/api/types'
