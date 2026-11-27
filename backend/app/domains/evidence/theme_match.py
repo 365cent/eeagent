@@ -5,7 +5,7 @@ import uuid
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.services.judgment import select_best_theme, structured_basis_consistent
+from app.domains.evidence.judgment import select_best_theme, structured_basis_consistent
 
 
 async def theme_display_tags(db: AsyncSession) -> dict[uuid.UUID, set[str]]:

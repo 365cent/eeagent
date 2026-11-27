@@ -44,7 +44,7 @@ from app.services.llm_usage import (
     usage_from_agent_result,
     usage_without_result,
 )
-from app.services.doc_structure import assign_figure_locations
+from app.domains.evidence.doc_structure import assign_figure_locations
 
 MAX_FIGURES = 8  # default only; runtime cap comes from settings.max_figures
 MAX_FIGURE_BYTES = 4 * 1024 * 1024

@@ -40,7 +40,9 @@ This record keeps evidence for implementation slices removed from the remaining-
 - Evidence for the second move: `lint-imports` 3 kept against both configs; `pytest tests/test_useragent.py tests/test_signal_dedup.py tests/test_signals_ingest.py` → 49 passed (35.3 s); `pytest --collect-only -q` still collects 624 tests.
 - Third move: `tagging_guard.py` → `app/domains/evidence/tagging_guard.py` (API signals, agent patches/tools, panorama import) and `refcodes.py` → `app/domains/vocab/refcodes.py`, which introduces the `vocab` bounded context (seed, schemas, conftest and 9 more call sites). Migration `0002_canonical_codes` only had its import path updated — no SQL or schema change; this repository already lets migrations import current code (`0001_init` imports the models).
 - Evidence for the third move: `lint-imports` 3 kept against both configs; `pytest tests/test_panorama_import.py tests/test_signals_ingest.py tests/test_useragent.py` → 44 passed (35.2 s); `import app.main` loads 5 vocabulary domains; `alembic heads` reports `0027_capture_job_progress`; collection still 624 tests.
-- Remaining BE-17 work: most of `app.services` still sits beside `app/domains`, and domains still import services such as `doc_ingest`, `llm`, `judgment` and `body_excerpt`; each needs its own slice.
+- Fourth move: `judgment.py` (stage/type rules and theme ranking) and `doc_structure.py` (Markdown sections and figure placement) joined `app/domains/evidence/`, 12 import sites updated. `judgment` now depends only on `app.domains.vocab.refcodes`; `doc_structure` has no app imports at all.
+- Evidence for the fourth move: `lint-imports` 3 kept against both configs; `pytest tests/test_document_structure.py tests/test_document_ingest.py tests/test_signals_ingest.py` → 56 passed (46.7 s); collection still 624 tests.
+- Remaining BE-17 work: most of `app.services` still sits beside `app/domains`, and domains still import services such as `doc_ingest`, `llm`, `body_excerpt` and `audit`; each needs its own slice.
 
 ## 2026-11-26
 

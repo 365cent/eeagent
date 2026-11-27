@@ -13,7 +13,7 @@ from pathlib import Path
 
 import yaml
 
-from app.services.judgment import judge_signal_type, judge_stage
+from app.domains.evidence.judgment import judge_signal_type, judge_stage
 from app.services.skills import (
     SkillRegistry,
     apply_skill_rules,

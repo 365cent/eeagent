@@ -10,7 +10,7 @@ from sqlalchemy.orm import selectinload
 from app.db.base import SessionLocal
 from app.models.models import Signal, TechTheme
 from app.domains.evidence.theme_match import theme_display_tags
-from app.services.judgment import rank_theme_overlaps, select_best_theme
+from app.domains.evidence.judgment import rank_theme_overlaps, select_best_theme
 
 
 async def build_report() -> dict:

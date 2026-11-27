@@ -33,7 +33,7 @@ from app.services.agent_contract import (
 from app.services.agent_patches import apply_confirmed_patch, propose_signal_patch
 from app.services.agent_rag import _chunk_citation, search_document_chunks
 from app.services.body_excerpt import text_for_tagging
-from app.services.judgment import judge_signal_type, judge_stage, rank_theme_overlaps
+from app.domains.evidence.judgment import judge_signal_type, judge_stage, rank_theme_overlaps
 from app.services.llm import suggest_tags_with_llm
 from app.platform.objectstore import load_body
 from app.services.tagging import suggest_tech_tags

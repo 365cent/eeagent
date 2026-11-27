@@ -63,7 +63,7 @@ from app.services.html_snapshot import (
     parse_html_snapshot,
     prepare_archive_replay_html,
 )
-from app.services.judgment import (
+from app.domains.evidence.judgment import (
     aggregation_structured_basis,
     judge_signal_type,
     judge_stage,

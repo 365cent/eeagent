@@ -482,7 +482,7 @@ def test_docx_distinguishes_seven_images_from_eight_insertions():
 
 @pytest.mark.no_db
 def test_captions_then_figure_locations_track_heading_paths():
-    from app.services.doc_structure import assign_figure_locations
+    from app.domains.evidence.doc_structure import assign_figure_locations
 
     figures = [
         doc_ingest.Figure(index=1, source="a.png", mime="image/png", data=b"", caption="第一张"),
