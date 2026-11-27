@@ -3,8 +3,8 @@
 
 import pytest
 
-from app.services import figure_recaption
-from app.services.figure_recaption import (
+from app.domains.evidence import figure_recaption
+from app.domains.evidence.figure_recaption import (
     figure_review_state,
     replace_figure_caption,
 )

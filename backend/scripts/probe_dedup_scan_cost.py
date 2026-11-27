@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.core.config import get_settings
 from app.core.uvicorn_loop import eea_event_loop
 from app.models.models import Base, Signal, SignalTag, Vocab
-from app.services.signal_dedup import _load_candidates, scan_duplicates
+from app.domains.evidence.signal_dedup import _load_candidates, scan_duplicates
 
 BENCH_DB = "eea_bench"
 LOCAL_HOSTS = {"127.0.0.1", "localhost", "::1"}

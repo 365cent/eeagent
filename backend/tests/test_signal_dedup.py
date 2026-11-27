@@ -7,8 +7,8 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.services import signal_dedup
-from app.services.signal_dedup import fingerprint, group_signals, keep_priority
+from app.domains.evidence import signal_dedup
+from app.domains.evidence.signal_dedup import fingerprint, group_signals, keep_priority
 from app.domains.tagging.service import normalize_url
 from tests.support import (
     DEMAND_STEP_KEYS,

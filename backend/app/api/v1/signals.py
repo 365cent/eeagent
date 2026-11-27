@@ -51,7 +51,7 @@ from app.domains.evidence.signal_record import create_signal_record as _create_s
 from app.domains.evidence.theme_match import match_theme as _match_theme, theme_display_tags
 from app.platform.audit import record_correction
 from app.services.demand_validation import confirmed_demand_citing
-from app.services.signal_dedup import (
+from app.domains.evidence.signal_dedup import (
     FIELD_LABELS,
     DuplicateGroup,
     scan_duplicates,
