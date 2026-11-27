@@ -255,3 +255,56 @@ func Save(dir string, cfg Config) error {
 	}
 	return os.WriteFile(filepath.Join(dir, "config.json"), append(data, '\n'), 0o644)
 }
+
+// DataRoot picks the directory that holds the client's data (browser profile,
+// queue, staged extension).
+//
+// A client copied into Program Files or a locked-down share cannot write next
+// to its own exe, and previously it opened a window that could never capture
+// and never say why. Fall back to %LOCALAPPDATA%\EEACapture and report the move
+// so the window can show where the data went.
+func DataRoot(configDir string) (root string, notice string, err error) {
+	primary := filepath.Join(configDir, "data")
+	if dirWritable(primary) {
+		return primary, "", nil
+	}
+	base := strings.TrimSpace(os.Getenv("LOCALAPPDATA"))
+	if base == "" {
+		base, _ = os.UserCacheDir()
+	}
+	if base == "" {
+		base = os.TempDir()
+	}
+	fallback := filepath.Join(base, "EEACapture", "data")
+	if fallback != primary && dirWritable(fallback) {
+		return fallback, "程序目录不可写，数据已改存到 " + fallback, nil
+	}
+	return "", "", fmt.Errorf(
+		"数据目录不可写：%s\n请把 capture.exe 放到可写目录（例如桌面或「文档」）后重试",
+		primary,
+	)
+}
+
+// RebaseDataPaths turns relative data paths into absolute ones under base, so
+// the chosen data root wins regardless of the launch working directory.
+func RebaseDataPaths(c Config, base string) Config {
+	if !filepath.IsAbs(c.UserDataDir) {
+		c.UserDataDir = filepath.Join(base, c.UserDataDir)
+	}
+	if !filepath.IsAbs(c.QueueDir) {
+		c.QueueDir = filepath.Join(base, c.QueueDir)
+	}
+	return c
+}
+
+func dirWritable(path string) bool {
+	if err := os.MkdirAll(path, 0o755); err != nil {
+		return false
+	}
+	probe := filepath.Join(path, ".write-probe")
+	if err := os.WriteFile(probe, []byte("ok"), 0o600); err != nil {
+		return false
+	}
+	_ = os.Remove(probe)
+	return true
+}
